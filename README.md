@@ -66,7 +66,8 @@ None of these exist yet. This is the plan.
 | `docker compose up -d` | Starts it. Run it from `~/rakazo-stack`. |
 | `docker compose down` | Stops it. Your data is kept. |
 | `docker compose ps` and `docker compose logs` | Shows what's running, and the logs. |
-| Backup and restore | Planned for v1, but how it works is _not decided yet_. |
+| `rakazo-stack backup` | Saves your data, settings and keys into one file locked with a passphrase you choose. Rakazo pauses while it runs. |
+| `rakazo-stack restore <file>` | Brings an Instance back from a backup file, on the same computer or a new one, on any supported system. |
 
 Everything setup writes goes in one folder, `~/rakazo-stack`, on every system. On Windows that's inside WSL, not on your C: drive. Your data itself lives in Docker's storage.
 

@@ -19,3 +19,7 @@ _Avoid_: Origin, domain, server URL
 **Instance folder**:
 The one folder on the machine that holds an Instance's settings, secrets and stack files. Its data lives in Docker volumes, not here.
 _Avoid_: Install dir, data dir
+
+**Backup**:
+One encrypted file holding everything needed to bring an Instance back, on the same machine or another. A database dump is one part of a Backup, not a Backup itself.
+_Avoid_: Snapshot, export, dump
