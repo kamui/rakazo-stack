@@ -11,3 +11,7 @@ _Avoid_: Operator, owner, host, admin
 **Instance**:
 One installed copy of rakazo-stack on one machine, with its own data and configuration.
 _Avoid_: Deployment, server, install
+
+**Instance URL**:
+The one address an Instance treats as its home: where people sign in, and the base for links and integration callbacks.
+_Avoid_: Origin, domain, server URL
