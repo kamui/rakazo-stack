@@ -27,7 +27,7 @@ Ticket: kamui/rakazo-stack#3. Pinned subject: Rakazo v0.4.0 (commit `b9c652f8898
 
 - `ComposioConnector.sessionFor` and `sessionForExecute` call `composio.create(userId, { manageConnections: false, sandbox: { enable: false }, toolkits?, connectedAccounts?, multiAccount? })`. There is no `authConfigs` option anywhere in `composio-connector.ts` (zero occurrences in the file).
 - Composio docs: "A session uses your config only when you pass its ID to `authConfigs`, keyed by toolkit. Toolkits you leave out keep using Composio managed auth" (https://docs.composio.dev/docs/authentication/custom-app-vs-managed-app). Hence dashboard-made auth configs are not picked up by Rakazo.
-- When a toolkit has no managed auth, Composio returns `ToolRouter_V2_NoManagedAuth`-style errors; Rakazo maps `ToolRouterV2_NoManagedAuth` to `ConnectorAuthUnavailableError` (`isNoManagedAuthError`). Toolkits that need no auth are handled (`isNoAuthToolkitError`).
+- When a toolkit has no managed auth, Composio returns an error containing `ToolRouterV2_NoManagedAuth`; Rakazo maps `ToolRouterV2_NoManagedAuth` to `ConnectorAuthUnavailableError` (`isNoManagedAuthError`). Toolkits that need no auth are handled (`isNoAuthToolkitError`).
 - Managed-OAuth catalog (125 toolkits) versus bring-your-own-OAuth (262): https://docs.composio.dev/toolkits/managed-auth. The list covers OAuth toolkits only; API-key toolkits are a separate case. Composio notes managed apps use Composio's branding on consent screens, shared provider quotas, and a 2-minute minimum trigger polling interval (triggers unused by Rakazo).
 - Rakazo sets `manageConnections: false`, so Composio's in-chat connection prompts are off; Rakazo drives connections itself via `session.authorize(provider, { callbackUrl })`.
 
@@ -63,7 +63,7 @@ A v0.4.0 reference install uses this same `COMPOSIO_API_KEY` path, and its Compo
 - research: Which Composio toolkits do typical household Self-hosters want that lack managed auth (so cannot be connected in v1)? Possibly document the limitation in the spec.
 - grilling: Should Composio be a prompt-or-skip optional step in the setup command, with a clear data-sharing notice (third-party SaaS holds tokens), given the "no outside account except model provider and Composio" note?
 - task/research: Does Composio accept a non-HTTPS or private/LAN/Tailscale `WEB_ORIGIN` as `callbackUrl`? Test on a throwaway project after the stack exists (unverified here).
-- task: Setup command should validate the key (a catalog or connected-accounts call) before writing it; Rakazo's own validation path is disabled in v0.4.0.
+- task: Setup command should validate the key (a catalog or connected-accounts call) before writing it, since the env path has no in-app verification (the in-app save path verifies credentials but is disabled in v0.4.0).
 - fog: Behavior when a Self-hoster later rotates `COMPOSIO_API_KEY`: connected accounts live in the Composio project, not in Rakazo, so a new project orphans all user connections (users must reconnect). Worth a note in backup/restore design (backup cannot capture Composio-side state).
 
 ## Sources
