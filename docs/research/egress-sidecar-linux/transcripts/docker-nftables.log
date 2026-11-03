@@ -1,0 +1,50 @@
+
+## Environment: scenario docker-nftables  [09:56:06]
+  Ubuntu 24.04.5 LTS, kernel 7.0.0-1017-azure, egress interface eth0
+  Docker Engine 29.9.2, compose 5.7.0
+  host iptables: iptables v1.8.10 (nf_tables) (alternative: /usr/sbin/iptables-nft)
+  ufw: Status: inactive; firewalld: inactive
+  host global IPv6 addresses: 0
+  script sha256: c2802eef397db19603494401c771ed49d57ad371674c28d3a389a1c492ce3dc3
+
+## Scenario setup: docker-nftables  [09:56:06]
+  Firewall Backend: nftables
+  iptables DOCKER-USER: iptables: No chain/target/match by that name.
+  nft tables: table ip docker-bridges table ip6 docker-bridges 
+  Docker firewall: Firewall Backend: nftables
+
+## Listeners and baseline container  [09:56:07]
+  host listeners on 127.0.0.1:18927 and 0.0.0.0:18928; baseline = computer image on an ordinary bridge (no rules apply)
+
+## Stack up (sidecar, supervisor restricted, relay/web/pubapp stand-ins)  [09:56:07]
+  sidecar NOT healthy
+  sidecar log tail: DOCKER-USER chain not present — is Docker running with the iptables backend?|
+  rakazo-c+ rules: v4 0 (INPUT 0), v6 0
+  supervisor log: restricted computer egress unavailable
+  network namespace: host net:[4026531833], sidecar net:[4026531833]
+  INPUT head: 
+  DOCKER-USER: iptables: No chain/target/match by that name.|
+
+## Baseline probe (unrestricted container, ordinary bridge)  [09:58:16]
+  host listener 0.0.0.0:18928 via bridge gateway       open
+  host listener 127.0.0.1:18927 via bridge gateway     refused/unresolved
+  host listener 0.0.0.0:18928 via docker0 172.17.0.1   open
+  host listener 0.0.0.0:18928 via <host IP>            open
+  published 127.0.0.1:3100 via <host IP>               refused/unresolved
+  published 127.0.0.1:5173 via bridge gateway          refused/unresolved
+  published 0.0.0.0:8080 via <host IP>                 open
+  published 0.0.0.0:8080 via bridge gateway            open
+  pubapp container by IP :3100                         timeout
+  supervisor container by IP :7091                     timeout
+  169.254.169.254:80 (cloud metadata)                  open
+  168.63.129.16:80 (Azure WireServer, public range)    open
+  1.1.1.1:443 (internet)                               open
+  example.com:443 (DNS + internet)                     open
+  github.com:22 (SSH out)                              open
+  DNS lookup example.com (embedded DNS): ok
+
+## Real bot computer  [09:58:24]
+  create rs27bot -> 500 {"error":"SANDBOX_COMPUTER_EGRESS=restricted is not enforced on this Docker host: run infra/compose/restrict-computer-egress.sh on the host, or set SANDBOX_COMPUTER_EGRESS=open (see docs/self-host-docker-computers.md) (a computer bridge reached the host)"}
+  no running computer to probe
+
+## done  [09:58:25]

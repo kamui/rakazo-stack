@@ -1,0 +1,112 @@
+
+## Environment: scenario firewalld  [09:56:21]
+  Ubuntu 24.04.5 LTS, kernel 7.0.0-1017-azure, egress interface eth0
+  Docker Engine 29.9.2, compose 5.7.0
+  host iptables: iptables v1.8.10 (nf_tables) (alternative: /usr/sbin/iptables-nft)
+  ufw: Status: inactive; firewalld: inactive
+  host global IPv6 addresses: 0
+  script sha256: c2802eef397db19603494401c771ed49d57ad371674c28d3a389a1c492ce3dc3
+
+## Scenario setup: firewalld  [09:56:22]
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+  firewalld 2.1.1: running; backend nftables
+  active zones: docker   interfaces: docker0 public (default) 
+  Docker firewall: Firewall Backend: iptables+firewalld
+
+## Listeners and baseline container  [09:56:28]
+  host listeners on 127.0.0.1:18927 and 0.0.0.0:18928; baseline = computer image on an ordinary bridge (no rules apply)
+
+## Stack up (sidecar, supervisor restricted, relay/web/pubapp stand-ins)  [09:56:29]
+  sidecar healthy
+  sidecar log tail: 
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+  supervisor log: restricted computer egress verified
+  network namespace: host net:[4026531833], sidecar net:[4026531833]
+  INPUT head: -A INPUT -i rakazo-c+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT|-A INPUT -i rakazo-c+ -j DROP|
+  DOCKER-USER: -N DOCKER-USER|-A DOCKER-USER -i rakazo-c+ -o rakazo-c+ -j RETURN|-A DOCKER-USER -d 0.0.0.0/8 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 10.0.0.0/8 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 100.64.0.0/10 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 127.0.0.0/8 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 169.254.0.0/16 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 172.16.0.0/12 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 192.0.
+
+## Baseline probe (unrestricted container, ordinary bridge)  [09:56:44]
+  host listener 0.0.0.0:18928 via bridge gateway       open
+  host listener 127.0.0.1:18927 via bridge gateway     refused/unresolved
+  host listener 0.0.0.0:18928 via docker0 172.17.0.1   open
+  host listener 0.0.0.0:18928 via <host IP>            open
+  published 127.0.0.1:3100 via <host IP>               refused/unresolved
+  published 127.0.0.1:5173 via bridge gateway          refused/unresolved
+  published 0.0.0.0:8080 via <host IP>                 open
+  published 0.0.0.0:8080 via bridge gateway            open
+  pubapp container by IP :3100                         timeout
+  supervisor container by IP :7091                     timeout
+  169.254.169.254:80 (cloud metadata)                  open
+  168.63.129.16:80 (Azure WireServer, public range)    open
+  1.1.1.1:443 (internet)                               open
+  example.com:443 (DNS + internet)                     open
+  github.com:22 (SSH out)                              open
+  DNS lookup example.com (embedded DNS): ok
+
+## Real bot computer  [09:56:52]
+  create rs27bot -> 200 {"id":"02b73c7086971669fecbfa84fb7a1685a385ec17c6fe37d915cb935c7210f84c","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":false}
+  rs27bot network bridge name: rakazo-c6128c2c
+  host listener 0.0.0.0:18928 via bridge gateway       timeout
+  host listener 127.0.0.1:18927 via bridge gateway     timeout
+  host listener 0.0.0.0:18928 via docker0 172.17.0.1   timeout
+  host listener 0.0.0.0:18928 via <host IP>            timeout
+  published 127.0.0.1:3100 via <host IP>               timeout
+  published 127.0.0.1:5173 via bridge gateway          timeout
+  published 0.0.0.0:8080 via <host IP>                 timeout
+  published 0.0.0.0:8080 via bridge gateway            timeout
+  pubapp container by IP :3100                         timeout
+  supervisor container by IP :7091                     timeout
+  169.254.169.254:80 (cloud metadata)                  timeout
+  168.63.129.16:80 (Azure WireServer, public range)    open
+  1.1.1.1:443 (internet)                               open
+  example.com:443 (DNS + internet)                     open
+  github.com:22 (SSH out)                              open
+  DNS lookup example.com (embedded DNS): ok
+
+## Relay path (ordinary Compose network)  [09:57:37]
+  relay-standin -> <bridge gateway>:18928         open
+  relay-standin -> pubapp:3100              open
+  relay-standin -> supervisor:7091          open
+  relay-standin -> 1.1.1.1:443              open
+
+## firewall-cmd --reload  [09:57:37]
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+  host listener 0.0.0.0:18928 via bridge gateway       timeout
+  published 0.0.0.0:8080 via <host IP>                 timeout
+  169.254.169.254:80 (cloud metadata)                  timeout
+  1.1.1.1:443 (internet)                               open
+  example.com:443 (DNS + internet)                     open
+
+## after one sidecar loop (65 s)  [09:57:49]
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+  host listener 0.0.0.0:18928 via bridge gateway       timeout
+  published 0.0.0.0:8080 via <host IP>                 timeout
+  169.254.169.254:80 (cloud metadata)                  timeout
+  1.1.1.1:443 (internet)                               open
+  example.com:443 (DNS + internet)                     open
+
+## systemctl restart firewalld  [09:59:06]
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+  host listener 0.0.0.0:18928 via bridge gateway       timeout
+  published 0.0.0.0:8080 via <host IP>                 timeout
+  169.254.169.254:80 (cloud metadata)                  timeout
+  1.1.1.1:443 (internet)                               open
+  example.com:443 (DNS + internet)                     open
+  after 65 s:
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+  host listener 0.0.0.0:18928 via bridge gateway       timeout
+  published 0.0.0.0:8080 via <host IP>                 timeout
+  169.254.169.254:80 (cloud metadata)                  timeout
+  1.1.1.1:443 (internet)                               open
+  example.com:443 (DNS + internet)                     open
+
+## done  [10:00:38]
