@@ -1,0 +1,43 @@
+# Honcho v3.5.0 on pgvector/pgvector:pg18, second (clean) boot. Commands: see ../honcho-roundtrip.py.
+
+## dc.sh logs honcho | grep 'Running upgrade' (31 lines, first and last shown)
+INFO  [alembic.runtime.migration] Running upgrade  -> a1b2c3d4e5f6, Initial schema creation
+...
+INFO  [alembic.runtime.migration] Running upgrade a5f8da8f6d23 -> d8c4f6a2b901, Add inactive primitive tombstone columns.
+INFO  [alembic.runtime.migration] Running upgrade d8c4f6a2b901 -> c4d8e2f6a1b3, add conclusion_source_messages table
+Database initialized successfully
+Starting API server...
+
+## honcho-db: select version(); extensions; alembic_version; `alembic heads` in the honcho container
+PostgreSQL 18.6 (Debian 18.6-1.pgdg12+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit
+btree_gin 1.3
+pg_trgm 1.6
+plpgsql 1.0
+vector 0.8.7
+c4d8e2f6a1b3
+c4d8e2f6a1b3 (head)
+(data directory: /var/lib/postgresql/18/docker, so mounting the parent /var/lib/postgresql works)
+
+## honcho-roundtrip.py (admin JWT minted in-container by scripts/generate_jwt.py --admin --print-only)
+no token, POST /workspaces: 401 {"detail":"No access token provided"}
+POST /workspaces: 201 "rs-compose-boot"
+POST /peers owner: 201 "owner"
+POST /peers assistant: 201 "assistant"
+POST /sessions: 201 "s1"
+POST /messages: 201 [<2 message ids>]
+POST /messages/list: 200 [["owner", "My favourite tea is genmaicha."], ["assistant", "Noted: genmaicha."]]
+GET /sessions/{id}/context: 200 [["owner", "My favourite tea is genmaicha."], ["assistant", "Noted: genmaicha."]]
+POST /sessions/{id}/search: 500 {"detail":"An unexpected error occurred"}
+POST /peers/owner/chat: 500 {"detail":"An unexpected error occurred"}
+
+## Cause of the 500s and of the failed background embedding (dc.sh logs honcho)
+  File "/app/src/embedding_client.py", line 57, in _emit_embedding_call
+    response = await openai_client.embeddings.create(**openai_kwargs)
+openai.AuthenticationError: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-dummy***********-key. ...
+(8 such AuthenticationError tracebacks; LLM_OPENAI_API_KEY was the deliberate dummy)
+
+## About 10 minutes later: message_embeddings (stored/total) and deriver queue
+embeddings|0|2
+queue|representation|f|
+queue|representation|f|
+(deriver: "Starting deriver queue processor", "Cache disabled, using in-memory cache"; tasks never processed)

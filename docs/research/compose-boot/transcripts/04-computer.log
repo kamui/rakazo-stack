@@ -1,0 +1,49 @@
+# Bot computer created by the throwaway stack's own supervisor (Docker Desktop, engine 29.9.2, WSL2, x86-64).
+# Container IPs are replaced by <service>@<network>; the computer's network is its own per-bot bridge.
+
+## supervisor log at startup (SANDBOX_COMPUTER_EGRESS unset -> compose default auto)
+"message":"computer egress is open: the host firewall rules are not installed"
+
+## computer-probe.sh create rscomposeboot-probe1 rscomposeboot-space
+200 {"id":"<id>","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":false}
+
+## docker network inspect <per-bot network>
+name=rakazo-computer-rscomposeboot-probe1-465feaa50a2576c8c183e66d1fad5699 internal=false
+labels={"rakazo.botId":"rscomposeboot-probe1","rakazo.computerOwner":"<hash>"}
+options={"com.docker.network.enable_ipv4":"true","com.docker.network.enable_ipv6":"false"}
+members=rakazo-bot-rscomposeboot-probe1 only (supervisor and web join lazily, when a screen is used)
+computer: extrahosts=null dns=null
+
+## computer-probe.sh probe ... (TCP connect, 3 s timeout, from inside the computer via POST /computers/:id/exec)
+lemonade-relay:13306               resolves=-   refused/unresolved
+lemonade:13305                     resolves=-   refused/unresolved
+honcho:8000                        resolves=-   refused/unresolved
+honcho-db:5432                     resolves=-   refused/unresolved
+postgres:5432                      resolves=-   refused/unresolved
+api:3100                           resolves=-   timeout   (unresolved; DNS lookup outlived the timeout)
+web:5173                           resolves=-   refused/unresolved
+supervisor:7091                    resolves=-   refused/unresolved
+lemonade-relay@stack:13306         timeout
+lemonade@stack:13305               timeout
+honcho@stack:8000                  timeout
+honcho-db@honcho-data:5432         timeout
+postgres@data:5432                 timeout
+lemonade-relay@egress:13306        timeout
+lemonade@egress:13305              timeout
+honcho@egress:8000                 timeout
+api@app:3100                       open      (port published to host 127.0.0.1)
+web@app:5173                       open      (port published to host 127.0.0.1)
+supervisor@app:7091                timeout   (not published)
+host.docker.internal:<this stack's web port>   open
+host.docker.internal:<this stack's API port>   open
+host.docker.internal:5173          open      (another Rakazo install's published web port on the same host)
+host.docker.internal:3100          open      (another Rakazo install's published API port on the same host)
+host.docker.internal:13305         refused   (nothing published there)
+host.docker.internal:13306         refused
+<per-bot gateway>:<web port>       refused
+<per-bot gateway>:22               refused
+1.1.1.1:443                        open      (egress open)
+(Same results on a first boot before a restart; host.docker.internal resolved to an IPv6 address.)
+
+## computer-probe.sh delete rscomposeboot-probe1 rscomposeboot-space
+200 {"ok":true}

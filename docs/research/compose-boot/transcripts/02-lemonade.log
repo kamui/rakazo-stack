@@ -1,0 +1,44 @@
+# Lemonade v2026.44.1 (built from the prototype's inline Dockerfile) behind lemonade-relay.
+
+## First build of the prototype's inline Dockerfile, unmodified
+#6 [2/2] RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+#6 -1.261 E: List directory /var/lib/apt/lists/partial is missing. - Acquire (13: Permission denied)
+failed to solve: ... exit code: 100
+$ docker run --rm --entrypoint sh ghcr.io/lemonade-sdk/lemonade-server:v2026.44.1 -c id
+uid=10001(lemonade) gid=999(lemonade) groups=999(lemonade)
+(fixed with ../lemonade-dockerfile.patch; rebuilt image: user lemonade, ffmpeg version 6.1.1-3ubuntu5)
+
+## lemonade-pull.sh kokoro-v1 Whisper-Large-v3-Turbo (from Rakazo's api container through the relay)
+pull kokoro-v1 200 16.0s {"model_name":"kokoro-v1","status":"success"}
+load kokoro-v1 200 6.7s {"checkpoint":"mikkoph/kokoro-onnx","model_name":"kokoro-v1","recipe":"kokoro","status":"success"}
+pull Whisper-Large-v3-Turbo 200 77.4s {"model_name":"Whisper-Large-v3-Turbo","status":"success"}
+load Whisper-Large-v3-Turbo 200 7.0s {"checkpoint":"ggerganov/whisper.cpp:ggml-large-v3-turbo.bin","model_name":"Whisper-Large-v3-Turbo","recipe":"whispercpp","status":"success"}
+
+## voice-roundtrip.sh with Lemonade defaults
+relay POST /audio/speech: 200 wav,3.300000
+ffmpeg WebM: opus "matroska,webm",3.308000
+relay POST /audio/transcriptions (WebM): 500 {"error":{"message":"Transcription failed: whisper-server returned status 400: Invalid request","type":"audio_processing_error"}}
+direct GET lemonade:13305/api/v1/models, no key: 401
+direct POST lemonade:13305/api/v1/audio/speech, no key: 401
+direct GET lemonade:13305/api/v1/models, wrong key: 401
+relay GET /models: 200
+
+## `lemonade config set whispercpp.cpu_args=--convert` changes nothing: backend auto picks vulkan
+(WhisperServer) Per-model settings: whispercpp_backend=vulkan, whispercpp_args=(none), merge_args=true, ...
+(ServerProcess) Started /opt/lemonade/.cache/lemonade/bin/whispercpp/vulkan/whisper-server
+(same 500 as above)
+
+## dc.sh exec -T lemonade lemonade config set whispercpp.cpu_args= whispercpp.args=--convert; unload; load
+  whispercpp.args                           --convert
+  whispercpp.backend                        auto
+(WhisperServer) Per-model settings: whispercpp_backend=vulkan, whispercpp_args=--convert, merge_args=true, ...
+(written to /opt/lemonade/.config/lemonade/config.json, i.e. the lemonade-config volume)
+
+## voice-roundtrip.sh after that
+relay POST /audio/speech: 200 wav,3.300000
+ffmpeg WebM: opus "matroska,webm",3.308000
+relay POST /audio/transcriptions (WebM): 200 {"text":" The quick brown fox jumps over the lazy dog.\n"}
+direct GET lemonade:13305/api/v1/models, no key: 401
+direct POST lemonade:13305/api/v1/audio/speech, no key: 401
+direct GET lemonade:13305/api/v1/models, wrong key: 401
+relay GET /models: 200

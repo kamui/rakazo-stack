@@ -1,0 +1,35 @@
+# Rakazo v0.4.0 fill-in (../fill-in.sh, adapted from #21) and voice through Rakazo (../rakazo-voice-check.sh).
+# Env: RAKAZO_OPENAI_COMPAT_PRIVATE_HOSTS=lemonade-relay, MCP_ALLOW_PRIVATE_ENDPOINT=true.
+# VOICE_BASE_URL=http://lemonade-relay:13306/api/v1 TTS_MODEL=kokoro-v1 STT_MODEL=Whisper-Large-v3-Turbo HONCHO_URL=http://honcho:8000
+
+== detect (read-only SQL, no password)
+   {"owner" : false, "defaultSpace" : false, "voiceCredentials" : [], "memoryProvider" : null}
+   missing: owner=true voice=true memory=true
+== bootstrap-owner
+Account verified
+   exit 0
+== sign in
+-> POST /api/auth/sign-in/email
+<- 200 {"redirect":false,"token":"<redacted>","user":{"name":"Account","email":"owner@example.com","emailVerified":true,...}}
+== voice.connect
+-> POST /rpc/voice/connect
+   body: {"json":{"provider":"openai-compatible","baseUrl":"http://lemonade-relay:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Large-v3-Turbo"}}
+<- 200 {"json":{"id":"<id>","provider":"openai-compatible","hasKey":true,"isDefault":true,"voiceId":"af_heart","speechModel":"","transcribe":true,"endpoint":"http://lemonade-relay:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Large-v3-Turbo"}}
+== memory.connectProvider
+-> POST /rpc/memory/connectProvider
+   body: {"json":{"provider":"honcho","settings":{"mode":"local","baseUrl":"http://honcho:8000"},"credentials":{"apiKey":"<redacted>"}}}
+<- 200 {"json":{"provider":"honcho","settings":{"mode":"local","baseUrl":"http://honcho:8000","reasoningLevel":"low"},"defaultMemoryScope":"isolated","updatedAt":"..."}}
+== sign out
+<- 200 {"success":true}
+== detect after
+   {"owner" : true, "defaultSpace" : true, "voiceCredentials" : ["openai-compatible"], "memoryProvider" : "honcho"}
+
+== rakazo-voice-check.sh (the "Hear a sample" button calls POST /api/voice/speak; dictation calls /api/voice/transcribe)
+POST /api/voice/speak: 200 content-type: audio/mpeg bytes=81796
+WebM: bytes=16291
+POST /api/voice/transcribe: 200 {"text":"Hi, this is how I will sound when I read replies out loud."}
+
+== web port proxies the API (unauthenticated probes)
+web POST /api/auth/sign-in/email (bad password): 401
+web POST /rpc/voice/status (no session): 401
+api POST /rpc/voice/status (no session): 401
