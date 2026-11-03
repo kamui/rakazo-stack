@@ -253,7 +253,7 @@ These keys are passed through by `docker-compose.images.yml` but are absent from
 ### Push (`EXPO_ACCESS_TOKEN`)
 
 - API and worker always construct `ExpoPushProvider`, and there is no switch to turn it off
-  ([R/apps/api/src/app.ts#L511-L518](https://github.com/elie222/rakazo/blob/v0.4.0/apps/api/src/app.ts#L509-L515)).
+  ([R/apps/api/src/app.ts#L511-L518](https://github.com/elie222/rakazo/blob/v0.4.0/apps/api/src/app.ts#L511-L518)).
   It posts to `https://exp.host/--/api/v2/push/send`
   ([R/packages/adapters/src/expo-push.ts#L17-L18](https://github.com/elie222/rakazo/blob/v0.4.0/packages/adapters/src/expo-push.ts#L17-L18)),
   but only for devices whose mobile app registered a push token.
