@@ -1,0 +1,6 @@
+services:
+  supervisor:
+    volumes: !override
+      - appdata:/data
+    environment:
+      DOCKER_SOCKET: /nonexistent/docker.sock
