@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE: rakazo-stack setup flow</title>
+<style>
+  :root { --ink:#1d1f23; --muted:#62666d; --line:#e3e5e8; --bg:#fafafa; --card:#fff; --accent:#2f6fde; --warn:#a15c00; --bad:#b3261e; --ok:#1e7b3a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:var(--bg); }
+  main { max-width:1180px; margin:0 auto; padding:28px 24px 60px; }
+  h1 { font-size:22px; margin:0 0 6px; }
+  h2 { font-size:15px; margin:0 0 10px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .tag { display:inline-block; font-size:11px; font-weight:600; background:#fde8e6; color:var(--bad); padding:2px 8px; border-radius:99px; margin-left:8px; vertical-align:middle; }
+  .intro { color:var(--muted); max-width:860px; }
+  .intro b { color:var(--ink); }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:18px; margin-top:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; }
+  .full { grid-column: 1 / -1; }
+  dl { display:grid; grid-template-columns: 190px 1fr; gap:4px 12px; margin:0; }
+  dt { color:var(--muted); } dd { margin:0; }
+  .changed { background:#fff6d6; border-radius:4px; padding:0 4px; }
+  button { font:inherit; font-size:13px; border:1px solid var(--line); background:#fff; border-radius:7px; padding:6px 10px; margin:0 6px 6px 0; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.done { opacity:.45; }
+  .group { margin-bottom:10px; } .group > span { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+  .tabs button.active { border-color:var(--accent); color:var(--accent); font-weight:600; }
+  .term { background:#16181d; color:#d8dce3; font:13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; border-radius:8px; padding:14px 16px; white-space:pre-wrap; min-height:120px; }
+  .t-ask { color:#9cc4ff; } .t-ok { color:#7bd88f; } .t-warn { color:#ffcf6b; } .t-bad { color:#ff8a80; } .t-step { color:#fff; font-weight:600; } .t-dim { color:#8b919b; }
+  .file { font:12.5px/1.5 ui-monospace, Menlo, monospace; background:#f4f5f7; border-radius:6px; padding:10px 12px; white-space:pre-wrap; }
+  ul.check { margin:0; padding-left:18px; } ul.check li { margin-bottom:4px; }
+  .status { font-weight:600; } .s-done { color:var(--ok); } .s-stopped { color:var(--bad); } .s-confirm { color:var(--warn); }
+  .note { font-size:13px; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>rakazo-stack setup: how it behaves <span class="tag">PROTOTYPE, throwaway</span></h1>
+  <p class="intro">
+    <b>Question:</b> what form should the setup tool take, and does this model of first runs and re-runs feel right?
+    Proposed form: <b>one command, <code>rakazo-stack setup</code>, that is both an interactive wizard and safe to re-run.</b>
+    It asks only what it must, pre-fills everything it can read from the existing Instance, keeps API keys without showing them,
+    never regenerates internal secrets, and writes two files: a <b>settings file</b> (your choices, safe to read) and a
+    <b>secrets file</b> (generated secrets and keys, private). Settings Rakazo keeps only in its database (Owner, the Owner's voice,
+    memory for the default Space) are filled in <b>only when missing</b>; anything you changed in Rakazo's UI is left alone.
+    Every run ends with a checklist of what is left to do by hand.
+    <br><br>Nothing here touches a real machine: the "machine", the "Instance" and Tailscale are simulated in memory.
+  </p>
+
+  <div class="grid">
+    <section class="card full">
+      <h2>Guided walkthroughs</h2>
+      <div class="tabs" id="tabs"></div>
+      <p id="scenarioText"></p>
+      <div id="scenarioSteps"></div>
+    </section>
+
+    <section class="card">
+      <h2>Your answers for the next run</h2>
+      <dl id="answers"></dl>
+    </section>
+
+    <section class="card">
+      <h2>This machine and the Instance</h2>
+      <dl id="world"></dl>
+    </section>
+
+    <section class="card full">
+      <h2>Free play</h2>
+      <div class="group"><span>Machine</span>
+        <button data-a="SET_OS:linux">Linux</button><button data-a="SET_OS:windows">Windows (WSL2)</button><button data-a="SET_OS:macos">macOS</button>
+        <button data-a="TOGGLE:windowsHome">Toggle Windows Home</button><button data-a="TOGGLE:desktopForLinux">Toggle Docker Desktop for Linux</button>
+        <button data-a="SET_DOCKER:old">Old Docker (API 1.43)</button><button data-a="SET_DOCKER:ok">Current Docker (API 1.47)</button>
+      </div>
+      <div class="group"><span>Answers</span>
+        <button data-a="ANSWER:access=local">Access: this machine only</button>
+        <button data-a="ANSWER:access=tailscale">Access: Tailscale</button>
+        <button data-a="ANSWER:access=byo">Access: my own Instance URL (advanced)</button>
+        <button data-a="ANSWER:tailscaleKey=tskey-auth-demo">Paste Tailscale auth key</button>
+        <button data-a="ANSWER:deviceName=rakazo">Device name: rakazo</button>
+        <button data-a="ANSWER:byoUrl=https://rakazo.example.com">My URL: https://rakazo.example.com</button>
+        <button data-a="ANSWER:modelKey=sk-or-demo">Paste model provider key</button>
+        <button data-a="ANSWER:composioKey=ak_good">Paste Composio key (valid)</button>
+        <button data-a="ANSWER:composioKey=bad_key">Paste Composio key (invalid)</button>
+        <button data-a="ANSWER:composioKey=">Leave Composio key blank</button>
+        <button data-a="ANSWER:ownerEmail=me@example.com">Owner email</button>
+        <button data-a="ANSWER:ownerPassword=long-enough-passphrase">Owner password (long enough)</button>
+        <button data-a="ANSWER:ownerPassword=short-pass">Owner password (too short)</button>
+      </div>
+      <div class="group"><span>Things that happen around setup</span>
+        <button data-a="TOGGLE:nameTaken">Toggle: "rakazo" already on my tailnet</button>
+        <button data-a="TOGGLE:relayDown">Toggle: voice relay is unhealthy</button>
+        <button data-a="UI_CHANGE_VOICE">I change my voice settings in Rakazo's UI</button>
+        <button data-a="RESET">Start over (fresh machine)</button>
+      </div>
+      <div class="group"><span>Run</span>
+        <button class="primary" data-a="RUN">Run rakazo-stack setup</button>
+        <button data-a="CONFIRM">Answer "yes" to the warning</button>
+      </div>
+    </section>
+
+    <section class="card full">
+      <h2>Last run <span id="runStatus" class="status"></span></h2>
+      <div class="term" id="term">(not run yet)</div>
+    </section>
+
+    <section class="card">
+      <h2>Left to do by hand</h2>
+      <ul class="check" id="checklist"><li class="note">(after a run)</li></ul>
+    </section>
+
+    <section class="card">
+      <h2>Files setup wrote</h2>
+      <div class="note">Settings file (your choices)</div>
+      <div class="file" id="settingsFile">(none yet)</div>
+      <div class="note" style="margin-top:10px">Secrets file (private; values hidden here)</div>
+      <div class="file" id="secretsFile">(none yet)</div>
+    </section>
+  </div>
+</main>
+
+<script>
+/* ---------- Portable logic: pure functions, no DOM ---------- */
+const SetupModel = (() => {
+  const TAILNET = "example-tailnet.ts.net";
+  const MIN_API = 1.45;
+  const GENERATED = ["POSTGRES_PASSWORD","POSTGRES_APP_PASSWORD","BETTER_AUTH_SECRET","ENCRYPTION_KEY","SCREEN_PROXY_SECRET","SANDBOX_SUPERVISOR_TOKEN","HONCHO_AUTH_JWT_SECRET","HONCHO_ADMIN_JWT"];
+
+  const initialState = () => ({
+    machine: { os: "linux", dockerApi: 1.47, windowsHome: false, desktopForLinux: false },
+    world: { nameTaken: false, relayDown: false },
+    answers: { access: "local", tailscaleKey: "", deviceName: "rakazo", byoUrl: "", modelKey: "", composioKey: "", ownerEmail: "", ownerPassword: "", confirmed: false },
+    instance: null,
+    lastRun: null,
+  });
+
+  function instanceUrlFor(answers, world, instance) {
+    if (answers.access === "tailscale") {
+      const wanted = answers.deviceName || "rakazo";
+      const keepExisting = instance && instance.tailscale && instance.tailscale.requested === wanted;
+      const assigned = keepExisting ? instance.tailscale.assigned : (world.nameTaken ? wanted + "-1" : wanted);
+      return { url: `https://${assigned}.${TAILNET}`, assigned, wanted };
+    }
+    if (answers.access === "byo") return { url: answers.byoUrl || "", assigned: null, wanted: null };
+    return { url: "http://localhost:5173", assigned: null, wanted: null };
+  }
+
+  // Plans and (if allowed) applies one run. Returns the run report and the next Instance.
+  function runSetup(state) {
+    const { machine, world, answers } = state;
+    const inst = state.instance;
+    const lines = [];
+    const say = (kind, text) => lines.push({ kind, text });
+    const checklist = [];
+    const stop = (why) => ({ status: "stopped", lines: [...lines, { kind: "bad", text: why }], checklist, instance: inst });
+
+    say("step", "1. Checking this machine");
+    if (machine.dockerApi < MIN_API) return stop(`Docker engine API ${machine.dockerApi} is too old; Rakazo needs ${MIN_API}+. Update Docker, then run setup again. Nothing was changed.`);
+    say("ok", `Docker engine API ${machine.dockerApi}, Compose 2.29: OK`);
+    if (machine.os === "linux" && machine.desktopForLinux) return stop("Docker Desktop for Linux isn't supported; install Docker Engine from Docker's repository. Nothing was changed.");
+    if (machine.os === "windows" && machine.windowsHome) say("warn", "Windows Home: Docker no longer lists Home as supported. It usually works through WSL 2; continuing.");
+    if (machine.os !== "linux") say("warn", "The Instance runs only while you're signed in to this computer.");
+
+    say("step", inst ? "2. Reading your existing Instance" : "2. New Instance");
+    if (inst) say("dim", `Found Instance at ${inst.url}; your answers are pre-filled from it.`);
+
+    say("step", "3. Questions");
+    // Access
+    const accessLabel = { local: "this machine only", tailscale: "Tailscale", byo: "my own Instance URL (advanced, unsupported)" }[answers.access];
+    say("ask", `How should people reach Rakazo? ${accessLabel}${inst ? " (current: " + inst.accessLabel + ")" : ""}`);
+    if (answers.access === "tailscale") {
+      const hasNode = inst && inst.tailscale;
+      if (!answers.tailscaleKey && !hasNode) return stop("Tailscale needs an auth key the first time. Create one in the Tailscale admin console (Settings > Keys), then run setup again.");
+      say("ask", hasNode && !answers.tailscaleKey ? "Tailscale auth key: already joined (Enter to keep)" : "Tailscale auth key: ********");
+      say("ask", `Device name: ${answers.deviceName || "rakazo"}`);
+    }
+    if (answers.access === "byo") {
+      if (!/^https?:\/\//.test(answers.byoUrl)) return stop("Your own Instance URL must start with https:// (or http://). Nothing was changed.");
+      say("warn", "Unsupported: setup only writes Rakazo's address settings. Your proxy, certificates and firewall are up to you.");
+    }
+    // Model provider key (Honcho needs one to start)
+    const haveModelKey = answers.modelKey || (inst && inst.keys.model);
+    if (!haveModelKey) return stop("Memory (Honcho) needs a model provider API key to start. Paste one (e.g. OpenRouter) and run setup again.");
+    say("ask", answers.modelKey ? "Model provider key: ********" : "Model provider key: set (Enter to keep)");
+    // Composio
+    let composio = inst ? inst.keys.composio : null;
+    if (answers.composioKey) {
+      if (answers.composioKey.startsWith("ak_")) { composio = "set"; say("ask", "Composio project API key: ******** (checked with Composio: OK)"); }
+      else say("warn", `Composio rejected that key; it was not saved. Integrations ${composio ? "keep the previous key" : "stay off"}.`);
+    } else say("ask", composio ? "Composio project API key: set (Enter to keep)" : "Composio project API key: (blank, integrations off)");
+    // Owner
+    const needOwner = !inst;
+    if (needOwner) {
+      if (!answers.ownerEmail) return stop("The Owner account needs an email address.");
+      if ((answers.ownerPassword || "").length < 16) return stop("The Owner password must be at least 16 characters. Nothing was changed.");
+      say("ask", `Owner email: ${answers.ownerEmail}`); say("ask", "Owner password: ******** (kept in memory only, never written)");
+    }
+
+    // Instance URL change?
+    const next = instanceUrlFor(answers, world, inst);
+    if (inst && next.url !== inst.url && !answers.confirmed) {
+      return { status: "confirm", lines: [...lines,
+        { kind: "warn", text: `This changes your Instance URL from ${inst.url} to ${next.url}. Everyone will be signed out, passkeys made on the old address stop working (passwords still work), phones must sign in again, and links in old emails will point to the old address.` },
+        { kind: "ask", text: "Continue? [y/N]  (use \"Answer yes to the warning\", then run again)" }], checklist, instance: inst };
+    }
+
+    say("step", "4. Writing files");
+    say(inst ? "dim" : "ok", inst ? "Internal secrets: kept (never regenerated: your data depends on them)" : `Generated ${GENERATED.length} internal secrets`);
+    say("ok", "Settings file and secrets file written");
+
+    say("step", "5. Starting the stack");
+    say("ok", "Rakazo, memory (Honcho), voice (Lemonade + relay) started" + (answers.access === "tailscale" ? ", Tailscale joined" : ""));
+    if (machine.os === "macos") say("dim", "macOS: Lemonade runs natively as a background service (install details pending another ticket)");
+    if (answers.access === "tailscale" && next.assigned !== next.wanted) say("warn", `"${next.wanted}" was taken on your tailnet; Tailscale named this device "${next.assigned}". Using that.`);
+    say("ok", `Instance URL: ${next.url}`);
+
+    say("step", "6. Settings Rakazo keeps in its database (filled in only when missing)");
+    const owner = inst ? inst.owner : answers.ownerEmail;
+    say(inst ? "dim" : "ok", inst ? `Owner ${owner}: exists, left as is` : `Owner ${owner}: created`);
+    let voice = inst ? inst.voice : null;
+    let memory = inst ? inst.memory : null;
+    const needSeeding = !voice || !memory;
+    const canSignIn = !inst || (answers.ownerPassword || "").length >= 16;
+    if (needSeeding && !canSignIn) {
+      say("warn", "Some settings are missing, and filling them in needs the Owner password. Skipped; see the checklist.");
+    }
+    if (!voice) {
+      if (!canSignIn) checklist.push("Rakazo > Settings > Voice: choose Self-hosted, Server URL http://host.docker.internal:13306/api/v1, speech model kokoro-v1, transcription model Whisper-Large-v3-Turbo");
+      else if (world.relayDown) { say("warn", "Owner's voice: the voice relay isn't healthy, so this was skipped"); checklist.push("Rakazo > Settings > Voice: choose Self-hosted, Server URL http://host.docker.internal:13306/api/v1, speech model kokoro-v1, transcription model Whisper-Large-v3-Turbo (setup couldn't do it: relay unhealthy)"); }
+      else { voice = { source: "setup" }; say("ok", "Owner's voice: Self-hosted Lemonade (through the relay)"); }
+    } else say("dim", `Owner's voice: already set${voice.source === "ui" ? " (you changed it in Rakazo's UI)" : ""}, left as is`);
+    if (!memory) {
+      if (!canSignIn) checklist.push("Rakazo > Space settings > Memory: connect local Honcho");
+      else { memory = { source: "setup" }; say("ok", "Memory for the default Space: connected to Honcho"); }
+    } else say("dim", "Memory for the default Space: already connected, left as is");
+
+    // Always-on checklist
+    if (answers.access === "tailscale") checklist.push("Tailscale admin console: turn on MagicDNS and HTTPS certificates (once per tailnet)");
+    if (inst && next.url !== inst.url) checklist.push("Sign in again on every browser and phone; re-create passkeys on the new address");
+    checklist.push("Rakazo > Settings > Models: connect your model provider (yours to set up)");
+    checklist.push("Other users: each sets their own voice in Rakazo > Settings > Voice");
+    checklist.push("New Spaces: connect memory in each Space's settings");
+    if (composio) checklist.push("Each user connects their apps in Rakazo > Integrations (Composio)");
+
+    const newInstance = {
+      url: next.url, access: answers.access, accessLabel,
+      tailscale: answers.access === "tailscale" ? { requested: next.wanted, assigned: next.assigned } : null,
+      keys: { model: "set", composio, tailscale: answers.access === "tailscale" ? "set" : null },
+      owner, voice, memory, os: machine.os,
+    };
+    say("ok", "Done.");
+    return { status: "done", lines, checklist, instance: newInstance };
+  }
+
+  function reduce(state, action) {
+    const s = structuredClone(state);
+    const [type, arg] = action.split(/:(.*)/s);
+    switch (type) {
+      case "RESET": return initialState();
+      case "SET_OS": s.machine.os = arg; return s;
+      case "SET_DOCKER": s.machine.dockerApi = arg === "old" ? 1.43 : 1.47; return s;
+      case "TOGGLE": if (arg in s.machine) s.machine[arg] = !s.machine[arg]; else s.world[arg] = !s.world[arg]; return s;
+      case "ANSWER": { const [k, v] = arg.split(/=(.*)/s); s.answers[k] = v ?? ""; if (k === "access" || k === "deviceName" || k === "byoUrl") s.answers.confirmed = false; return s; }
+      case "CONFIRM": s.answers.confirmed = true; return s;
+      case "UI_CHANGE_VOICE": if (s.instance) s.instance.voice = { source: "ui" }; return s;
+      case "RUN": {
+        const run = runSetup(s);
+        s.lastRun = run;
+        if (run.status === "done") {
+          s.instance = run.instance;
+          // A finished run consumes one-time answers; keys stay stored, not displayed.
+          Object.assign(s.answers, { tailscaleKey: "", modelKey: "", composioKey: "", ownerPassword: "", confirmed: false });
+        }
+        return s;
+      }
+    }
+    return s;
+  }
+
+  return { initialState, reduce, GENERATED };
+})();
+
+/* ---------- Throwaway page shell ---------- */
+const scenarios = [
+  { name: "First run, this machine only", text: "A fresh machine. Watch what setup asks, what it generates, and the checklist it leaves you.",
+    steps: ["RESET","ANSWER:modelKey=sk-or-demo","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=long-enough-passphrase","RUN"] },
+  { name: "First run with Tailscale, name taken", text: "Tailscale on, but a device called \"rakazo\" already exists on your tailnet. Setup should use the name Tailscale actually gives it.",
+    steps: ["RESET","TOGGLE:nameTaken","ANSWER:access=tailscale","ANSWER:tailscaleKey=tskey-auth-demo","ANSWER:modelKey=sk-or-demo","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=long-enough-passphrase","RUN"] },
+  { name: "Re-run: turn Tailscale on later", text: "Install locally first, then re-run to add Tailscale. Setup must stop and warn before changing the Instance URL. Note that the re-run asks for no keys it already has.",
+    steps: ["RESET","ANSWER:modelKey=sk-or-demo","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=long-enough-passphrase","RUN","ANSWER:access=tailscale","ANSWER:tailscaleKey=tskey-auth-demo","RUN","CONFIRM","RUN"] },
+  { name: "Re-run: keep keys, bad Composio key", text: "A re-run where you press Enter for every key, then one where you paste a key Composio rejects. A rejected key is never saved.",
+    steps: ["RESET","ANSWER:modelKey=sk-or-demo","ANSWER:composioKey=ak_good","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=long-enough-passphrase","RUN","RUN","ANSWER:composioKey=bad_key","RUN"] },
+  { name: "Re-run after changing things in Rakazo", text: "You changed your voice in Rakazo's UI. A re-run must leave it alone.",
+    steps: ["RESET","ANSWER:modelKey=sk-or-demo","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=long-enough-passphrase","RUN","UI_CHANGE_VOICE","RUN"] },
+  { name: "Voice relay down on first run", text: "Something setup fills in fails. It should carry on and turn that step into a checklist item rather than stopping.",
+    steps: ["RESET","TOGGLE:relayDown","ANSWER:modelKey=sk-or-demo","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=long-enough-passphrase","RUN"] },
+  { name: "Machine problems", text: "Old Docker stops setup before anything changes; Windows Home only warns.",
+    steps: ["RESET","SET_DOCKER:old","ANSWER:modelKey=sk-or-demo","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=long-enough-passphrase","RUN","SET_DOCKER:ok","SET_OS:windows","TOGGLE:windowsHome","RUN"] },
+  { name: "Should be refused", text: "A 10-character Owner password, and Tailscale with no auth key on a first run. Both must stop with nothing changed.",
+    steps: ["RESET","ANSWER:modelKey=sk-or-demo","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=short-pass","RUN","ANSWER:ownerPassword=long-enough-passphrase","ANSWER:access=tailscale","RUN"] },
+];
+const labelFor = (a) => {
+  const b = document.querySelector(`[data-a="${CSS.escape(a)}"]`);
+  return b ? b.textContent : a;
+};
+
+let state = SetupModel.initialState();
+let prev = null;
+let activeTab = 0, stepIndex = 0;
+
+function dispatch(a) { prev = state; state = SetupModel.reduce(state, a); render(); }
+
+function row(dl, label, value, was) {
+  const dt = document.createElement("dt"); dt.textContent = label;
+  const dd = document.createElement("dd"); dd.textContent = value;
+  if (was !== undefined && was !== value) dd.className = "changed";
+  dl.append(dt, dd);
+}
+const show = (v) => v ? (String(v).startsWith("tskey") || String(v).startsWith("sk-") || String(v).startsWith("ak_") || v === "bad_key" ? "pasted (hidden)" : v) : "—";
+
+function describe(st) {
+  const a = st.answers, i = st.instance, m = st.machine;
+  return {
+    answers: [
+      ["Access", { local: "this machine only", tailscale: "Tailscale", byo: "my own Instance URL" }[a.access]],
+      ["Tailscale auth key", show(a.tailscaleKey)], ["Device name", a.deviceName],
+      ["My own Instance URL", a.byoUrl || "—"], ["Model provider key", show(a.modelKey)],
+      ["Composio key", a.composioKey === "" ? "blank (keep / off)" : show(a.composioKey)],
+      ["Owner email", a.ownerEmail || "—"], ["Owner password", a.ownerPassword ? `${a.ownerPassword.length} characters` : "—"],
+      ["Confirmed URL change", a.confirmed ? "yes" : "no"],
+    ],
+    world: [
+      ["Operating system", { linux: "Linux", windows: "Windows (WSL2)", macos: "macOS" }[m.os] + (m.windowsHome && m.os === "windows" ? " Home" : "")],
+      ["Docker engine API", String(m.dockerApi) + (m.desktopForLinux ? " (Docker Desktop for Linux)" : "")],
+      ["\"rakazo\" taken on tailnet", st.world.nameTaken ? "yes" : "no"], ["Voice relay", st.world.relayDown ? "unhealthy" : "healthy"],
+      ["Instance", i ? "installed" : "none yet"], ["Instance URL", i ? i.url : "—"],
+      ["Owner", i ? i.owner : "—"],
+      ["Owner's voice", i ? (i.voice ? (i.voice.source === "ui" ? "set (changed in Rakazo's UI)" : "set by setup") : "not set") : "—"],
+      ["Default Space memory", i ? (i.memory ? "connected" : "not connected") : "—"],
+      ["Stored keys", i ? ["model", i.keys.composio && "Composio", i.keys.tailscale && "Tailscale"].filter(Boolean).join(", ") : "—"],
+    ],
+  };
+}
+
+function render() {
+  const now = describe(state), was = prev ? describe(prev) : null;
+  for (const id of ["answers", "world"]) {
+    const dl = document.getElementById(id); dl.innerHTML = "";
+    now[id].forEach(([k, v], n) => row(dl, k, v, was ? was[id][n][1] : undefined));
+  }
+  const run = state.lastRun;
+  const term = document.getElementById("term"), status = document.getElementById("runStatus");
+  if (run) {
+    term.innerHTML = "";
+    for (const l of run.lines) { const s = document.createElement("div"); s.className = "t-" + l.kind; s.textContent = (l.kind === "ask" ? "? " : l.kind === "ok" ? "✓ " : l.kind === "warn" ? "! " : l.kind === "bad" ? "✗ " : "") + l.text; term.append(s); }
+    status.textContent = { done: "· finished", stopped: "· stopped, nothing changed", confirm: "· waiting for your confirmation" }[run.status];
+    status.className = "status " + { done: "s-done", stopped: "s-stopped", confirm: "s-confirm" }[run.status];
+    const cl = document.getElementById("checklist"); cl.innerHTML = "";
+    (run.checklist.length ? run.checklist : ["Nothing (this run did not finish)"]).forEach(t => { const li = document.createElement("li"); li.textContent = t; cl.append(li); });
+  }
+  const i = state.instance;
+  document.getElementById("settingsFile").textContent = i
+    ? `access = "${i.access}"\ninstance_url = "${i.url}"${i.tailscale ? `\ntailscale_device_name = "${i.tailscale.requested}"  # assigned: ${i.tailscale.assigned}` : ""}\nrakazo_version = "v0.4.0"\nlemonade_version = "v2026.44.1"\nhoncho_version = "v3.5.0"\nphone_calls = true\nsignups = false`
+    : "(none yet)";
+  document.getElementById("secretsFile").textContent = i
+    ? SetupModel.GENERATED.map(k => `${k}=••••••`).join("\n") + `\nMODEL_PROVIDER_API_KEY=••••••${i.keys.composio ? "\nCOMPOSIO_API_KEY=••••••" : ""}${i.keys.tailscale ? "\nTAILSCALE_AUTH_KEY=(used once; identity kept in a volume)" : ""}`
+    : "(none yet)";
+  renderTabs();
+}
+
+function renderTabs() {
+  const tabs = document.getElementById("tabs"); tabs.innerHTML = "";
+  scenarios.forEach((sc, n) => { const b = document.createElement("button"); b.textContent = sc.name; if (n === activeTab) b.className = "active"; b.onclick = () => { activeTab = n; stepIndex = 0; state = SetupModel.initialState(); prev = null; render(); }; tabs.append(b); });
+  const sc = scenarios[activeTab];
+  document.getElementById("scenarioText").textContent = sc.text;
+  const box = document.getElementById("scenarioSteps"); box.innerHTML = "";
+  sc.steps.forEach((a, n) => {
+    const b = document.createElement("button");
+    b.textContent = `${n + 1}. ${a === "RESET" ? "Start fresh" : labelFor(a)}`;
+    if (n < stepIndex) b.className = "done"; if (n === stepIndex) b.className = "primary";
+    b.disabled = n !== stepIndex;
+    b.onclick = () => { stepIndex++; dispatch(a); };
+    box.append(b);
+  });
+}
+
+document.querySelectorAll("[data-a]").forEach(b => b.addEventListener("click", () => dispatch(b.dataset.a)));
+render();
+</script>
+</body>
+</html>
