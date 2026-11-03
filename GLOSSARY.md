@@ -15,3 +15,7 @@ _Avoid_: Deployment, server, install
 **Instance URL**:
 The one address an Instance treats as its home: where people sign in, and the base for links and integration callbacks.
 _Avoid_: Origin, domain, server URL
+
+**Instance folder**:
+The one folder on the machine that holds an Instance's settings, secrets and stack files. Its data lives in Docker volumes, not here.
+_Avoid_: Install dir, data dir

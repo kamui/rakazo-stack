@@ -35,7 +35,6 @@ Integrations through [Composio](https://composio.dev) are optional. Setup asks f
   - **Windows and Mac:** Docker Desktop. It's free for personal use and for companies with fewer than 250 employees and under $10M in revenue. Bigger companies need a paid plan.
   - Minimum versions: Docker Engine API 1.45 and Docker Compose 2.24.4.
 - **An account with an AI model provider.** Bring your own. Setup uses the key to turn on memory; leave it blank to skip memory. Which providers we'll document is _not decided yet_.
-- **On a Mac: ffmpeg**, for transcription. How setup gets it is _not decided yet_.
 - **Optional:** a Composio key, and a Tailscale account.
 - **Hardware:** the minimum is _not decided yet_. As a guide:
   - Rakazo's downloads are about 9 GB.
@@ -64,12 +63,12 @@ None of these exist yet. This is the plan.
 | An install script you run with `curl … \| sh` | Downloads the `rakazo-stack` program for Linux (including WSL 2) or an Apple-silicon Mac, and checks the download hasn't been tampered with. The address is _not decided yet_. |
 | `rakazo-stack setup` | Asks you questions, then sets everything up and starts it. You can run it again any time: it remembers your answers, never shows your saved keys, and never changes the passwords it created. |
 | `rakazo-stack setup`, with a no-questions option | Does the same without asking, for scripts. The option's name is _not decided yet_. |
-| `docker compose up -d` | Starts it. Run it from your Instance's folder. |
+| `docker compose up -d` | Starts it. Run it from `~/rakazo-stack`. |
 | `docker compose down` | Stops it. Your data is kept. |
 | `docker compose ps` and `docker compose logs` | Shows what's running, and the logs. |
 | Backup and restore | Planned for v1, but how it works is _not decided yet_. |
 
-Where the folder and settings files go on each system is _not decided yet_.
+Everything setup writes goes in one folder, `~/rakazo-stack`, on every system. On Windows that's inside WSL, not on your C: drive. Your data itself lives in Docker's storage.
 
 ## FAQ
 
