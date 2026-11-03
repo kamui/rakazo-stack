@@ -1,0 +1,55 @@
+Device "eth0" does not exist.
+
+## Environment: scenario ufw  [09:45:25]
+  Ubuntu 24.04.5 LTS, kernel 7.0.0-1014-aws
+  Docker Engine 28.0.4, compose 2.38.2
+  host iptables: iptables v1.8.10 (nf_tables) (alternative: /usr/sbin/iptables-nft)
+  ufw: Status: inactive; firewalld: inactive
+  host global IPv6 addresses: 0
+  script sha256: c2802eef397db19603494401c771ed49d57ad371674c28d3a389a1c492ce3dc3
+
+## Scenario setup: ufw  [09:45:28]
+  Status: active Default: deny (incoming), allow (outgoing), deny (routed) 
+  Docker firewall: 
+
+## Listeners and baseline container  [09:45:30]
+  host listeners on 127.0.0.1:18927 and 0.0.0.0:18928; baseline = computer image on an ordinary bridge (no rules apply)
+
+## Stack up (sidecar, supervisor restricted, relay/web/pubapp stand-ins)  [09:45:35]
+  sidecar healthy
+  sidecar log tail: 
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+  supervisor log: restricted computer egress verified
+  network namespace: host net:[4026531833], sidecar net:[4026531833]
+  INPUT head: -A INPUT -i rakazo-c+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT|-A INPUT -i rakazo-c+ -j DROP|-A INPUT -j ufw-before-logging-input|-A INPUT -j ufw-before-input|
+  DOCKER-USER: -N DOCKER-USER|-A DOCKER-USER -i rakazo-c+ -o rakazo-c+ -j RETURN|-A DOCKER-USER -d 0.0.0.0/8 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 10.0.0.0/8 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 100.64.0.0/10 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 127.0.0.0/8 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 169.254.0.0/16 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 172.16.0.0/12 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 192.0.
+
+## Baseline probe (unrestricted container, ordinary bridge)  [09:45:48]
+sed: -e expression #1, char 0: no previous regular expression
+  DNS lookup example.com (embedded DNS): ok
+
+## Real bot computer  [09:45:52]
+  create rs27bot -> 200 {"id":"1a37fe90e6a2fa7e37e89e7ce7a038bcd46e88006ef6d71598b50043dfbf4b11","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":false}
+  rs27bot network bridge name: rakazo-c6128c2c
+sed: -e expression #1, char 0: no previous regular expression
+  DNS lookup example.com (embedded DNS): ok
+
+## Relay path (ordinary Compose network)  [09:46:00]
+sed: -e expression #1, char 0: no previous regular expression
+
+## ufw reload  [09:46:04]
+  INPUT head: -A INPUT -i rakazo-c+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT|-A INPUT -i rakazo-c+ -j DROP|-A INPUT -j ufw-before-logging-input|-A INPUT -j ufw-before-input|
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+sed: -e expression #1, char 0: no previous regular expression
+
+## ufw disable + enable  [09:46:09]
+  INPUT head: -A INPUT -i rakazo-c+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT|-A INPUT -i rakazo-c+ -j DROP|-A INPUT -j ufw-before-logging-input|-A INPUT -j ufw-before-input|
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+sed: -e expression #1, char 0: no previous regular expression
+
+## after one sidecar loop (65 s)  [09:46:14]
+  INPUT head: -A INPUT -i rakazo-c+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT|-A INPUT -i rakazo-c+ -j DROP|-A INPUT -j ufw-before-logging-input|-A INPUT -j ufw-before-input|
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+sed: -e expression #1, char 0: no previous regular expression
+
+## done  [09:47:23]

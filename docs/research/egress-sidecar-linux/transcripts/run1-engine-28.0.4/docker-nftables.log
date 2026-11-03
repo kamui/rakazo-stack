@@ -1,0 +1,28 @@
+
+## Environment: scenario docker-nftables  [09:46:35]
+  Ubuntu 24.04.5 LTS, kernel 7.0.0-1017-azure
+  Docker Engine 28.0.4, compose 2.38.2
+  host iptables: iptables v1.8.10 (nf_tables) (alternative: /usr/sbin/iptables-nft)
+  ufw: Status: inactive; firewalld: inactive
+  host global IPv6 addresses: 0
+  script sha256: c2802eef397db19603494401c771ed49d57ad371674c28d3a389a1c492ce3dc3
+
+## Scenario setup: docker-nftables  [09:46:35]
+Job for docker.service failed because the control process exited with error code.
+See "systemctl status docker.service" and "journalctl -xeu docker.service" for details.
+  dockerd did not start with firewall-backend nftables:
+    Nov 03 09:43:06 runnervm48cm3 dockerd[1108]: time="2026-11-03T09:43:06.387744423Z" level=info msg="API listen on /run/docker.sock"
+    Nov 03 09:43:06 runnervm48cm3 systemd[1]: Started docker.service - Docker Application Container Engine.
+    Nov 03 09:46:35 runnervm48cm3 systemd[1]: Stopping docker.service - Docker Application Container Engine...
+    Nov 03 09:46:35 runnervm48cm3 dockerd[1108]: time="2026-11-03T09:46:35.400795471Z" level=info msg="Processing signal 'terminated'"
+    Nov 03 09:46:35 runnervm48cm3 dockerd[1108]: time="2026-11-03T09:46:35.401867864Z" level=info msg="stopping event stream following graceful shutdown" error="<nil>" module=libcontainerd namespace=moby
+    Nov 03 09:46:35 runnervm48cm3 dockerd[1108]: time="2026-11-03T09:46:35.402116034Z" level=info msg="Daemon shutdown complete"
+    Nov 03 09:46:35 runnervm48cm3 dockerd[1108]: time="2026-11-03T09:46:35.402155928Z" level=info msg="stopping event stream following graceful shutdown" error="context canceled" module=libcontainerd namespace=plugins.moby
+    Nov 03 09:46:35 runnervm48cm3 systemd[1]: docker.service: Deactivated successfully.
+    Nov 03 09:46:35 runnervm48cm3 systemd[1]: Stopped docker.service - Docker Application Container Engine.
+    Nov 03 09:46:35 runnervm48cm3 systemd[1]: docker.service: Consumed 1min 37.015s CPU time, 95.6M memory peak, 0B memory swap peak.
+    Nov 03 09:46:35 runnervm48cm3 systemd[1]: Starting docker.service - Docker Application Container Engine...
+    Nov 03 09:46:35 runnervm48cm3 dockerd[2644]: unable to configure the Docker daemon with file /etc/docker/daemon.json: the following directives don't match any configuration option: firewall-backend
+    Nov 03 09:46:35 runnervm48cm3 systemd[1]: docker.service: Main process exited, code=exited, status=1/FAILURE
+    Nov 03 09:46:35 runnervm48cm3 systemd[1]: docker.service: Failed with result 'exit-code'.
+    Nov 03 09:46:35 runnervm48cm3 systemd[1]: Failed to start docker.service - Docker Application Container Engine.

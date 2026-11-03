@@ -27,6 +27,19 @@ jobs:
           f=docs/research/egress-sidecar-linux/mini/restrict-computer-egress.sh
           curl -fsSL https://raw.githubusercontent.com/elie222/rakazo/b9c652f8898eb970b5c6d2d235d3f78b66502068/infra/compose/restrict-computer-egress.sh -o "$f"
           echo "c2802eef397db19603494401c771ed49d57ad371674c28d3a389a1c492ce3dc3  $f" | sha256sum -c
+      - name: Install Docker Engine (current stable from download.docker.com, as a Self-hoster would get)
+        run: |
+          sudo systemctl stop docker docker.socket || true
+          sudo apt-get -qq remove -y 'moby-*' docker.io containerd runc >/dev/null 2>&1 || true
+          sudo rm -f /etc/apt/sources.list.d/docker*.list
+          sudo install -m 0755 -d /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker-ce.list >/dev/null
+          sudo apt-get -qq update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -qq install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+          sudo systemctl start docker
+          docker version --format 'Engine {{.Server.Version}}, client {{.Client.Version}}'
+          docker compose version
       - name: Pull images
         run: |
           for i in ghcr.io/elie222/rakazo/app:v0.4.0 ghcr.io/elie222/rakazo/computer:v0.4.0 alpine:3 busybox:1 python:3-alpine; do

@@ -12,11 +12,12 @@ P=$HERE/computer-probe.sh
 SCRIPT=$HERE/mini/restrict-computer-egress.sh
 COMPUTER_IMAGE=ghcr.io/elie222/rakazo/computer:v0.4.0
 : "${SANDBOX_SUPERVISOR_TOKEN:?}"
-HOSTIP=$(ip -4 -o addr show eth0 | awk '{split($4, a, "/"); print a[1]; exit}')
+HOSTIP=$(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}')
 
 step() { printf '\n## %s  [%s]\n' "$*" "$(date -u +%T)"; }
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
-redact() { sed -e "s/$HOSTIP/<host IP>/g"; }
+# Drops the computer image's harmless NWRAP (nss_wrapper) stderr lines under docker exec.
+redact() { grep -v '^NWRAP_ERROR' | sed -e "s/${HOSTIP:-<none>}/<host IP>/g"; }
 rules() { echo "  rakazo-c+ rules: v4 $(iptables-save 2>/dev/null | grep -c 'rakazo-c+') (INPUT $(iptables -S INPUT 2>/dev/null | grep -c 'rakazo-c+')), v6 $(ip6tables-save 2>/dev/null | grep -c 'rakazo-c+')"; }
 wait_rules() {
   local i
@@ -66,7 +67,7 @@ targets_full() {
     "published 0.0.0.0:8080 via bridge gateway=$gw:8080" \
     "pubapp container by IP :3100=$(ip_of rs27l-pubapp-1):3100" \
     "supervisor container by IP :7091=$(ip_of rs27l-supervisor-1):7091" \
-    "169.254.169.254:80 (Azure IMDS)=169.254.169.254:80" \
+    "169.254.169.254:80 (cloud metadata)=169.254.169.254:80" \
     "168.63.129.16:80 (Azure WireServer, public range)=168.63.129.16:80" \
     "1.1.1.1:443 (internet)=1.1.1.1:443" \
     "example.com:443 (DNS + internet)=example.com:443" \
@@ -78,7 +79,7 @@ targets_short() {
   printf '%s\n' \
     "host listener 0.0.0.0:18928 via bridge gateway=$gw:18928" \
     "published 0.0.0.0:8080 via <host IP>=$HOSTIP:8080" \
-    "169.254.169.254:80 (Azure IMDS)=169.254.169.254:80" \
+    "169.254.169.254:80 (cloud metadata)=169.254.169.254:80" \
     "1.1.1.1:443 (internet)=1.1.1.1:443" \
     "example.com:443 (DNS + internet)=example.com:443"
 }
@@ -107,7 +108,7 @@ up_stack() {
 
 step "Environment: scenario $SCENARIO"
 . /etc/os-release
-echo "  $PRETTY_NAME, kernel $(uname -r)"
+echo "  $PRETTY_NAME, kernel $(uname -r), egress interface $(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}')"
 echo "  Docker Engine $(docker version --format '{{.Server.Version}}'), compose $(docker compose version --short)"
 echo "  host iptables: $(iptables -V) (alternative: $(update-alternatives --query iptables 2>/dev/null | awk '/^Value:/{print $2}'))"
 echo "  ufw: $(ufw status 2>&1 | head -1); firewalld: $(systemctl is-active firewalld 2>/dev/null)"

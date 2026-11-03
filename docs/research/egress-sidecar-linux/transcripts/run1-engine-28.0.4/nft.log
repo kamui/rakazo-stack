@@ -1,0 +1,88 @@
+Device "eth0" does not exist.
+
+## Environment: scenario nft  [09:45:36]
+  Ubuntu 24.04.5 LTS, kernel 7.0.0-1014-aws
+  Docker Engine 28.0.4, compose 2.38.2
+  host iptables: iptables v1.8.10 (nf_tables) (alternative: /usr/sbin/iptables-nft)
+  ufw: Status: inactive; firewalld: inactive
+  host global IPv6 addresses: 0
+  script sha256: c2802eef397db19603494401c771ed49d57ad371674c28d3a389a1c492ce3dc3
+
+## Scenario setup: nft  [09:45:38]
+  no changes (Ubuntu default: iptables-nft, ufw inactive)
+  Docker firewall: 
+
+## Listeners and baseline container  [09:45:41]
+  host listeners on 127.0.0.1:18927 and 0.0.0.0:18928; baseline = computer image on an ordinary bridge (no rules apply)
+
+## Stack up (sidecar, supervisor restricted, relay/web/pubapp stand-ins)  [09:45:46]
+  sidecar healthy
+  sidecar log tail: 
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+  supervisor log: restricted computer egress verified
+  network namespace: host net:[4026531833], sidecar net:[4026531833]
+  INPUT head: -A INPUT -i rakazo-c+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT|-A INPUT -i rakazo-c+ -j DROP|
+  DOCKER-USER: -N DOCKER-USER|-A DOCKER-USER -i rakazo-c+ -o rakazo-c+ -j RETURN|-A DOCKER-USER -d 0.0.0.0/8 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 10.0.0.0/8 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 100.64.0.0/10 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 127.0.0.0/8 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 169.254.0.0/16 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 172.16.0.0/12 -i rakazo-c+ -j DROP|-A DOCKER-USER -d 192.0.
+
+## Baseline probe (unrestricted container, ordinary bridge)  [09:45:59]
+sed: -e expression #1, char 0: no previous regular expression
+  DNS lookup example.com (embedded DNS): ok
+
+## Real bot computer  [09:45:59]
+  create rs27bot -> 200 {"id":"28499c391849f252cb99315227ff4622c6330cbc19621847b27626fe3fc2bca9","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":false}
+  rs27bot network bridge name: rakazo-c6128c2c
+sed: -e expression #1, char 0: no previous regular expression
+  DNS lookup example.com (embedded DNS): ok
+
+## Relay path (ordinary Compose network)  [09:46:07]
+sed: -e expression #1, char 0: no previous regular expression
+
+## Screens (network level; web is an alpine stand-in)  [09:46:07]
+sed: -e expression #1, char 0: no previous regular expression
+  supervisor on the computer bridge :7091              open
+
+## Rules removed while the supervisor keeps running (cached verdict)  [09:46:09]
+  rakazo-c+ rules: v4 0 (INPUT 0), v6 0
+  create rs27bot2 -> 200 {"id":"2e849b45ac3c5e1b4f7cbf42be5d0a147970cbec74e988731e9522cbd44e0117","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":false}
+sed: -e expression #1, char 0: no previous regular expression
+
+## Supervisor restarted with the rules missing (fail closed)  [09:46:19]
+  supervisor log: restricted computer egress unavailable
+  create rs27bot3 -> 500 {"error":"SANDBOX_COMPUTER_EGRESS=restricted is not enforced on this Docker host: run infra/compose/restrict-computer-egress.sh on the host, or set SANDBOX_COMPUTER_EGRESS=open (see docs/self-host-docker-computers.md) (a computer bridge reached the host)"}
+
+## Sidecar started again, supervisor not restarted  [09:46:22]
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+  create rs27bot3 -> 200 {"id":"0b582d56861fe52d3abba8e77ce9d0121b8e5fbd17735d7ecfe9745507da3173","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":false}
+sed: -e expression #1, char 0: no previous regular expression
+  rs27bot2 (created while the rules were missing):
+sed: -e expression #1, char 0: no previous regular expression
+
+## systemctl restart docker (sidecar running)  [09:46:39]
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+  rs27l-computer-egress-1      running exit=0 restarts=0 started=2026-11-03T09:46:50.277409169Z
+  rs27l-supervisor-1           running exit=0 restarts=0 started=2026-11-03T09:46:50.257050179Z
+  rakazo-bot-rs27bot           exited exit=0 restarts=0 started=2026-11-03T09:45:59.414217846Z
+  supervisor log: restricted computer egress verified
+  create rs27bot -> 200 {"id":"28499c391849f252cb99315227ff4622c6330cbc19621847b27626fe3fc2bca9","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":true,"started":true}
+sed: -e expression #1, char 0: no previous regular expression
+
+## Simulated boot: docker stopped, nft ruleset flushed, docker started (sidecar running before)  [09:47:03]
+  rakazo-c+ rules: v4 0 (INPUT 0), v6 0
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+  rs27l-computer-egress-1      running exit=0 restarts=0 started=2026-11-03T09:47:15.777088202Z
+  rs27l-supervisor-1           running exit=0 restarts=0 started=2026-11-03T09:47:15.779077404Z
+  supervisor log: restricted computer egress verified
+  create rs27bot -> 200 {"id":"28499c391849f252cb99315227ff4622c6330cbc19621847b27626fe3fc2bca9","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":true,"started":true}
+sed: -e expression #1, char 0: no previous regular expression
+
+## Simulated boot with the sidecar stopped  [09:47:28]
+  rs27l-computer-egress-1      exited exit=137 restarts=0 started=2026-11-03T09:47:15.777088202Z
+  rs27l-supervisor-1           running exit=0 restarts=0 started=2026-11-03T09:47:49.188405042Z
+  rakazo-c+ rules: v4 0 (INPUT 0), v6 0
+  supervisor log: restricted computer egress unavailable
+  create rs27bot -> 500 {"error":"SANDBOX_COMPUTER_EGRESS=restricted is not enforced on this Docker host: run infra/compose/restrict-computer-egress.sh on the host, or set SANDBOX_COMPUTER_EGRESS=open (see docs/self-host-docker-computers.md) (a computer bridge reached the host)"}
+  rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+  create rs27bot -> 200 {"id":"28499c391849f252cb99315227ff4622c6330cbc19621847b27626fe3fc2bca9","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":true,"started":true}
+sed: -e expression #1, char 0: no previous regular expression
+
+## done  [09:48:07]
