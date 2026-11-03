@@ -1,0 +1,72 @@
+# Throwaway: Rakazo v0.4.0 supervisor plus the computer-egress sidecar, on Linux Docker Engine (GitHub-hosted Ubuntu runner).
+# Same shape as the Windows test (research/egress-sidecar-windows mini/compose.yaml with compose.baked.yaml): the sidecar
+# image has the unmodified v0.4.0 script built in. RAKAZO_IPTABLES/RAKAZO_IP6TABLES pass through for the legacy backend.
+name: rs27l
+services:
+  computer-egress:
+    build: {context: ., dockerfile: egress.Dockerfile}
+    image: rs27-egress:local
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW]
+    restart: unless-stopped
+    environment:
+      RAKAZO_IPTABLES: ${RAKAZO_IPTABLES:-iptables}
+      RAKAZO_IP6TABLES: ${RAKAZO_IP6TABLES:-ip6tables}
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/applied"]
+      interval: 2s
+      retries: 60
+  data-init:
+    image: busybox:1
+    command: ["chown", "-R", "1000:1000", "/data"]
+    network_mode: none
+    restart: "no"
+    volumes:
+      - appdata:/data
+  supervisor:
+    image: ghcr.io/elie222/rakazo/app:v0.4.0
+    command: ["pnpm", "--filter", "@rakazo/sandbox-supervisor", "start"]
+    restart: unless-stopped
+    init: true
+    user: root
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      NODE_ENV: production
+      DATA_DIR: /data
+      SUPERVISOR_HOST: "0.0.0.0"
+      SUPERVISOR_PORT: "7091"
+      DOCKER_SOCKET: /var/run/docker.sock
+      RAKAZO_COMPUTER_IMAGE: ghcr.io/elie222/rakazo/computer:v0.4.0
+      SANDBOX_SUPERVISOR_TOKEN: ${SANDBOX_SUPERVISOR_TOKEN:?}
+      SANDBOX_SCREEN_NETWORK: isolated
+      SANDBOX_COMPUTER_EGRESS: restricted
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - appdata:/data
+    networks: [app]
+    depends_on:
+      computer-egress: {condition: service_healthy}
+      data-init: {condition: service_completed_successfully}
+  # Stand-in for lemonade-relay: an ordinary Compose network, not a rakazo-c* bridge.
+  relay-standin:
+    image: alpine:3
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+    networks: [app]
+  # Network stand-in for Rakazo's web screen proxy (the supervisor joins the "web" service to computer bridges).
+  web:
+    image: alpine:3
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+    networks: [app]
+  # Stand-in for Rakazo's published api/web (127.0.0.1:3100/5173, as upstream publishes them) plus one port on all addresses.
+  pubapp:
+    image: python:3-alpine
+    command: ["sh", "-c", "python -m http.server 3100 & python -m http.server 8080 & exec python -m http.server 5173"]
+    restart: unless-stopped
+    ports: ["127.0.0.1:3100:3100", "127.0.0.1:5173:5173", "8080:8080"]
+    networks: [app]
+networks:
+  app: {}
+volumes:
+  appdata: {}

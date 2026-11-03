@@ -1,0 +1,46 @@
+# Research for #27 (Linux half): runs docs/research/egress-sidecar-linux/linux-test.sh on throwaway Ubuntu runners.
+# Lives only on the research/egress-sidecar-linux branch, which is never merged.
+name: egress-sidecar-linux
+on:
+  push:
+    branches: [research/egress-sidecar-linux]
+    paths: [".github/workflows/egress-sidecar-linux.yml", "docs/research/egress-sidecar-linux/**"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [nft, legacy, ufw, firewalld, docker-nftables]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space for the Rakazo images
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
+      - name: Fetch Rakazo v0.4.0 restrict-computer-egress.sh
+        run: |
+          f=docs/research/egress-sidecar-linux/mini/restrict-computer-egress.sh
+          curl -fsSL https://raw.githubusercontent.com/elie222/rakazo/b9c652f8898eb970b5c6d2d235d3f78b66502068/infra/compose/restrict-computer-egress.sh -o "$f"
+          echo "c2802eef397db19603494401c771ed49d57ad371674c28d3a389a1c492ce3dc3  $f" | sha256sum -c
+      - name: Pull images
+        run: |
+          for i in ghcr.io/elie222/rakazo/app:v0.4.0 ghcr.io/elie222/rakazo/computer:v0.4.0 alpine:3 busybox:1 python:3-alpine; do
+            docker pull -q "$i" &
+          done
+          wait
+          docker image ls
+      - name: Run scenario
+        run: |
+          token=$(openssl rand -hex 24)
+          echo "::add-mask::$token"
+          sudo SANDBOX_SUPERVISOR_TOKEN="$token" bash docs/research/egress-sidecar-linux/linux-test.sh ${{ matrix.scenario }} 2>&1 | tee transcript.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: transcript-${{ matrix.scenario }}
+          path: transcript.log
