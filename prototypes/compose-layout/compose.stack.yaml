@@ -15,7 +15,9 @@ services:
     build:
       dockerfile_inline: |
         FROM ghcr.io/lemonade-sdk/lemonade-server:v2026.44.1
+        USER root
         RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+        USER lemonade
     image: rakazo-stack/lemonade:v2026.44.1-ffmpeg
     restart: unless-stopped
     environment:
