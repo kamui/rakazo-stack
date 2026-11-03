@@ -2,6 +2,8 @@
 # Reproduce the kamui/rakazo-stack#12 checks. Usage: ./run.sh nomic|qwen [long-message-tokens] [max-input-tokens]
 # Creates a throwaway compose project `rs-embed-test`; remove it with:
 #   docker compose -p rs-embed-test down -v --remove-orphans
+# Warning: on the original WSL2 test machine llama-server segfaulted under load and the VM restarted
+# (see ../lemonade-embeddings.md, "Stability during testing"). Run on a machine where that is acceptable.
 set -eu
 cd "$(dirname "$0")"
 
