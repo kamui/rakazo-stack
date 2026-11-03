@@ -1,0 +1,147 @@
+# Throwaway test harness for kamui/rakazo-stack#12. Run with run.sh; never part of the product.
+# Project name: rs-embed-test. No host ports. Only `lemonade` (model downloads) and the one-shot
+# `tiktoken-cache` can reach the internet; Honcho itself runs with no egress.
+#
+# Flow: honcho/honcho-deriver --(OpenAI SDK)--> embed-spy (logs request shape) --> lemonade /api/v1/embeddings
+
+x-honcho-env: &honcho-env
+  DB_CONNECTION_URI: postgresql+psycopg://honcho:honcho@honcho-db:5432/honcho
+  AUTH_USE_AUTH: "false"
+  CACHE_ENABLED: "false"
+  # Chat slots are not exercised; a dummy key on an unreachable URL keeps any LLM call local and failing.
+  LLM_OPENAI_API_KEY: dummy-not-a-real-key
+  LLM_OPENAI_BASE_URL: http://no-llm.invalid/v1
+  EMBEDDING_MODEL_CONFIG__TRANSPORT: openai
+  EMBEDDING_MODEL_CONFIG__MODEL: ${EMBED_MODEL:?}
+  EMBEDDING_VECTOR_DIMENSIONS: ${EMBED_DIMS:?}
+  EMBEDDING_MAX_INPUT_TOKENS: ${EMBED_MAX_INPUT_TOKENS:-8192}
+  EMBEDDING_MODEL_CONFIG__DIMENSIONS_MODE: ${EMBED_DIMENSIONS_MODE:-auto}
+  EMBEDDING_MODEL_CONFIG__OVERRIDES__BASE_URL: http://embed-spy:8080/api/v1
+  EMBEDDING_MODEL_CONFIG__OVERRIDES__API_KEY_ENV: LEMONADE_API_KEY
+  LEMONADE_API_KEY: ${LEMONADE_API_KEY:?}
+  # The image does not ship tiktoken's BPE files; without this Honcho downloads them on first use.
+  TIKTOKEN_CACHE_DIR: /tiktoken
+
+services:
+  tiktoken-cache:
+    image: ghcr.io/plastic-labs/honcho:v3.5.0
+    user: "0"  # fresh named volumes are root-owned; the image runs as a non-root user
+    entrypoint: ["/app/.venv/bin/python", "-c", "import tiktoken; [tiktoken.get_encoding(e) for e in ('cl100k_base', 'o200k_base')]"]
+    environment:
+      TIKTOKEN_CACHE_DIR: /tiktoken
+    volumes:
+      - tiktoken:/tiktoken
+    networks: [egress]
+
+  lemonade:
+    image: ghcr.io/lemonade-sdk/lemonade-server:v2026.44.1
+    mem_limit: 4g
+    environment:
+      LEMONADE_API_KEY: ${LEMONADE_API_KEY:?}
+    volumes:
+      - lemonade-models:/opt/lemonade/.cache/huggingface
+      - lemonade-llama:/opt/lemonade/llama
+      - lemonade-data:/opt/lemonade/.cache/lemonade
+      # recipe_options.json (per-model llama-server args) lives here.
+      - lemonade-config:/opt/lemonade/.config/lemonade
+    networks: [test, egress]
+
+  embed-spy:
+    image: ghcr.io/plastic-labs/honcho:v3.5.0
+    user: "0"
+    entrypoint: ["/app/.venv/bin/python", "-u", "/harness/embed_spy.py"]
+    environment:
+      UPSTREAM: http://lemonade:13305
+    volumes:
+      - ./:/harness:ro
+      - spy-log:/spylog
+    networks: [test]
+
+  honcho-db:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: honcho
+      POSTGRES_PASSWORD: honcho
+      POSTGRES_DB: honcho
+    volumes:
+      - honcho-pgdata:/var/lib/postgresql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U honcho -d honcho"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    networks: [test]
+
+  # The one-time step a non-1536 Instance needs: migrations, then ALTER the vector columns.
+  honcho-setup:
+    image: ghcr.io/plastic-labs/honcho:v3.5.0
+    entrypoint: ["sh", "-c", "/app/.venv/bin/python scripts/provision_db.py && /app/.venv/bin/python scripts/configure_embeddings.py --yes"]
+    environment: *honcho-env
+    volumes:
+      - tiktoken:/tiktoken:ro
+    depends_on:
+      honcho-db: {condition: service_healthy}
+      tiktoken-cache: {condition: service_completed_successfully}
+    networks: [test]
+
+  honcho:
+    image: ghcr.io/plastic-labs/honcho:v3.5.0
+    entrypoint: ["sh", "docker/entrypoint.sh"]
+    environment: *honcho-env
+    volumes:
+      - tiktoken:/tiktoken:ro
+    depends_on:
+      honcho-setup: {condition: service_completed_successfully}
+      embed-spy: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    networks: [test]
+
+  honcho-deriver:
+    image: ghcr.io/plastic-labs/honcho:v3.5.0
+    entrypoint: ["/app/.venv/bin/python", "-m", "src.deriver"]
+    environment:
+      <<: *honcho-env
+      VECTOR_STORE_RECONCILIATION_INTERVAL_SECONDS: "20"
+    volumes:
+      - tiktoken:/tiktoken:ro
+    depends_on:
+      honcho: {condition: service_healthy}
+    networks: [test]
+
+  # Runs the probe and end-to-end scripts: `docker compose run --rm tester <script>`.
+  tester:
+    image: ghcr.io/plastic-labs/honcho:v3.5.0
+    profiles: [tools]
+    entrypoint: ["/app/.venv/bin/python", "-u"]
+    environment:
+      LEMONADE_URL: http://lemonade:13305/api/v1
+      LEMONADE_API_KEY: ${LEMONADE_API_KEY:?}
+      HONCHO_URL: http://honcho:8000/v3
+      DB_URL: postgresql://honcho:honcho@honcho-db:5432/honcho
+      EMBED_MODEL: ${EMBED_MODEL:?}
+      EMBED_DIMS: ${EMBED_DIMS:?}
+      TIKTOKEN_CACHE_DIR: /tiktoken
+    volumes:
+      - tiktoken:/tiktoken:ro
+      - ./:/harness:ro
+      - spy-log:/spylog:ro
+    networks: [test]
+
+volumes:
+  lemonade-models:
+  lemonade-llama:
+  lemonade-data:
+  lemonade-config:
+  honcho-pgdata:
+  spy-log:
+  tiktoken:
+
+networks:
+  test:
+    internal: true
+  egress:
