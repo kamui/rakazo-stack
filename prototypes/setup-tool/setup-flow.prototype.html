@@ -45,6 +45,7 @@
     never regenerates internal secrets, and writes two files: a <b>settings file</b> (your choices, safe to read) and a
     <b>secrets file</b> (generated secrets and keys, private). Settings Rakazo keeps only in its database (Owner, the Owner's voice,
     memory for the default Space) are filled in <b>only when missing</b>; anything you changed in Rakazo's UI is left alone.
+    Memory (Honcho) is optional: leave the model provider key blank and it isn't installed; paste one on a later run to turn it on.
     Every run ends with a checklist of what is left to do by hand.
     <br><br>Nothing here touches a real machine: the "machine", the "Instance" and Tailscale are simulated in memory.
   </p>
@@ -81,7 +82,8 @@
         <button data-a="ANSWER:tailscaleKey=tskey-auth-demo">Paste Tailscale auth key</button>
         <button data-a="ANSWER:deviceName=rakazo">Device name: rakazo</button>
         <button data-a="ANSWER:byoUrl=https://rakazo.example.com">My URL: https://rakazo.example.com</button>
-        <button data-a="ANSWER:modelKey=sk-or-demo">Paste model provider key</button>
+        <button data-a="ANSWER:modelKey=sk-or-demo">Paste model provider key (memory on)</button>
+        <button data-a="ANSWER:modelKey=">Leave model provider key blank (memory off)</button>
         <button data-a="ANSWER:composioKey=ak_good">Paste Composio key (valid)</button>
         <button data-a="ANSWER:composioKey=bad_key">Paste Composio key (invalid)</button>
         <button data-a="ANSWER:composioKey=">Leave Composio key blank</button>
@@ -126,7 +128,8 @@
 const SetupModel = (() => {
   const TAILNET = "example-tailnet.ts.net";
   const MIN_API = 1.45;
-  const GENERATED = ["POSTGRES_PASSWORD","POSTGRES_APP_PASSWORD","BETTER_AUTH_SECRET","ENCRYPTION_KEY","SCREEN_PROXY_SECRET","SANDBOX_SUPERVISOR_TOKEN","HONCHO_AUTH_JWT_SECRET","HONCHO_ADMIN_JWT"];
+  const GENERATED = ["POSTGRES_PASSWORD","POSTGRES_APP_PASSWORD","BETTER_AUTH_SECRET","ENCRYPTION_KEY","SCREEN_PROXY_SECRET","SANDBOX_SUPERVISOR_TOKEN"];
+  const GENERATED_MEMORY = ["HONCHO_AUTH_JWT_SECRET","HONCHO_ADMIN_JWT"];
 
   const initialState = () => ({
     machine: { os: "linux", dockerApi: 1.47, windowsHome: false, desktopForLinux: false },
@@ -180,10 +183,9 @@ const SetupModel = (() => {
       if (!/^https?:\/\//.test(answers.byoUrl)) return stop("Your own Instance URL must start with https:// (or http://). Nothing was changed.");
       say("warn", "Unsupported: setup only writes Rakazo's address settings. Your proxy, certificates and firewall are up to you.");
     }
-    // Model provider key (Honcho needs one to start)
-    const haveModelKey = answers.modelKey || (inst && inst.keys.model);
-    if (!haveModelKey) return stop("Memory (Honcho) needs a model provider API key to start. Paste one (e.g. OpenRouter) and run setup again.");
-    say("ask", answers.modelKey ? "Model provider key: ********" : "Model provider key: set (Enter to keep)");
+    const memoryWasOn = !!(inst && inst.keys.model);
+    const memoryOn = !!answers.modelKey || memoryWasOn;
+    say("ask", "Model provider key for memory (Honcho): " + (answers.modelKey ? "********" : memoryWasOn ? "set (Enter to keep)" : "(blank, memory off)"));
     // Composio
     let composio = inst ? inst.keys.composio : null;
     if (answers.composioKey) {
@@ -208,10 +210,11 @@ const SetupModel = (() => {
 
     say("step", "4. Writing files");
     say(inst ? "dim" : "ok", inst ? "Internal secrets: kept (never regenerated: your data depends on them)" : `Generated ${GENERATED.length} internal secrets`);
+    if (memoryOn && !memoryWasOn) say("ok", `Generated ${GENERATED_MEMORY.length} secrets for memory`);
     say("ok", "Settings file and secrets file written");
 
     say("step", "5. Starting the stack");
-    say("ok", "Rakazo, memory (Honcho), voice (Lemonade + relay) started" + (answers.access === "tailscale" ? ", Tailscale joined" : ""));
+    say("ok", "Rakazo, voice (Lemonade + relay)" + (memoryOn ? ", memory (Honcho)" : "") + " started" + (answers.access === "tailscale" ? ", Tailscale joined" : ""));
     if (machine.os === "macos") say("dim", "macOS: Lemonade runs natively as a background service (install details pending another ticket)");
     if (answers.access === "tailscale" && next.assigned !== next.wanted) say("warn", `"${next.wanted}" was taken on your tailnet; Tailscale named this device "${next.assigned}". Using that.`);
     say("ok", `Instance URL: ${next.url}`);
@@ -221,8 +224,9 @@ const SetupModel = (() => {
     say(inst ? "dim" : "ok", inst ? `Owner ${owner}: exists, left as is` : `Owner ${owner}: created`);
     let voice = inst ? inst.voice : null;
     let memory = inst ? inst.memory : null;
-    const needSeeding = !voice || !memory;
+    const needSeeding = !voice || (memoryOn && !memory);
     const canSignIn = !inst || (answers.ownerPassword || "").length >= 16;
+    if (inst && needSeeding && canSignIn) say("ask", "Owner password: ******** (asked because settings are missing)");
     if (needSeeding && !canSignIn) {
       say("warn", "Some settings are missing, and filling them in needs the Owner password. Skipped; see the checklist.");
     }
@@ -231,7 +235,8 @@ const SetupModel = (() => {
       else if (world.relayDown) { say("warn", "Owner's voice: the voice relay isn't healthy, so this was skipped"); checklist.push("Rakazo > Settings > Voice: choose Self-hosted, Server URL http://host.docker.internal:13306/api/v1, speech model kokoro-v1, transcription model Whisper-Large-v3-Turbo (setup couldn't do it: relay unhealthy)"); }
       else { voice = { source: "setup" }; say("ok", "Owner's voice: Self-hosted Lemonade (through the relay)"); }
     } else say("dim", `Owner's voice: already set${voice.source === "ui" ? " (you changed it in Rakazo's UI)" : ""}, left as is`);
-    if (!memory) {
+    if (!memoryOn) say("dim", "Memory: off (no model provider key)");
+    else if (!memory) {
       if (!canSignIn) checklist.push("Rakazo > Space settings > Memory: connect local Honcho");
       else { memory = { source: "setup" }; say("ok", "Memory for the default Space: connected to Honcho"); }
     } else say("dim", "Memory for the default Space: already connected, left as is");
@@ -241,13 +246,13 @@ const SetupModel = (() => {
     if (inst && next.url !== inst.url) checklist.push("Sign in again on every browser and phone; re-create passkeys on the new address");
     checklist.push("Rakazo > Settings > Models: connect your model provider (yours to set up)");
     checklist.push("Other users: each sets their own voice in Rakazo > Settings > Voice");
-    checklist.push("New Spaces: connect memory in each Space's settings");
+    checklist.push(memoryOn ? "New Spaces: connect memory in each Space's settings" : "Memory is off. To turn it on, run setup again and paste a model provider key");
     if (composio) checklist.push("Each user connects their apps in Rakazo > Integrations (Composio)");
 
     const newInstance = {
       url: next.url, access: answers.access, accessLabel,
       tailscale: answers.access === "tailscale" ? { requested: next.wanted, assigned: next.assigned } : null,
-      keys: { model: "set", composio, tailscale: answers.access === "tailscale" ? "set" : null },
+      keys: { model: memoryOn ? "set" : null, composio, tailscale: answers.access === "tailscale" ? "set" : null },
       owner, voice, memory, os: machine.os,
     };
     say("ok", "Done.");
@@ -279,7 +284,7 @@ const SetupModel = (() => {
     return s;
   }
 
-  return { initialState, reduce, GENERATED };
+  return { initialState, reduce, GENERATED, GENERATED_MEMORY };
 })();
 
 /* ---------- Throwaway page shell ---------- */
@@ -294,6 +299,8 @@ const scenarios = [
     steps: ["RESET","ANSWER:modelKey=sk-or-demo","ANSWER:composioKey=ak_good","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=long-enough-passphrase","RUN","RUN","ANSWER:composioKey=bad_key","RUN"] },
   { name: "Re-run after changing things in Rakazo", text: "You changed your voice in Rakazo's UI. A re-run must leave it alone.",
     steps: ["RESET","ANSWER:modelKey=sk-or-demo","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=long-enough-passphrase","RUN","UI_CHANGE_VOICE","RUN"] },
+  { name: "Memory off, turned on later", text: "First run with no model provider key: memory isn't installed. A later re-run with a key turns it on, and asks for the Owner password because memory for the default Space is now missing.",
+    steps: ["RESET","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=long-enough-passphrase","RUN","ANSWER:modelKey=sk-or-demo","ANSWER:ownerPassword=long-enough-passphrase","RUN"] },
   { name: "Voice relay down on first run", text: "Something setup fills in fails. It should carry on and turn that step into a checklist item rather than stopping.",
     steps: ["RESET","TOGGLE:relayDown","ANSWER:modelKey=sk-or-demo","ANSWER:ownerEmail=me@example.com","ANSWER:ownerPassword=long-enough-passphrase","RUN"] },
   { name: "Machine problems", text: "Old Docker stops setup before anything changes; Windows Home only warns.",
@@ -326,7 +333,7 @@ function describe(st) {
     answers: [
       ["Access", { local: "this machine only", tailscale: "Tailscale", byo: "my own Instance URL" }[a.access]],
       ["Tailscale auth key", show(a.tailscaleKey)], ["Device name", a.deviceName],
-      ["My own Instance URL", a.byoUrl || "—"], ["Model provider key", show(a.modelKey)],
+      ["My own Instance URL", a.byoUrl || "—"], ["Model provider key (memory)", a.modelKey ? show(a.modelKey) : "blank (keep / off)"],
       ["Composio key", a.composioKey === "" ? "blank (keep / off)" : show(a.composioKey)],
       ["Owner email", a.ownerEmail || "—"], ["Owner password", a.ownerPassword ? `${a.ownerPassword.length} characters` : "—"],
       ["Confirmed URL change", a.confirmed ? "yes" : "no"],
@@ -338,8 +345,8 @@ function describe(st) {
       ["Instance", i ? "installed" : "none yet"], ["Instance URL", i ? i.url : "—"],
       ["Owner", i ? i.owner : "—"],
       ["Owner's voice", i ? (i.voice ? (i.voice.source === "ui" ? "set (changed in Rakazo's UI)" : "set by setup") : "not set") : "—"],
-      ["Default Space memory", i ? (i.memory ? "connected" : "not connected") : "—"],
-      ["Stored keys", i ? ["model", i.keys.composio && "Composio", i.keys.tailscale && "Tailscale"].filter(Boolean).join(", ") : "—"],
+      ["Memory (Honcho)", i ? (i.keys.model ? (i.memory ? "on, default Space connected" : "on, default Space not connected") : "off") : "—"],
+      ["Stored keys", i ? [i.keys.model && "model provider", i.keys.composio && "Composio", i.keys.tailscale && "Tailscale"].filter(Boolean).join(", ") : "—"],
     ],
   };
 }
@@ -365,7 +372,7 @@ function render() {
     ? `access = "${i.access}"\ninstance_url = "${i.url}"${i.tailscale ? `\ntailscale_device_name = "${i.tailscale.requested}"  # assigned: ${i.tailscale.assigned}` : ""}\nrakazo_version = "v0.4.0"\nlemonade_version = "v2026.44.1"\nhoncho_version = "v3.5.0"\nphone_calls = true\nsignups = false`
     : "(none yet)";
   document.getElementById("secretsFile").textContent = i
-    ? SetupModel.GENERATED.map(k => `${k}=••••••`).join("\n") + `\nMODEL_PROVIDER_API_KEY=••••••${i.keys.composio ? "\nCOMPOSIO_API_KEY=••••••" : ""}${i.keys.tailscale ? "\nTAILSCALE_AUTH_KEY=(used once; identity kept in a volume)" : ""}`
+    ? [...SetupModel.GENERATED, ...(i.keys.model ? SetupModel.GENERATED_MEMORY : [])].map(k => `${k}=••••••`).join("\n") + `${i.keys.model ? "\nMODEL_PROVIDER_API_KEY=••••••" : ""}${i.keys.composio ? "\nCOMPOSIO_API_KEY=••••••" : ""}${i.keys.tailscale ? "\nTAILSCALE_AUTH_KEY=(used once; identity kept in a volume)" : ""}`
     : "(none yet)";
   renderTabs();
 }
