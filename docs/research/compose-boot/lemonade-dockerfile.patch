@@ -1,0 +1,8 @@
+--- a/prototypes/compose-layout/compose.stack.yaml
++++ b/prototypes/compose-layout/compose.stack.yaml
+@@ lemonade.build.dockerfile_inline @@
+         FROM ghcr.io/lemonade-sdk/lemonade-server:v2026.44.1
+-        RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
++        USER root
++        RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
++        USER lemonade
