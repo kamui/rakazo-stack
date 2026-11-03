@@ -1,0 +1,6 @@
+== before: {"voice" : [{"secretId" : "804583b4df3e31bcb4ef6427", "voiceId" : "af_bella"}], "memorySecretId" : "6cc5cdda40e5299351f909b5", "secretRows" : 2}
+-> POST /rpc/voice/connect {"json":{"provider":"openai-compatible","baseUrl":"http://host.docker.internal:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Large-v3-Turbo"}}
+<- 200 {"json":{"id":"cmw0562rk000207p8chf7the5","provider":"openai-compatible","hasKey":true,"isDefault":true,"voiceId":"af_heart","speechModel":"","transcribe":true,"endpoint":"http://host.docker.internal:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Large-v3-Turbo"}}
+-> POST /rpc/memory/connectProvider {"json":{"provider":"honcho","settings":{"mode":"local","baseUrl":"http://honcho-api:8000"},"credentials":{"apiKey":"<redacted>"}}}
+<- 200 {"json":{"provider":"honcho","settings":{"mode":"local","baseUrl":"http://honcho-api:8000","reasoningLevel":"low"},"defaultMemoryScope":"isolated","updatedAt":"2026-11-03T03:43:05.150Z"}}
+== after: {"voice" : [{"secretId" : "f79e76b18329e1c95af42cd1", "voiceId" : "af_heart"}], "memorySecretId" : "3d1c0e1bea14f2a355a95f90", "secretRows" : 2}

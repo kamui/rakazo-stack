@@ -1,0 +1,21 @@
+== detect (read-only SQL, no password)
+   {"owner" : true, "defaultSpace" : true, "voiceCredentials" : [], "memoryProvider" : "honcho"}
+   missing: owner=false voice=true memory=false
+== snapshot before
+   {"user" : [{"email" : "owner@example.com", "updatedAt" : "2026-11-03T03:42:05.828"}], "voiceCredentials" : null, "voicePreferences" : null, "spaceVoicePreferences" : null, "memoryConfigs" : [{"provider" : "honcho", "settings" : {"mode": "local", "baseUrl": "http://honcho-api:8000", "reasoningLevel": "low"}, "secretId" : "3d1c0e1bea14f2a355a95f90", "updatedAt" : "2026-11-03T03:43:05.15"}], "secrets" : [{"id" : "3d1c0e1bea14f2a355a95f90", "kind" : "memory-provider", "createdAt" : "2026-11-03T03:43:05.149"}]}
+== sign in
+-> POST /api/auth/sign-in/email
+   body: {"email":"owner@example.com","password":"<redacted>"}
+<- 200 {"redirect":false,"token":"<redacted>","user":{"name":"Account","email":"owner@example.com","emailVerified":true,"image":null,"createdAt":"2026-11-03T03:42:05.828Z","updatedAt":"2026-11-03T03:42:05.828Z","id":"a230c169-9bf5-43a5-bd72-cc9033e7db43"}}
+== voice.connect
+-> POST /rpc/voice/connect
+   body: {"json":{"provider":"openai-compatible","baseUrl":"http://host.docker.internal:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Large-v3-Turbo"}}
+<- 200 {"json":{"id":"cmw057mws000v07p8d3ey28ts","provider":"openai-compatible","hasKey":true,"isDefault":true,"voiceId":"af_heart","speechModel":"","transcribe":true,"endpoint":"http://host.docker.internal:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Large-v3-Turbo"}}
+== sign out
+-> POST /api/auth/sign-out
+   body: {}
+<- 200 {"success":true}
+== detect after
+   {"owner" : true, "defaultSpace" : true, "voiceCredentials" : ["openai-compatible"], "memoryProvider" : "honcho"}
+== snapshot after
+   {"user" : [{"email" : "owner@example.com", "updatedAt" : "2026-11-03T03:42:05.828"}], "voiceCredentials" : [{"provider" : "openai-compatible", "secretId" : "ef03d95aa7bf324057e3e02a", "updatedAt" : "2026-11-03T03:43:19.228"}], "voicePreferences" : [{"voiceId" : "af_heart", "isDefault" : true, "updatedAt" : "2026-11-03T03:43:19.23"}], "spaceVoicePreferences" : null, "memoryConfigs" : [{"provider" : "honcho", "settings" : {"mode": "local", "baseUrl": "http://honcho-api:8000", "reasoningLevel": "low"}, "secretId" : "3d1c0e1bea14f2a355a95f90", "updatedAt" : "2026-11-03T03:43:05.15"}], "secrets" : [{"id" : "3d1c0e1bea14f2a355a95f90", "kind" : "memory-provider", "createdAt" : "2026-11-03T03:43:05.149"}, {"id" : "ef03d95aa7bf324057e3e02a", "kind" : "voice", "createdAt" : "2026-11-03T03:43:19.227"}]}

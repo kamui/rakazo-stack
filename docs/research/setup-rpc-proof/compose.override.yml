@@ -1,0 +1,61 @@
+# Layered on Rakazo v0.4.0's infra/compose/docker-compose.images.yml for the throwaway proof.
+# Run with: docker compose -p rs-rpc-proof --env-file .env -f docker-compose.images.yml -f compose.override.yml ...
+services:
+  # No Docker socket: this stack shares a Docker host with another Rakazo install, and the
+  # proof needs no bot computers. The supervisor's /health is static, so it still turns healthy.
+  supervisor:
+    volumes: !override
+      - appdata:/data
+    environment:
+      DOCKER_SOCKET: /nonexistent/docker.sock
+
+  honcho-db:
+    image: pgvector/pgvector:pg15
+    restart: "no"
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${HONCHO_DB_PASSWORD:?}
+    volumes:
+      - honchodata:/var/lib/postgresql/data
+    networks:
+      - honcho
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  honcho-api:
+    image: ghcr.io/plastic-labs/honcho:v3.5.0
+    restart: "no"
+    entrypoint: ["sh", "docker/entrypoint.sh"]
+    environment:
+      DB_CONNECTION_URI: postgresql+psycopg://postgres:${HONCHO_DB_PASSWORD:?}@honcho-db:5432/postgres
+      CACHE_ENABLED: "false"
+      AUTH_USE_AUTH: "true"
+      AUTH_JWT_SECRET: ${HONCHO_JWT_SECRET:?}
+      # Deliberately not a working key: the proof checks whether connecting needs one.
+      LLM_OPENAI_API_KEY: sk-dummy-not-a-real-key
+    networks:
+      - honcho
+      - app
+    depends_on:
+      honcho-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  honchodata:
+
+networks:
+  honcho:
+    internal: true

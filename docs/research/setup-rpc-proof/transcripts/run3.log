@@ -1,0 +1,6 @@
+== detect (read-only SQL, no password)
+   {"owner" : true, "defaultSpace" : true, "voiceCredentials" : ["openai-compatible"], "memoryProvider" : "honcho"}
+   missing: owner=false voice=false memory=false
+== snapshot before
+   {"user" : [{"email" : "owner@example.com", "updatedAt" : "2026-11-03T03:42:05.828"}], "voiceCredentials" : [{"provider" : "openai-compatible", "secretId" : "804583b4df3e31bcb4ef6427", "updatedAt" : "2026-11-03T03:42:06.464"}], "voicePreferences" : [{"voiceId" : "af_bella", "isDefault" : true, "updatedAt" : "2026-11-03T03:42:31.078"}], "spaceVoicePreferences" : null, "memoryConfigs" : [{"provider" : "honcho", "settings" : {"mode": "local", "baseUrl": "http://honcho-api:8000", "reasoningLevel": "low"}, "secretId" : "6cc5cdda40e5299351f909b5", "updatedAt" : "2026-11-03T03:42:07.5"}], "secrets" : [{"id" : "804583b4df3e31bcb4ef6427", "kind" : "voice", "createdAt" : "2026-11-03T03:42:06.462"}, {"id" : "6cc5cdda40e5299351f909b5", "kind" : "memory-provider", "createdAt" : "2026-11-03T03:42:07.498"}]}
+== nothing missing: no password asked, nothing written

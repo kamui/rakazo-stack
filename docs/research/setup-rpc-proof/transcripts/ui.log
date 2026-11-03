@@ -1,0 +1,13 @@
+-> POST /api/auth/sign-in/email {"email":"owner@example.com","password":"<redacted>"}
+<- 200 {"redirect":false,"token":"<redacted>","user":{"name":"Account","email":"owner@example.com","emailVerified":true,"image":null,"createdAt":"2026-11-03T03:42:05.828Z","updatedAt":"2026-11-03T03:42:05.828Z","id":"a230c169-9bf5-43a5-bd72-cc9033e7db43"}}
+-> POST /rpc/voice/credentials {}
+<- 200 {"json":[{"id":"cmw0562rk000207p8chf7the5","provider":"openai-compatible","hasKey":true,"isDefault":true,"voiceId":"af_heart","speechModel":"","transcribe":true,"endpoint":"http://host.docker.internal:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Large-v3-Turbo"}]}
+-> POST /rpc/voice/status {}
+<- 200 {"json":{"configured":true,"ready":true,"transcribe":true,"provider":"openai-compatible","voiceId":"af_heart"}}
+-> POST /rpc/memory/providerConfig {}
+<- 200 {"json":{"provider":"honcho","settings":{"mode":"local","baseUrl":"http://honcho-api:8000","reasoningLevel":"low"},"defaultMemoryScope":"isolated","updatedAt":"2026-11-03T03:42:07.500Z"}}
+== voices offered: ["af_heart","af_bella","af_nicole","am_michael","am_fenrir","bf_emma","bm_george","bm_fable"]
+== change voice af_heart -> af_bella (as the UI would)
+-> POST /rpc/voice/setVoice {"json":{"scope":"account","voiceId":"af_bella","provider":"openai-compatible"}}
+<- 200 {"json":{"configured":true,"ready":true,"transcribe":true,"provider":"openai-compatible","voiceId":"af_bella"}}
+== signed out

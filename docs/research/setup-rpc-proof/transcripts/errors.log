@@ -1,0 +1,13 @@
+== no token
+-> /rpc/voice/status {}
+<- 401 {"json":{"defined":false,"code":"UNAUTHORIZED","status":401,"message":"Unauthorized"}}
+== token shape: length=77 dots=1
+== voice server unreachable
+-> /rpc/voice/connect {"json":{"provider":"openai-compatible","baseUrl":"http://host.docker.internal:1/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Large-v3-Turbo"}}
+<- 400 {"json":{"defined":false,"code":"BAD_REQUEST","status":400,"message":"Couldn't reach the speech server at http://host.docker.internal:1."}}
+== honcho key rejected
+-> /rpc/memory/connectProvider {"json":{"provider":"honcho","settings":{"mode":"local","baseUrl":"http://honcho-api:8000"},"credentials":{"apiKey":"<redacted>"}}}
+<- 400 {"json":{"defined":false,"code":"BAD_REQUEST","status":400,"message":"Honcho request failed: 401. A key scoped to one workspace needs that workspace entered."}}
+== UI disconnect of voice
+-> /rpc/voice/disconnect {"json":{"provider":"openai-compatible"}}
+<- 200 {"json":{"ok":true}}
