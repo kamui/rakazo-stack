@@ -9,7 +9,7 @@ Files:
 - `relay/lang-code-relay.ts`: the `lang_code` relay, now also adding Lemonade's API key.
 - `tailscale-serve.json`, `honcho/init.sql`: mounted config.
 
-Services are named after the app they run (`lemonade-relay` is the relay in front of Lemonade). Validated with `docker compose config` for every profile combination (dummy values). Not booted.
+Services are named after the app they run (`lemonade-relay` is the relay in front of Lemonade). Validated with `docker compose config` for every profile combination (dummy values). Booted end to end on Windows/WSL2 in [Boot the drafted compose layout end to end](https://github.com/kamui/rakazo-stack/issues/24).
 
 ## Shape
 
@@ -66,6 +66,12 @@ flowchart LR
 - Default Space memory: `http://honcho:8000` + Honcho admin JWT
 - New generated secrets: `LEMONADE_API_KEY`, `HONCHO_DB_PASSWORD`, `HONCHO_AUTH_JWT_SECRET` (+ admin JWT)
 - macOS: `LEMONADE_UPSTREAM=http://host.docker.internal:13305`
+
+## Setup steps the layout relies on
+
+- After Lemonade starts: `lemonade config set whispercpp.args=--convert` (browser WebM/MP4 needs it; `cpu_args` is ignored because backend `auto` picks vulkan), then pull and load `kokoro-v1` and `Whisper-Large-v3-Turbo` through the relay. Safe to repeat on re-runs.
+- Rakazo's API port is not published (`ports: !reset []`); setup and browsers use the web port, which proxies `/api` and `/rpc`.
+- Honcho's tokenizer files are cached in the `honcho-tiktoken` volume; embeddings are hosted through the model provider.
 
 ## Who can reach what
 
