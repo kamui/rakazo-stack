@@ -1,0 +1,90 @@
+# Probes on an Apple M3 Pro (11 cores, 18 GB), macOS 27.2, Docker Desktop 4.94.0 (Engine 29.8.2, API 1.56);
+# Rakazo boot after Docker Desktop updated itself to 4.97.0 (Engine 29.9.2).
+# lemond v2026.44.1 embeddable, started with: env -i PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+#   HF_HOME=<scratch> LEMONADE_API_KEY=<generated> lemond --no-broadcast <cache> <config>
+# Config: whispercpp.backend=metal, whispercpp.metal_args=--convert. Models: kokoro-v1, Whisper-Large-v3-Turbo.
+
+## What listens (lsof), models loaded
+lemond    127.0.0.1:9000  (WebSocket, websocket_port=auto)
+lemond    127.0.0.1:13305 and [::1]:13305
+koko      127.0.0.1:8001  (child, started by lemond: koko ... openai --ip 127.0.0.1 --port 8001)
+whisper-s 127.0.0.1:8002  (child, started by lemond: whisper-server -m ... --port 8002 --convert)
+/api/v1/health: kokoro-v1 device=cpu, Whisper-Large-v3-Turbo device=gpu
+
+## Load times
+first load after download: kokoro-v1 3.2 s, Whisper-Large-v3-Turbo 17.0 s (ggml_metal_library_init: loaded in 11.3 s)
+reload of Whisper: 1.2-1.9 s
+
+## On the host, no key
+127.0.0.1:13305/api/v1/models        401
+127.0.0.1:8001/v1/audio/speech       200 (WAV)
+127.0.0.1:8002/inference             200 {"text":" Sure, I've added that to your calendar for tomorrow at 9.\n"}
+
+## whisper-server directly (port 8002), 4 s clip, seconds
+-t 1: 1.56 1.59 1.61 1.75 1.69     long clip: 3.23 3.33 3.14 3.20 3.30
+-t 4: 1.24 1.17 1.17 1.18 1.20     long clip: 3.32 3.43 3.31 3.42 3.30   (default)
+-t 8: 1.18 1.27 1.22 1.24 1.23     long clip: 3.49 3.03 3.29 3.21 3.20
+webm vs wav input: same (1.2-1.35 s each)
+
+## Through Lemonade, language hint or not (seconds)
+language=none SHORT: 1.62 1.57 1.57 1.54   LONG: 2.82 2.79 2.77 2.72
+language=en   SHORT: 0.82 0.83 0.86 0.81   LONG: 2.01 2.03 2.03 2.01
+
+## Idle eviction
+Whisper and Kokoro still loaded after 6 min idle (per-model settings print auto_evict=(none), evict_idle_timeout=300).
+
+## Plain container (alpine:3, default bridge)
+host.docker.internal -> fdc4:f303:9324::254
+port 13305 open, 8001 open, 8002 open, 9000 open
+lemonade no key: 401   wrong key: 401   right key: 200
+kokoro :8001 speech, no key: 200 (38596-byte WAV)
+whisper :8002 GET /, no key: 200
+
+## whisper-server /load from the container, no key
+POST :8002/load model=/does/not/exist   -> 400 (model not found); GET /health afterwards -> 404 (state stuck at loading)
+POST :8002/load model=/etc/hosts        -> connection dropped; whisper-server process exited (model init failed -> exit(1))
+next transcription through Lemonade: 200 in 4.2 s (lemond restarted whisper-server on port 8003), then 2.5 s, 2.3 s
+
+## Throwaway Rakazo v0.4.0 stack (project rs-mac16; prototype/compose-layout, profiles none,
+## LEMONADE_UPSTREAM=http://host.docker.internal:13305, same LEMONADE_API_KEY as native lemond)
+up -d --wait: postgres, supervisor, api, worker, lemonade-relay healthy; web up on 127.0.0.1:15173
+supervisor log: "computer egress is open: the host firewall rules are not installed"
+fill-in.sh (memory skipped): bootstrap-owner ok; sign-in 200; /rpc/voice/connect
+  {provider: openai-compatible, baseUrl: http://lemonade-relay:13306/api/v1} -> 200
+POST /api/voice/speak (scope user, 13 words): 200 audio/mpeg 2.76 s (first), 1.22 s, 1.30 s, 1.20 s
+POST /api/voice/transcribe (WebM/Opus, language en): 200 1.01 s, 0.91 s, 0.87 s, 0.89 s
+  text: "Hi, this is how I will sound when I read replies out loud."
+
+## Bot computer created by the stack's own supervisor (computer-probe.sh create; image computer:v0.4.0) -> 200
+lemonade-relay:13306        refused/unresolved
+postgres:5432               refused/unresolved
+api:3100                    refused/unresolved
+web:5173                    refused/unresolved
+supervisor:7091             refused/unresolved
+host.docker.internal:13305  open
+host.docker.internal:8001   open
+host.docker.internal:8002   open
+host.docker.internal:9000   open
+host.docker.internal:15173  open
+1.1.1.1:443                 open
+HTTP from inside the computer:
+lemonade :13305 no key: 401   wrong key: 401
+kokoro :8001 speech, no key: 200 bytes=42916
+whisper :8002 inference, no key: {"text":" Hello from a bot computer.\n"}
+lemonade websocket :9000 plain GET: no HTTP response (000)
+rakazo web :15173: 403
+computer deleted (200), stack down -v, images removed.
+
+## Setup binary (Bun 1.4.4 in a linux/arm64 oven/bun:1.4.4-alpine container, cross-compiled
+## --compile --minify --target=bun-darwin-arm64; hello world that runs `docker version`)
+size 89,159,906 bytes; fetched with curl from a local HTTP server
+xattr: com.apple.provenance only (no com.apple.quarantine)
+codesign -dv: Identifier=a.out, flags=0x20002(adhoc,linker-signed), hashes=21599, Signature=adhoc, TeamIdentifier=not set
+codesign --verify --strict: ok
+spctl -a -t execute: rejected (expected for ad-hoc; not consulted without quarantine)
+./rakazo-stack -> {"platform":"darwin","arch":"arm64","bun":"1.4.4","dockerApi":"1.56"} exit 0, no prompt
+browser-style copy (com.apple.quarantine "0083;...;Safari;..." added by hand, not launched):
+  spctl: rejected; syspolicy_check distribution: "Adhoc Signed App" (warning), "Notary Ticket Missing" (fatal)
+
+## Lemonade binaries (embeddable tarball, SHA-256 matches release digest, fetched with curl)
+lemond: Signature=adhoc, flags=0x10002(adhoc,runtime), no quarantine xattr; ran with no prompt.

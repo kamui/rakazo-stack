@@ -1,0 +1,25 @@
+1793682211.074315  INFO ort::logging: Discovered OrtHardwareDevice {vendor_id:0x106b, device_id:0x0, vendor:Apple, type:2, metadata: []}
+1793682211.074496  INFO ort::logging: Discovered OrtHardwareDevice {vendor_id:0x106b, device_id:0x0, vendor:Apple, type:1, metadata: []}
+1793682211.074509  INFO ort::logging: Discovered OrtHardwareDevice {vendor_id:0x106b, device_id:0x0, vendor:Apple, type:0, metadata: []}
+1793682211.074952  INFO ort::ep: Successfully registered `CPUExecutionProvider` source=session options
+1793682211.683809  INFO kokoros::onn::ort_koko: OrtKoko: Standard backend activated (1 output)
+1793682211.721992  INFO kokoros::tts::koko: ==========================================
+1793682211.722034  INFO kokoros::tts::koko: Voice styles loaded (54 total):
+1793682211.722040  INFO kokoros::tts::koko: ==========================================
+1793682211.722050  INFO kokoros::tts::koko: American Female(af): af_alloy, af_aoede, af_bella, af_heart, af_jessica, af_kore, af_nicole, af_nova, af_river, af_sarah, af_sky
+1793682211.722055  INFO kokoros::tts::koko: American Male(am): am_adam, am_echo, am_eric, am_fenrir, am_liam, am_michael, am_onyx, am_puck, am_santa
+1793682211.722059  INFO kokoros::tts::koko: British Female(bf): bf_alice, bf_emma, bf_isabella, bf_lily
+1793682211.722063  INFO kokoros::tts::koko: British Male(bm): bm_daniel, bm_fable, bm_george, bm_lewis
+1793682211.722066  INFO kokoros::tts::koko: European Female(ef): ef_dora
+1793682211.722070  INFO kokoros::tts::koko: European Male(em): em_alex, em_santa
+1793682211.722074  INFO kokoros::tts::koko: French Female(ff): ff_siwis
+1793682211.722078  INFO kokoros::tts::koko: Hindi Female(hf): hf_alpha, hf_beta
+1793682211.722082  INFO kokoros::tts::koko: Hindi Male(hm): hm_omega, hm_psi
+1793682211.722085  INFO kokoros::tts::koko: Italian Female(if): if_sara
+1793682211.722089  INFO kokoros::tts::koko: Italian Male(im): im_nicola
+1793682211.722093  INFO kokoros::tts::koko: Japanese Female(jf): jf_alpha, jf_gongitsune, jf_nezumi, jf_tebukuro
+1793682211.722096  INFO kokoros::tts::koko: Japanese Male(jm): jm_kumo
+1793682211.722099  INFO kokoros::tts::koko: Portuguese Female(pf): pf_dora
+1793682211.722102  INFO kokoros::tts::koko: Portuguese Male(pm): pm_alex, pm_santa
+1793682211.722105  INFO kokoros::tts::koko: Chinese Female(zf): zf_xiaobei, zf_xiaoni, zf_xiaoxiao, zf_xiaoyi
+1793682211.722108  INFO kokoros::tts::koko: Chinese Male(zm): zm_yunjian, zm_yunxi, zm_yunxia, zm_yunyang

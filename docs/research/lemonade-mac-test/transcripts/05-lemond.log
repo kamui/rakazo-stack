@@ -1,0 +1,304 @@
+2026-11-03 00:01:44.712 [Info] (main) Starting Lemonade Server...
+2026-11-03 00:01:44.712 [Info] (main)   Version: 2026.44.1
+2026-11-03 00:01:44.712 [Info] (main)   Cache dir: /tmp/rs16/cache
+2026-11-03 00:01:44.712 [Info] (main)   Config dir: /tmp/rs16/config
+2026-11-03 00:01:44.712 [Info] (main)   Port: 13305
+2026-11-03 00:01:44.712 [Info] (main)   Host: localhost
+2026-11-03 00:01:44.712 [Info] (main)   Log level: info
+2026-11-03 00:01:44.712 [Info] (main)   Log file mode: auto
+2026-11-03 00:01:44.712 [Info] (main)   Log max file size: 10 MB
+2026-11-03 00:01:44.712 [Info] (main)   Log max files: 5
+2026-11-03 00:01:44.712 [Info] (main)   Telemetry: disabled
+2026-11-03 00:01:44.714 [Warn] (ModelManager) Could not load architecture_defaults.json: Failed to open file: /tmp/rs16/lemonade/lemonade-embeddable-2026.44.1-macos-arm64/resources/architecture_defaults.json
+2026-11-03 00:01:44.715 [Info] (ModelManager) Building models cache...
+2026-11-03 00:01:44.794 lemond[45287:3915715] [Metal] Detected device: Apple M3 Pro
+2026-11-03 00:01:44.796 [Info] (ModelManager) Backend availability:
+2026-11-03 00:01:44.796 [Info] (ModelManager)   - NPU hardware: No
+2026-11-03 00:01:44.796 [Info] (ModelManager)   - System RAM: 18.0 GB (max model size: 14.4 GB)
+2026-11-03 00:01:44.796 [Info] (ModelManager)   - Largest memory pool: 13.3
+2026-11-03 00:01:44.796 [Info] (ModelManager)   - NVIDIA GPU: detection error: NVIDIA GPUs not detected on macOS
+2026-11-03 00:01:44.816 [Info] (ModelManager) Cache built: 86 total, 0 downloaded
+2026-11-03 00:01:44.818 [Warn] (Server) Could not mount static files from: /tmp/rs16/lemonade/lemonade-embeddable-2026.44.1-macos-arm64/resources/static
+2026-11-03 00:01:44.818 [Warn] (Server) Status page assets will not be available
+2026-11-03 00:01:44.818 [Info] (Server) Web app directory not found at: /tmp/rs16/lemonade/lemonade-embeddable-2026.44.1-macos-arm64/resources/web-app
+2026-11-03 00:01:44.818 [Info] (Server) Falling back to static status page at root
+2026-11-03 00:01:44.818 [Warn] (Server) Could not mount static files from: /tmp/rs16/lemonade/lemonade-embeddable-2026.44.1-macos-arm64/resources/static
+2026-11-03 00:01:44.818 [Warn] (Server) Status page assets will not be available
+2026-11-03 00:01:44.818 [Info] (Server) Web app directory not found at: /tmp/rs16/lemonade/lemonade-embeddable-2026.44.1-macos-arm64/resources/web-app
+2026-11-03 00:01:44.818 [Info] (Server) Falling back to static status page at root
+2026-11-03 00:01:44.818 [Info] (WebSocket) Configured port: 9000
+2026-11-03 00:01:44.818 [Info] (Server) Starting HTTP server on localhost:13305
+2026-11-03 00:01:44.819 [Info] (Server) Host resolution: IPv4=127.0.0.1, IPv6=::1
+2026-11-03 00:01:44.823 [Info] (WebSocket) Server started on port 9000
+2026-11-03 00:01:44.823 [Info] (Server) WebSocket server started on port 9000
+2026-11-03 00:01:44.823 [Info] (Server) Binding IPv4 HTTP server to 127.0.0.1:13305...
+2026-11-03 00:01:44.823 [Info] (Server) Binding IPv6 HTTP server to [::1]:13305...
+2026-11-03 00:01:44.823 [Info] (Server) IPv6 HTTP server listening on [::1]:13305
+2026-11-03 00:01:44.835 [Info] (Server) Broadcasting disabled by configuration or CLI option
+2026-11-03 00:02:07.898 [Info] (Server) Pulling model: kokoro-v1
+2026-11-03 00:02:07.899 [Info] (ModelManager) Downloading model: mikkoph/kokoro-onnx
+2026-11-03 00:02:07.899 [Info] (ModelManager) Fetching repository file list from Hugging Face: mikkoph/kokoro-onnx
+2026-11-03 00:02:07.997 [Info] (ModelManager) Repository contains 5 files
+2026-11-03 00:02:07.997 [Info] (ModelManager) Identified files to download:
+2026-11-03 00:02:07.997 [Info] (ModelManager)   - huggingface:mikkoph/kokoro-onnx:.gitattributes
+2026-11-03 00:02:07.997 [Info] (ModelManager)   - huggingface:mikkoph/kokoro-onnx:README.md
+2026-11-03 00:02:07.997 [Info] (ModelManager)   - huggingface:mikkoph/kokoro-onnx:index.json
+2026-11-03 00:02:07.997 [Info] (ModelManager)   - huggingface:mikkoph/kokoro-onnx:kokoro-v1.0.onnx
+2026-11-03 00:02:07.997 [Info] (ModelManager)   - huggingface:mikkoph/kokoro-onnx:voices-v1.0.bin
+2026-11-03 00:02:07.998 [Info] (ModelManager) Downloading: .gitattributes...
+2026-11-03 00:02:08.061 [Info] (Download) Hash verified for /tmp/rs16/hf/hub/models--mikkoph--kokoro-onnx/snapshots/abf6e2a176872a599e992bd9cf38b370d0eea9e3/.gitattributes
+2026-11-03 00:02:08.061 [Info] (ModelManager) Downloaded: .gitattributes
+2026-11-03 00:02:08.061 [Info] (ModelManager) Downloading: README.md...
+2026-11-03 00:02:08.123 [Info] (Download) Hash verified for /tmp/rs16/hf/hub/models--mikkoph--kokoro-onnx/snapshots/abf6e2a176872a599e992bd9cf38b370d0eea9e3/README.md
+2026-11-03 00:02:08.124 [Info] (ModelManager) Downloaded: README.md
+2026-11-03 00:02:08.124 [Info] (ModelManager) Downloading: index.json...
+2026-11-03 00:02:08.193 [Info] (Download) Hash verified for /tmp/rs16/hf/hub/models--mikkoph--kokoro-onnx/snapshots/abf6e2a176872a599e992bd9cf38b370d0eea9e3/index.json
+2026-11-03 00:02:08.193 [Info] (ModelManager) Downloaded: index.json
+2026-11-03 00:02:08.193 [Info] (ModelManager) Downloading: kokoro-v1.0.onnx...
+2026-11-03 00:02:13.355 [Info] (Download) Hash verified for /tmp/rs16/hf/hub/models--mikkoph--kokoro-onnx/snapshots/abf6e2a176872a599e992bd9cf38b370d0eea9e3/kokoro-v1.0.onnx
+2026-11-03 00:02:13.355 [Info] (ModelManager) Downloaded: kokoro-v1.0.onnx
+2026-11-03 00:02:13.356 [Info] (ModelManager) Downloading: voices-v1.0.bin...
+2026-11-03 00:02:13.941 [Info] (Download) Hash verified for /tmp/rs16/hf/hub/models--mikkoph--kokoro-onnx/snapshots/abf6e2a176872a599e992bd9cf38b370d0eea9e3/voices-v1.0.bin
+2026-11-03 00:02:13.942 [Info] (ModelManager) Downloaded: voices-v1.0.bin
+2026-11-03 00:02:13.942 [Info] (ModelManager) Validating downloaded files...
+2026-11-03 00:02:13.942 [Info] (ModelManager) All files downloaded and validated from Hugging Face
+2026-11-03 00:02:13.942 [Info] (ModelManager) Download location: /tmp/rs16/hf/hub/models--mikkoph--kokoro-onnx/snapshots/abf6e2a176872a599e992bd9cf38b370d0eea9e3
+2026-11-03 00:02:13.942 [Info] (ModelManager) Updated 'kokoro-v1' downloaded=1, resolved_path=/tmp/rs16/hf/hub/models--mikkoph--kokoro-onnx/snapshots/abf6e2a176872a599e992bd9cf38b370d0eea9e3/index.json
+2026-11-03 00:02:13.951 [Info] (Server) Pulling model: Whisper-Large-v3-Turbo
+2026-11-03 00:02:13.951 [Info] (ModelManager) Downloading model: ggerganov/whisper.cpp (variant: ggml-large-v3-turbo.bin)
+2026-11-03 00:02:13.951 [Info] (ModelManager) Fetching repository file list from Hugging Face: ggerganov/whisper.cpp
+2026-11-03 00:02:14.012 [Info] (ModelManager) Repository contains 47 files
+2026-11-03 00:02:14.012 [Info] (ModelManager) Identified files to download:
+2026-11-03 00:02:14.012 [Info] (ModelManager)   - huggingface:ggerganov/whisper.cpp:ggml-large-v3-turbo.bin
+2026-11-03 00:02:14.012 [Info] (ModelManager) Downloading: ggml-large-v3-turbo.bin...
+2026-11-03 00:02:36.032 [Info] (Download) Hash verified for /tmp/rs16/hf/hub/models--ggerganov--whisper.cpp/snapshots/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin
+2026-11-03 00:02:36.033 [Info] (ModelManager) Downloaded: ggml-large-v3-turbo.bin
+2026-11-03 00:02:36.033 [Info] (ModelManager) Validating downloaded files...
+2026-11-03 00:02:36.034 [Info] (ModelManager) All files downloaded and validated from Hugging Face
+2026-11-03 00:02:36.034 [Info] (ModelManager) Download location: /tmp/rs16/hf/hub/models--ggerganov--whisper.cpp/snapshots/5359861c739e955e79d9a303bcbc70fb988958b1
+2026-11-03 00:02:36.034 [Info] (ModelManager) Updated 'Whisper-Large-v3-Turbo' downloaded=1, resolved_path=/tmp/rs16/hf/hub/models--ggerganov--whisper.cpp/snapshots/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin
+2026-11-03 00:02:44.315 [Info] (Server) Ensuring model loaded: kokoro-v1 
+2026-11-03 00:02:44.317 lemond[45287:3915785] [Metal] Detected device: Apple M3 Pro
+2026-11-03 00:02:44.317 [Info] (Router) Auto-tune ctx_size resolved to 11468
+2026-11-03 00:02:44.317 [Info] (KokoroServer) Loading model: kokoro-v1
+2026-11-03 00:02:44.318 [Info] (kokoro Server) Installing koko (version: b21)
+  Progress: 100% (19.1/19.1 MB)
+2026-11-03 00:02:45.343 [Info] (KokoroServer) Reading "index.json"
+2026-11-03 00:02:45.344 [Info] (KokoroServer) Using model: "kokoro-v1.0.onnx"
+2026-11-03 00:02:45.345 [Info] (KokoroServer) Starting server on port 8001
+2026-11-03 00:02:45.345 [Info] (KokoroServer) Setting LD_LIBRARY_PATH=/tmp/rs16/cache/bin/kokoro/metal
+2026-11-03 00:02:45.346 [Info] (ServerProcess) Started /tmp/rs16/cache/bin/kokoro/metal/koko (PID 46791)
+Waiting for kokoro-server to be ready (timeout: 600s)...
+2026-11-03 00:02:47.542 [Info] (WrappedServer) kokoro-server is ready at http://127.0.0.1:8001
+2026-11-03 00:02:47.542 [Info] (BackendWatchdog) Started watchdog for kokoro-server using http://127.0.0.1:8001/ (streaming=on, non_streaming=on)
+2026-11-03 00:02:47.542 [Info] (Router) Model loaded successfully. Total loaded: 1
+2026-11-03 00:02:47.568 [Info] (Server) Ensuring model loaded: Whisper-Large-v3-Turbo 
+2026-11-03 00:02:47.568 lemond[45287:3915787] [Metal] Detected device: Apple M3 Pro
+2026-11-03 00:02:47.569 [Info] (Router) Auto-tune ctx_size resolved to 4096
+2026-11-03 00:02:47.569 [Info] (WhisperServer) Loading model: Whisper-Large-v3-Turbo
+2026-11-03 00:02:47.570 [Info] (WhisperServer) Per-model settings: whispercpp_backend=metal, whispercpp_args=--convert, merge_args=true, auto_evict=(none), evict_idle_timeout=300, downsize_idle_timeout=60, evict_weight_factor=1.000000, pinned=false, auto_update=(none)
+2026-11-03 00:02:47.570 [Info] (whispercpp Server) Installing whisper-server (version: v1.8.4)
+  Progress: 100% (1.9/1.9 MB)
+2026-11-03 00:02:47.919 [Info] (WhisperServer) Using model: /tmp/rs16/hf/hub/models--ggerganov--whisper.cpp/snapshots/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin
+2026-11-03 00:02:47.919 [Info] (WhisperServer) Using backend: metal
+2026-11-03 00:02:47.919 [Info] (WhisperServer) Starting server on port 8002
+2026-11-03 00:02:47.920 [Info] (ServerProcess) Started /tmp/rs16/cache/bin/whispercpp/metal/whisper-server (PID 46841)
+Waiting for whisper-server to be ready (timeout: 600s)...
+2026-11-03 00:03:04.533 [Info] (WrappedServer) whisper-server is ready at http://127.0.0.1:8002
+2026-11-03 00:03:04.534 [Info] (BackendWatchdog) Started watchdog for whisper-server using http://127.0.0.1:8002/health (streaming=on, non_streaming=on)
+2026-11-03 00:03:04.535 [Info] (Router) Model loaded successfully. Total loaded: 2
+2026-11-03 00:04:26.571 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:28.324 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:33.393 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:34.167 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:34.205 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:34.951 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:35.030 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:35.817 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:35.852 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:36.631 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:36.665 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:37.479 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:37.516 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:38.299 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:38.555 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:40.882 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:40.932 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:43.147 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:43.182 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:45.497 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:45.532 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:47.718 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:47.755 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:50.006 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:50.043 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:52.240 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:52.502 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:04:59.053 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:04:59.109 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:05:06.257 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:05:06.296 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:05:12.486 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:05:12.523 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:05:19.866 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:05:19.907 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:05:26.530 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:05:26.575 [Info] (Server) POST /api/v1/audio/speech
+2026-11-03 00:05:32.970 [Info] (Server) Streaming completed - 200 OK
+2026-11-03 00:05:33.432 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:05:33.432 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+2026-11-03 00:05:36.461 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:05:36.461 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+2026-11-03 00:05:39.173 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:05:39.173 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+2026-11-03 00:05:41.693 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:05:41.693 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+2026-11-03 00:05:44.148 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:05:44.148 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+2026-11-03 00:05:46.699 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:05:46.699 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+2026-11-03 00:05:49.256 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:05:49.256 [Info] (Server) Audio file: MEDIUM.webm (47480 bytes)
+2026-11-03 00:05:51.761 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:05:51.761 [Info] (Server) Audio file: MEDIUM.webm (47480 bytes)
+2026-11-03 00:05:54.218 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:05:54.218 [Info] (Server) Audio file: MEDIUM.webm (47480 bytes)
+2026-11-03 00:05:56.596 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:05:56.596 [Info] (Server) Audio file: MEDIUM.webm (47480 bytes)
+2026-11-03 00:05:59.053 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:05:59.053 [Info] (Server) Audio file: MEDIUM.webm (47480 bytes)
+2026-11-03 00:06:02.053 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:06:02.054 [Info] (Server) Audio file: MEDIUM.webm (47480 bytes)
+2026-11-03 00:06:04.657 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:06:04.657 [Info] (Server) Audio file: LONG.webm (133061 bytes)
+2026-11-03 00:06:09.046 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:06:09.046 [Info] (Server) Audio file: LONG.webm (133061 bytes)
+2026-11-03 00:06:13.314 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:06:13.314 [Info] (Server) Audio file: LONG.webm (133061 bytes)
+2026-11-03 00:06:17.773 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:06:17.773 [Info] (Server) Audio file: LONG.webm (133061 bytes)
+2026-11-03 00:06:22.086 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:06:22.086 [Info] (Server) Audio file: LONG.webm (133061 bytes)
+2026-11-03 00:06:25.942 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:06:25.942 [Info] (Server) Audio file: LONG.webm (133061 bytes)
+2026-11-03 00:06:48.428 [Error] (Server) Error 401: GET /api/v1/models
+2026-11-03 00:07:09.067 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:07:09.068 [Info] (Server) Audio file: SHORT.wav (369644 bytes)
+2026-11-03 00:07:11.961 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:07:11.961 [Info] (Server) Audio file: SHORT.wav (369644 bytes)
+2026-11-03 00:07:14.144 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:07:14.144 [Info] (Server) Audio file: SHORT.wav (369644 bytes)
+2026-11-03 00:07:16.391 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:07:16.391 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+2026-11-03 00:07:18.801 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:07:18.801 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+2026-11-03 00:07:21.330 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:07:21.330 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+2026-11-03 00:07:43.319 [Info] (Server) Unload request received
+2026-11-03 00:07:43.319 [Info] (Router) Unload model called: Whisper-Large-v3-Turbo
+2026-11-03 00:07:43.319 [Info] (Router) Evicting model: Whisper-Large-v3-Turbo
+2026-11-03 00:07:43.319 [Info] (ServerProcess) Stopping /tmp/rs16/cache/bin/whispercpp/metal/whisper-server (PID 46841)
+2026-11-03 00:07:43.524 [Info] (ProcessManager) Process terminated, waiting for GPU driver cleanup...
+2026-11-03 00:07:45.529 [Info] (Router) Evicted model: Whisper-Large-v3-Turbo
+2026-11-03 00:07:45.530 [Info] (Server) Model 'Whisper-Large-v3-Turbo' unloaded successfully
+2026-11-03 00:07:45.557 [Info] (Server) Ensuring model loaded: Whisper-Large-v3-Turbo 
+2026-11-03 00:07:45.561 lemond[45287:3915797] [Metal] Detected device: Apple M3 Pro
+2026-11-03 00:07:45.561 [Info] (Router) Auto-tune ctx_size resolved to 6960
+2026-11-03 00:07:45.562 [Info] (WhisperServer) Loading model: Whisper-Large-v3-Turbo
+2026-11-03 00:07:45.562 [Info] (WhisperServer) Per-model settings: whispercpp_backend=metal, whispercpp_args=--convert -t 1, merge_args=true, auto_evict=(none), evict_idle_timeout=300, downsize_idle_timeout=60, evict_weight_factor=1.000000, pinned=false, auto_update=(none)
+2026-11-03 00:07:45.772 [Info] (WhisperServer) Using model: /tmp/rs16/hf/hub/models--ggerganov--whisper.cpp/snapshots/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin
+2026-11-03 00:07:45.772 [Info] (WhisperServer) Using backend: metal
+2026-11-03 00:07:45.773 [Info] (WhisperServer) Starting server on port 8002
+2026-11-03 00:07:45.773 [Info] (ServerProcess) Started /tmp/rs16/cache/bin/whispercpp/metal/whisper-server (PID 54814)
+Waiting for whisper-server to be ready (timeout: 600s)...
+2026-11-03 00:07:47.493 [Info] (WrappedServer) whisper-server is ready at http://127.0.0.1:8002
+2026-11-03 00:07:47.493 [Info] (BackendWatchdog) Started watchdog for whisper-server using http://127.0.0.1:8002/health (streaming=on, non_streaming=on)
+2026-11-03 00:07:47.493 [Info] (Router) Model loaded successfully. Total loaded: 2
+2026-11-03 00:08:17.950 [Info] (Server) Unload request received
+2026-11-03 00:08:17.951 [Info] (Router) Unload model called: Whisper-Large-v3-Turbo
+2026-11-03 00:08:17.951 [Info] (Router) Evicting model: Whisper-Large-v3-Turbo
+2026-11-03 00:08:17.952 [Info] (ServerProcess) Stopping /tmp/rs16/cache/bin/whispercpp/metal/whisper-server (PID 54814)
+2026-11-03 00:08:18.261 [Info] (ProcessManager) Process terminated, waiting for GPU driver cleanup...
+2026-11-03 00:08:20.268 [Info] (Router) Evicted model: Whisper-Large-v3-Turbo
+2026-11-03 00:08:20.268 [Info] (Server) Model 'Whisper-Large-v3-Turbo' unloaded successfully
+2026-11-03 00:08:20.294 [Info] (Server) Ensuring model loaded: Whisper-Large-v3-Turbo 
+2026-11-03 00:08:20.296 lemond[45287:3915803] [Metal] Detected device: Apple M3 Pro
+2026-11-03 00:08:20.296 [Info] (Router) Auto-tune ctx_size resolved to 7897
+2026-11-03 00:08:20.297 [Info] (WhisperServer) Loading model: Whisper-Large-v3-Turbo
+2026-11-03 00:08:20.297 [Info] (WhisperServer) Per-model settings: whispercpp_backend=metal, whispercpp_args=--convert -t 8, merge_args=true, auto_evict=(none), evict_idle_timeout=300, downsize_idle_timeout=60, evict_weight_factor=1.000000, pinned=false, auto_update=(none)
+2026-11-03 00:08:20.440 [Info] (WhisperServer) Using model: /tmp/rs16/hf/hub/models--ggerganov--whisper.cpp/snapshots/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin
+2026-11-03 00:08:20.440 [Info] (WhisperServer) Using backend: metal
+2026-11-03 00:08:20.441 [Info] (WhisperServer) Starting server on port 8002
+2026-11-03 00:08:20.441 [Info] (ServerProcess) Started /tmp/rs16/cache/bin/whispercpp/metal/whisper-server (PID 55474)
+Waiting for whisper-server to be ready (timeout: 600s)...
+2026-11-03 00:08:21.468 [Info] (WrappedServer) whisper-server is ready at http://127.0.0.1:8002
+2026-11-03 00:08:21.468 [Info] (BackendWatchdog) Started watchdog for whisper-server using http://127.0.0.1:8002/health (streaming=on, non_streaming=on)
+2026-11-03 00:08:21.468 [Info] (Router) Model loaded successfully. Total loaded: 2
+2026-11-03 00:08:48.819 [Info] (Server) Unload request received
+2026-11-03 00:08:48.820 [Info] (Router) Unload model called: Whisper-Large-v3-Turbo
+2026-11-03 00:08:48.820 [Info] (Router) Evicting model: Whisper-Large-v3-Turbo
+2026-11-03 00:08:48.821 [Info] (ServerProcess) Stopping /tmp/rs16/cache/bin/whispercpp/metal/whisper-server (PID 55474)
+2026-11-03 00:08:49.340 [Info] (ProcessManager) Process terminated, waiting for GPU driver cleanup...
+2026-11-03 00:08:51.346 [Info] (Router) Evicted model: Whisper-Large-v3-Turbo
+2026-11-03 00:08:51.346 [Info] (Server) Model 'Whisper-Large-v3-Turbo' unloaded successfully
+2026-11-03 00:08:51.363 [Info] (Server) Ensuring model loaded: Whisper-Large-v3-Turbo 
+2026-11-03 00:08:51.367 lemond[45287:3915811] [Metal] Detected device: Apple M3 Pro
+2026-11-03 00:08:51.367 [Info] (Router) Auto-tune ctx_size resolved to 6492
+2026-11-03 00:08:51.368 [Info] (WhisperServer) Loading model: Whisper-Large-v3-Turbo
+2026-11-03 00:08:51.368 [Info] (WhisperServer) Per-model settings: whispercpp_backend=metal, whispercpp_args=--convert -t 4, merge_args=true, auto_evict=(none), evict_idle_timeout=300, downsize_idle_timeout=60, evict_weight_factor=1.000000, pinned=false, auto_update=(none)
+2026-11-03 00:08:51.537 [Info] (WhisperServer) Using model: /tmp/rs16/hf/hub/models--ggerganov--whisper.cpp/snapshots/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin
+2026-11-03 00:08:51.537 [Info] (WhisperServer) Using backend: metal
+2026-11-03 00:08:51.537 [Info] (WhisperServer) Starting server on port 8002
+2026-11-03 00:08:51.538 [Info] (ServerProcess) Started /tmp/rs16/cache/bin/whispercpp/metal/whisper-server (PID 56636)
+Waiting for whisper-server to be ready (timeout: 600s)...
+2026-11-03 00:08:52.675 [Info] (WrappedServer) whisper-server is ready at http://127.0.0.1:8002
+2026-11-03 00:08:52.676 [Info] (BackendWatchdog) Started watchdog for whisper-server using http://127.0.0.1:8002/health (streaming=on, non_streaming=on)
+2026-11-03 00:08:52.676 [Info] (Router) Model loaded successfully. Total loaded: 2
+2026-11-03 00:09:33.605 [Error] (Server) Error 401: GET /api/v1/models
+2026-11-03 00:09:33.608 [Error] (Server) Error 401: GET /api/v1/models
+2026-11-03 00:10:11.333 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:10:11.333 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+2026-11-03 00:10:11.333 [Warn] (Router) Pruning unavailable backend for model: Whisper-Large-v3-Turbo (state=exited)
+2026-11-03 00:10:11.333 [Info] (Router) Evicting model: Whisper-Large-v3-Turbo
+2026-11-03 00:10:11.333 [Error] (ServerProcess) /tmp/rs16/cache/bin/whispercpp/metal/whisper-server (PID 56636) had exited with code 1
+2026-11-03 00:10:11.334 [Info] (Router) Evicted model: Whisper-Large-v3-Turbo
+2026-11-03 00:10:11.334 [Info] (Server) Auto-loading model: Whisper-Large-v3-Turbo
+2026-11-03 00:10:11.338 lemond[45287:3915827] [Metal] Detected device: Apple M3 Pro
+2026-11-03 00:10:11.338 [Info] (Router) Auto-tune ctx_size resolved to 6492
+2026-11-03 00:10:11.340 [Info] (WhisperServer) Loading model: Whisper-Large-v3-Turbo
+2026-11-03 00:10:11.340 [Info] (WhisperServer) Per-model settings: whispercpp_backend=metal, whispercpp_args=--convert, merge_args=true, auto_evict=(none), evict_idle_timeout=300, downsize_idle_timeout=60, evict_weight_factor=1.000000, pinned=false, auto_update=(none)
+2026-11-03 00:10:11.836 [Info] (WhisperServer) Using model: /tmp/rs16/hf/hub/models--ggerganov--whisper.cpp/snapshots/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin
+2026-11-03 00:10:11.836 [Info] (WhisperServer) Using backend: metal
+2026-11-03 00:10:11.837 [Info] (WhisperServer) Starting server on port 8003
+2026-11-03 00:10:11.838 [Info] (ServerProcess) Started /tmp/rs16/cache/bin/whispercpp/metal/whisper-server (PID 57709)
+Waiting for whisper-server to be ready (timeout: 600s)...
+2026-11-03 00:10:13.169 [Info] (WrappedServer) whisper-server is ready at http://127.0.0.1:8003
+2026-11-03 00:10:13.169 [Info] (BackendWatchdog) Started watchdog for whisper-server using http://127.0.0.1:8003/health (streaming=on, non_streaming=on)
+2026-11-03 00:10:13.170 [Info] (Router) Model loaded successfully. Total loaded: 2
+2026-11-03 00:10:13.170 [Info] (Server) Model loaded successfully: Whisper-Large-v3-Turbo
+2026-11-03 00:10:15.524 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:10:15.524 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+2026-11-03 00:10:18.088 [Info] (Server) POST /api/v1/audio/transcriptions
+2026-11-03 00:10:18.088 [Info] (Server) Audio file: SHORT.webm (15492 bytes)
+Shutdown signal received, exiting...
+ 2026-11-03 00:16:14.574 [Info] (Server) Shutdown requested, stopping server...
+2026-11-03 00:16:14.575 [Info] (Server) Stopping HTTP server...
+2026-11-03 00:16:14.575 [Info] (Server) Stopping WebSocket server...
+2026-11-03 00:16:14.597 [Info] (WebSocket) Server stopped
+2026-11-03 00:16:14.597 [Info] (Server) Unloading models and stopping backend servers...
+2026-11-03 00:16:14.601 [Info] (Router) Unload all models called
+2026-11-03 00:16:14.601 [Info] (Router) Evicting all models (2 total)
+2026-11-03 00:16:14.601 [Info] (Router) Evicting model: kokoro-v1
+2026-11-03 00:16:14.603 [Info] (ServerProcess) Stopping /tmp/rs16/cache/bin/kokoro/metal/koko (PID 46791)
+2026-11-03 00:16:14.709 [Info] (ProcessManager) Process terminated, waiting for GPU driver cleanup...
+2026-11-03 00:16:16.744 [Info] (Router) Evicted model: kokoro-v1
+2026-11-03 00:16:16.744 [Info] (Router) Evicting model: Whisper-Large-v3-Turbo
+2026-11-03 00:16:16.744 [Info] (ServerProcess) Stopping /tmp/rs16/cache/bin/whispercpp/metal/whisper-server (PID 57709)
+2026-11-03 00:16:17.261 [Info] (ProcessManager) Process terminated, waiting for GPU driver cleanup...
+2026-11-03 00:16:19.294 [Info] (Router) Evicted model: Whisper-Large-v3-Turbo
+2026-11-03 00:16:19.305 [Info] (Router) Evict all completed. Remaining tombstoned models: 0
+2026-11-03 00:16:19.319 [Info] (Server) Shutting down telemetry queue...
+2026-11-03 00:16:19.324 [Info] (Server) Cleanup complete
+2026-11-03 00:16:26.114 [Info] (Router) Unload all models called
+2026-11-03 00:16:26.114 [Info] (Router) Evicting all models (0 total)
+2026-11-03 00:16:26.114 [Info] (Router) Evict all completed. Remaining tombstoned models: 0

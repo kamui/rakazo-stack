@@ -1,0 +1,9 @@
+label=mac-default base=http://127.0.0.1:13305/api/v1 runs=5 out=/tmp/rs16/bench/out-default
+tts  SHORT  words= 11 audio= 3.85s  ttfb_median=0.784s total_median=0.784s
+tts  MEDIUM words= 34 audio=11.47s  ttfb_median=2.216s total_median=2.217s
+tts  LONG   words= 95 audio=32.17s  ttfb_median=6.624s total_median=6.626s
+stt  SHORT  webm  total_median=2.504s  text=Sure, I've added that to your calendar for tomorrow at 9.
+stt  MEDIUM webm  total_median=2.435s  text=I checked your inbox and found three new messages.
+ One is from the landlord about the lea
+stt  LONG   webm  total_median=4.242s  text=Here's a quick summary of the week. On Monday you have the
+ team planning meeting at 10, f
