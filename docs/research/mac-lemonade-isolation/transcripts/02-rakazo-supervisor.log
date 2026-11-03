@@ -1,0 +1,64 @@
+# Throwaway Compose project rs25-mini (mini/compose.yaml): Rakazo v0.4.0 supervisor (ghcr.io/elie222/rakazo/app:v0.4.0,
+# computer image ghcr.io/elie222/rakazo/computer:v0.4.0), the egress sidecar from Rakazo's docs ("Docker in a Linux VM")
+# running the unmodified v0.4.0 restrict-computer-egress.sh, and an alpine "relay-standin" on an ordinary Compose network.
+# Same Mac and Docker Desktop 4.97.0 as 01. Listener on the Mac's 127.0.0.1:18925. Supervisor token generated per run, not shown.
+# Computers created and probed with compose-boot's computer-probe.sh (TCP connect, 3 s timeout, via the supervisor's exec API).
+
+## 1. SANDBOX_COMPUTER_EGRESS unset -> compose default auto
+up -d --wait: computer-egress healthy, data-init exited 0, supervisor healthy, relay-standin up
+supervisor log: {"level":"info","message":"supervisor listening","http.host":"0.0.0.0","http.port":7091}
+supervisor log: {"level":"info","message":"restricted computer egress verified"}
+
+computer-probe.sh create rs25bot rs25space
+200 {"id":"24c6d121…","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":false}
+network rakazo-computer-rs25bot-596a7b041f10f980f996f431d5dfa4ec: bridge name rakazo-c596a7b0, internal=false
+
+computer-probe.sh probe (from inside the real bot computer)
+host.docker.internal:18925         resolves=fdc4:f303:9324::254 timeout
+192.168.65.254:18925               resolves=-               timeout
+host.docker.internal:7091          resolves=fdc4:f303:9324::254 timeout
+169.254.169.254:80                 resolves=-               timeout
+1.1.1.1:443                        resolves=1.1.1.1         open
+example.com:443                    resolves=2606:4700:10::ac42:93f3 open
+github.com:22                      resolves=140.82.114.4    open
+supervisor:7091                    resolves=-               refused/unresolved
+relay-standin:80                   resolves=-               refused/unresolved
+--- relay stand-in (ordinary compose network)
+wget http://host.docker.internal:18925/ -> ok (open)
+
+Docker Desktop internal endpoints from the computer (all timeout):
+http.docker.internal:3128 gateway.docker.internal:53 gateway.docker.internal:80 vm.docker.internal:22
+192.168.65.1:3128 192.168.65.1:53 192.168.65.7:53
+(relay-standin -> 192.168.65.1:3128: open)
+
+## 2. Docker Desktop restart (docker desktop restart)
+restart policies: computer-egress unless-stopped, computer RestartPolicy=no
+after restart: computer-egress Up (healthy); supervisor, relay-standin, rakazo-bot-rs25bot exited
+VM DOCKER-USER rakazo-c rules after restart (sidecar re-applied): 12; INPUT:
+-A INPUT -i rakazo-c+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -i rakazo-c+ -j DROP
+
+sidecar stopped, docker desktop restart again:
+rakazo-c rules after VM restart without sidecar: 0
+
+## 3. Boot order after a restart with supervisor restart: unless-stopped (as upstream), auto
+docker desktop restart; both containers start from their restart policies (Compose depends_on is not consulted)
+computer-egress  06:18:40.505 apk "OK: 20.4 MiB in 24 packages" (rules applied right after)
+supervisor       06:18:47.625 "restricted computer egress verified"
+(the supervisor probes after its computer-image check; here it lost the race by 7 s, which is luck, not ordering)
+computer-probe.sh create rs25bot -> 200 {"resumed":true,"started":true}
+host.docker.internal:18925 timeout, 192.168.65.254:18925 timeout, 1.1.1.1:443 open
+
+## 4. SANDBOX_COMPUTER_EGRESS=restricted with the rules missing (fail closed)
+sidecar stopped; restrict-computer-egress.sh --remove -> "v4 left: 0"
+SANDBOX_COMPUTER_EGRESS=restricted up -d --no-deps supervisor
+computer-probe.sh create rs25bot2 ->
+500 {"error":"SANDBOX_COMPUTER_EGRESS=restricted is not enforced on this Docker host: run infra/compose/restrict-computer-egress.sh on the host, or set SANDBOX_COMPUTER_EGRESS=open (see docs/self-host-docker-computers.md) (a computer bridge reached the host)"}
+sidecar started again (supervisor not restarted); 12 s later:
+computer-probe.sh create rs25bot2 -> 200 {"resumed":false}
+host.docker.internal:18925 timeout, 1.1.1.1:443 open
+
+## Cleanup
+computers deleted (200), rules removed (v4 left: 0, v6 left: 0), down -v, per-bot networks removed,
+images removed (app, computer, busybox, alpine), listener stopped, Docker Desktop stopped again
+(it was not running before the test).

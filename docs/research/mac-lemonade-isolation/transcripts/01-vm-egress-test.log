@@ -1,0 +1,69 @@
+# vm-egress-test.sh on an Apple-silicon Mac, macOS 27.2, Docker Desktop 4.97.0 (Engine 29.9.2, API 1.56),
+# default Docker Desktop settings. Script: Rakazo v0.4.0 infra/compose/restrict-computer-egress.sh with
+# BRIDGE_PREFIX changed to "rs25t-c" so the rules match only the test bridge. Listener: python3 http.server
+# on the Mac's 127.0.0.1:18925 (stands in for lemond's child servers, which bind 127.0.0.1 the same way).
+# "blocked/failed (0s)" = refused at once; "(3s)/(4s)" = timed out (dropped).
+
+## Docker: 29.9.2 API 1.56
+## VM firewall before (host-network container)
+iptables: iptables v1.8.13 (nf_tables)
+-N DOCKER-USER
+-A DOCKER-USER -i eth0 -j ACCEPT
+-A DOCKER-USER -i eth1 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 3128 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 5555 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 53 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -j REJECT --reject-with icmp-port-unreachable
+ip6tables:
+-N DOCKER-USER
+-A DOCKER-USER -i eth0 -j ACCEPT
+-A DOCKER-USER -i eth1 -j ACCEPT
+legacy tables present: 0 lines
+global IPv6 in VM: 2
+## Before rules: computer-like network (bridge rs25t-c0)
+  host.docker.internal -> fdc4:f303:9324::254
+  http://host.docker.internal:18925 (Mac 127.0.0.1 listener): open (0s)
+  http://192.168.65.254:18925 (by IPv4): open (0s)
+  bridge gateway 172.18.0.1:22: blocked/failed (0s)
+  1.1.1.1:443 (internet): open (1s)
+  example.com:443 (DNS + internet): open (0s)
+  ipv6 addrs:
+## Before rules: relay-like network (br-*)
+  host.docker.internal -> fdc4:f303:9324::254
+  http://host.docker.internal:18925 (Mac 127.0.0.1 listener): open (0s)
+  http://192.168.65.254:18925 (by IPv4): open (0s)
+  bridge gateway 172.19.0.1:22: blocked/failed (0s)
+  1.1.1.1:443 (internet): open (0s)
+  example.com:443 (DNS + internet): open (0s)
+  ipv6 addrs:
+## Apply rules (restrict-computer-egress.sh --apply, prefix rs25t-c)
+applied
+-A DOCKER-USER -i rs25t-c+ -o rs25t-c+ -j RETURN
+-A DOCKER-USER -d 0.0.0.0/8 -i rs25t-c+ -j DROP
+-A DOCKER-USER -d 10.0.0.0/8 -i rs25t-c+ -j DROP
+-A DOCKER-USER -d 100.64.0.0/10 -i rs25t-c+ -j DROP
+...
+-A DOCKER-USER -i rs25t-c+ -o rs25t-c+ -j RETURN
+-A DOCKER-USER -d ::1/128 -i rs25t-c+ -j DROP
+-A DOCKER-USER -d fc00::/7 -i rs25t-c+ -j DROP
+## After rules: computer-like network (bridge rs25t-c0)
+  host.docker.internal -> fdc4:f303:9324::254
+  http://host.docker.internal:18925 (Mac 127.0.0.1 listener): blocked/failed (4s)
+  http://192.168.65.254:18925 (by IPv4): blocked/failed (4s)
+  bridge gateway 172.18.0.1:22: blocked/failed (3s)
+  1.1.1.1:443 (internet): open (0s)
+  example.com:443 (DNS + internet): open (0s)
+  ipv6 addrs:
+## After rules: relay-like network (br-*)
+  host.docker.internal -> fdc4:f303:9324::254
+  http://host.docker.internal:18925 (Mac 127.0.0.1 listener): open (0s)
+  http://192.168.65.254:18925 (by IPv4): open (0s)
+  bridge gateway 172.19.0.1:22: blocked/failed (0s)
+  1.1.1.1:443 (internet): open (0s)
+  example.com:443 (DNS + internet): open (0s)
+  ipv6 addrs:
+## cleanup
+rules left (v4):
+0
+rules left (v6):
+0

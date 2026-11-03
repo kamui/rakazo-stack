@@ -1,0 +1,58 @@
+# Throwaway: Rakazo v0.4.0 supervisor only, plus the egress sidecar from Rakazo's
+# docs/self-host-docker-computers.md ("Docker in a Linux VM"), on Docker Desktop for Mac.
+name: rs25-mini
+services:
+  computer-egress:
+    image: alpine:3
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW]
+    restart: unless-stopped
+    volumes:
+      - ./restrict-computer-egress.sh:/restrict-computer-egress.sh:ro
+    command: >-
+      sh -c "apk add --no-cache bash iptables ip6tables &&
+      while true; do bash /restrict-computer-egress.sh --apply; touch /tmp/applied; sleep 60; done"
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/applied"]
+      interval: 2s
+      retries: 60
+  data-init:
+    image: busybox:1
+    command: ["chown", "-R", "1000:1000", "/data"]
+    network_mode: none
+    restart: "no"
+    volumes:
+      - appdata:/data
+  supervisor:
+    image: ghcr.io/elie222/rakazo/app:v0.4.0
+    command: ["pnpm", "--filter", "@rakazo/sandbox-supervisor", "start"]
+    restart: unless-stopped
+    init: true
+    user: root
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      NODE_ENV: production
+      DATA_DIR: /data
+      SUPERVISOR_HOST: "0.0.0.0"
+      SUPERVISOR_PORT: "7091"
+      DOCKER_SOCKET: /var/run/docker.sock
+      RAKAZO_COMPUTER_IMAGE: ghcr.io/elie222/rakazo/computer:v0.4.0
+      SANDBOX_SUPERVISOR_TOKEN: ${SANDBOX_SUPERVISOR_TOKEN:?}
+      SANDBOX_SCREEN_NETWORK: isolated
+      SANDBOX_COMPUTER_EGRESS: ${SANDBOX_COMPUTER_EGRESS:-auto}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - appdata:/data
+    networks: [app]
+    depends_on:
+      computer-egress: {condition: service_healthy}
+      data-init: {condition: service_completed_successfully}
+  # Stand-in for lemonade-relay: an ordinary Compose network, not a rakazo-c* bridge.
+  relay-standin:
+    image: alpine:3
+    command: ["sleep", "infinity"]
+    networks: [app]
+networks:
+  app: {}
+volumes:
+  appdata: {}
