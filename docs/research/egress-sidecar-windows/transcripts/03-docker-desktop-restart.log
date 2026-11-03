@@ -1,0 +1,54 @@
+# Docker Desktop restarts with the rs27-mini project from 02 running (SANDBOX_COMPUTER_EGRESS=restricted).
+# Restart command: Windows' own CLI, "C:\Program Files\Docker\Docker\resources\bin\docker.exe" desktop restart.
+# (The WSL distro's `docker desktop restart` fails here: it tries to start /opt/docker-desktop/bin/com.docker.backend,
+#  a Docker Desktop for Linux path, and leaves Docker Desktop running.)
+# Restart policies: computer-egress, supervisor, relay-standin, web unless-stopped; bot computers RestartPolicy=no.
+# after-restart.sh records container start times, the rule count (vm-rules.sh count), the supervisor's egress log
+# lines, then resumes the computer through the supervisor (no supervisor restart) and probes it.
+
+## 0. Two engine restarts not started by this test (08:34:17 and 08:34:54, while a question to the Self-hoster was open)
+sidecar "apk add" finished at 08:34:28 and 08:34:54; supervisor "supervisor listening" 08:34:31 and 08:34:56
+supervisor 08:35:03 "restricted computer egress verified"
+rakazo-bot-rs27bot exited 08:34:17 (exit 0; RestartPolicy=no)
+the supervisor's startup egress-probe container (created 08:34:31, computer image, no AutoRemove) was killed by the
+08:34:54 restart (exit 137) and left behind; found and removed during cleanup
+
+## 1. Restart with the sidecar running
+08:36:26 docker.exe desktop restart -> "Starting Docker Desktop" (returned 08:36:34)
+docker up: 08:36:44  engine 29.9.2
+  rs27-mini-computer-egress-1    running restarts=0 started=08:36:37.03
+  rs27-mini-supervisor-1         running restarts=0 started=08:36:37.08
+  rs27-mini-relay-standin-1      running restarts=0 started=08:36:37.03
+  rs27-mini-web-1                running restarts=0 started=08:36:37.03
+  rakazo-bot-rs27bot             exited  (RestartPolicy=no)
+  live Instance (rakazo-supervisor-1, rakazo-web-1, lemonade-server): running, started=08:36:37
+sidecar "apk add" OK 08:36:37.59
+rules at 08:36:45: rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+supervisor 08:36:40 "supervisor listening"; 08:36:47 "restricted computer egress verified"
+create (resume) rs27bot without restarting the supervisor:
+  200 {"id":"90ed918a…","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":true,"started":true}
+  host.docker.internal:18927         resolves=fdc4:f303:9324::254 timeout
+  host.docker.internal:5173          resolves=fdc4:f303:9324::254 timeout
+  192.168.65.254:3100                resolves=-               timeout
+  169.254.169.254:80                 resolves=-               timeout
+  1.1.1.1:443                        resolves=-               open
+  example.com:443                    resolves=2606:4700:10::6814:179a open
+relay-standin -> host.docker.internal:18927: ok
+
+## 2. Restart with the sidecar stopped
+compose stop computer-egress (stopping it leaves the rules in place: v4 14, v6 7)
+08:37:31 first attempt: WSL interop error "UtilAcceptVsock:271: accept4 failed 110", docker.exe never ran, nothing restarted
+08:38:08 docker.exe desktop restart -> "Starting Docker Desktop"; docker up 08:38:27
+  rs27-mini-computer-egress-1 exited (stopped by hand, so unless-stopped leaves it down)
+  rs27-mini-supervisor-1 running started=08:38:22
+rakazo-c+ rules: v4 0 (INPUT 0), v6 0          <- the rules do not survive a restart on their own
+supervisor 08:38:25 "supervisor listening"; 08:38:26 error "restricted computer egress unavailable"
+create (resume) rs27bot:
+500 {"error":"SANDBOX_COMPUTER_EGRESS=restricted is not enforced on this Docker host: run infra/compose/restrict-computer-egress.sh on the host, or set SANDBOX_COMPUTER_EGRESS=open (see docs/self-host-docker-computers.md) (a computer bridge reached the host)"}
+computer state: exited                          <- the existing computer is not resumed either
+
+compose start computer-egress (supervisor not restarted)
+08:38:51 rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+create (resume) rs27bot:
+200 {"id":"90ed918a…","resumed":true,"started":true}
+host.docker.internal:18927 timeout, host.docker.internal:5173 timeout, 1.1.1.1:443 open, example.com:443 open

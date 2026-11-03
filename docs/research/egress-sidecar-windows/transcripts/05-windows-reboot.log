@@ -1,0 +1,37 @@
+# Windows reboot (shutdown.exe /r), with the variant from 04 running: sidecar image rs27-egress:local (script built in,
+# no mounts) and the supervisor started by Compose run from Windows' docker.exe (docker.sock from Docker Desktop's
+# proxy). Control: rs27-canary, started from the WSL distro with a file bind-mounted from the distro, unless-stopped.
+# Docker Desktop AutoStart=true. The Startup-folder watcher had not fired two minutes after logon, so the state was read
+# directly with docker inspect; the hook was then deleted.
+
+Windows LastBootUpTime 09:15:43 UTC; engine restarted containers at 09:16:58-09:17:01
+
+rs27-canary                   exited exit=127 restarts=0
+  err=OCI runtime create failed: … error mounting "/run/desktop/mnt/host/wsl/docker-desktop-bind-mounts/Ubuntu/<hash>" …
+  (finished 09:16:58: the distro's bind-mount source was not there when the engine started containers)
+rs27-mini-computer-egress-1   running exit=0 restarts=0 started=09:17:01.40     (baked image, no mounts)
+rs27-mini-supervisor-1        running exit=0 restarts=0 started=09:17:01.34     (docker.sock from Docker Desktop's proxy)
+rs27-mini-relay-standin-1     running started=09:17:01.38
+rs27-mini-web-1               running started=09:17:01.25
+rakazo-bot-rs27bot            exited exit=0 (RestartPolicy=no)
+live Instance: rakazo-web-1, lemonade-server running from 09:17:01; rakazo-supervisor-1 (docker.sock bound from the
+  WSL distro) exited exit=127 with "failed to create task for container …" and stayed down until started by hand
+  (`docker start`, healthy afterwards)
+
+rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+supervisor 09:17:04 "supervisor listening"; 09:17:11 "restricted computer egress verified"
+
+Windows listener started again (win-listener.sh start)
+create (resume) rs27bot without restarting the supervisor:
+200 {"id":"90ed918a…","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":true,"started":true}
+host.docker.internal:18927         resolves=fdc4:f303:9324::254 timeout
+192.168.65.254:18927               resolves=-               timeout
+host.docker.internal:5173          resolves=fdc4:f303:9324::254 timeout
+host.docker.internal:3100          resolves=fdc4:f303:9324::254 timeout
+169.254.169.254:80                 resolves=-               timeout
+192.168.65.1:3128                  resolves=-               timeout
+1.1.1.1:443                        resolves=-               open
+example.com:443                    resolves=2606:4700:10::6814:179a open
+github.com:22                      resolves=140.82.114.4    open
+relay-standin -> host.docker.internal:18927: ok
+=> pass for the variant with no WSL bind mounts; the control and the live Instance's supervisor show the race.

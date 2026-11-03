@@ -1,0 +1,9 @@
+# Override for compose.yaml: the sidecar from a locally built image (egress.Dockerfile) instead of alpine:3 plus a
+# bind-mounted script. Used with `docker.exe compose` run from Windows, so docker.sock comes from Docker Desktop's
+# own proxy rather than the WSL distro.
+services:
+  computer-egress:
+    image: rs27-egress:local
+    pull_policy: never
+    volumes: !reset []
+    command: !reset null

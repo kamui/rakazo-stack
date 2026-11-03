@@ -1,0 +1,124 @@
+# Throwaway Compose project rs27-mini (mini/compose.yaml): Rakazo v0.4.0 supervisor (ghcr.io/elie222/rakazo/app:v0.4.0,
+# computer image ghcr.io/elie222/rakazo/computer:v0.4.0), the egress sidecar from Rakazo's docs ("Docker in a Linux VM")
+# running the unmodified v0.4.0 restrict-computer-egress.sh (sha256 c2802eef…c3), an alpine "relay-standin" and an alpine
+# "web" stand-in, both on an ordinary Compose network. SANDBOX_COMPUTER_EGRESS=restricted throughout.
+# Windows 11 (build 26300), Docker Desktop 4.97.0 (244584), Engine 29.9.2, WSL 2 backend, WSL networking mode nat.
+# Listener: Windows' python.exe http.server bound to Windows' 127.0.0.1:18927 (win-listener.sh). The live Instance's
+# web/api are published on Windows' 127.0.0.1:5173/3100. Supervisor token generated per run, not shown.
+# Computers created and probed with compose-boot's computer-probe.sh (TCP connect, 3 s timeout, via the supervisor's
+# exec API) and probe-all targets; machine-specific addresses replaced with <placeholders>.
+
+## 1. Boot with SANDBOX_COMPUTER_EGRESS=restricted
+up -d --wait: computer-egress healthy, data-init exited 0, supervisor healthy, relay-standin up (4 s)
+sidecar rules: rakazo-c+ v4 14 (12 DOCKER-USER + 2 INPUT), v6 7
+supervisor log 08:06:39 {"level":"info","message":"supervisor listening","http.port":7091}
+supervisor log 08:06:46 {"level":"info","message":"restricted computer egress verified"}
+
+computer-probe.sh create rs27bot rs27space
+200 {"id":"90ed918a…","image":"ghcr.io/elie222/rakazo/computer:v0.4.0","resumed":false}
+network rakazo-computer-rs27bot-6128c2c16527d0ca7bfb40703690a300: bridge name rakazo-c6128c2c, internal=false
+
+probe from inside the real bot computer
+host.docker.internal:18927         resolves=fdc4:f303:9324::254 timeout     (Windows 127.0.0.1 listener)
+192.168.65.254:18927               resolves=-               timeout
+host.docker.internal:5173          resolves=fdc4:f303:9324::254 timeout     (live Instance's published web)
+host.docker.internal:3100          resolves=fdc4:f303:9324::254 timeout     (live Instance's published api)
+192.168.65.254:5173                resolves=-               timeout
+192.168.65.254:3100                resolves=-               timeout
+host.docker.internal:7091          resolves=fdc4:f303:9324::254 timeout
+gateway.docker.internal:18927      resolves=fdc4:f303:9324::1 timeout
+<bridge gateway>:22                resolves=-               timeout
+<bridge gateway>:18927             resolves=-               timeout
+169.254.169.254:80                 resolves=-               timeout
+192.168.65.1:3128                  resolves=-               timeout     (Docker Desktop HTTP proxy)
+http.docker.internal:3128          resolves=fdc4:f303:9324::1 timeout
+192.168.65.7:53                    resolves=-               timeout     (Docker Desktop DNS, TCP)
+gateway.docker.internal:53         resolves=fdc4:f303:9324::1 timeout
+vm.docker.internal:22              resolves=fdc4:f303:9324::7 timeout
+192.168.65.3:2375                  resolves=-               timeout     (VM eth0)
+<WSL distro IP>:18928              resolves=-               timeout     (listener in the Ubuntu distro, 0.0.0.0)
+<WSL tailnet IP>:18928             resolves=-               timeout     (same listener via the distro's tailscale0)
+<host LAN IP>:445                  resolves=-               timeout
+<host LAN IP>:5173                 resolves=-               timeout
+<live api IP>:3100                 resolves=-               timeout     (live Instance's api container by IP)
+<live web IP>:5173                 resolves=-               timeout     (live Instance's web container by IP)
+<test supervisor IP>:7091          resolves=-               timeout
+<relay stand-in IP>:80             resolves=-               timeout
+supervisor:7091                    resolves=-               refused/unresolved
+1.1.1.1:443                        resolves=-               open
+example.com:443                    resolves=2606:4700:10::6814:179a open    (embedded DNS works)
+github.com:22                      resolves=140.82.114.4    timeout     (see SSH note below)
+
+SSH out (repeat probes)
+computer-probe.sh x3: github.com:22 open/timeout/timeout; 140.82.112.3:22 open x3; ssh.github.com:443 open x3; gitlab.com:22 open x3
+relay-standin (ordinary network, no rules) x3: github.com:22 fail x3; 140.82.112.3:22 open, open, fail; gitlab.com:22 open, fail, fail
+SSH banner (SSH-2.0) reads, 8 s timeout:
+  WSL distro github.com:22 10/10; WSL distro ssh.github.com:443 10/10; computer ssh.github.com:443 10/10
+  then, same method run at the same time: WSL distro 0/20, restricted computer 0/20, unrestricted computer image on default bridge 0/20
+=> port-22 failures hit the unrestricted container and the WSL distro as well (GitHub throttling this public IP after the
+   repeated probes); the rules do not block SSH. SSH banners from the restricted computer did succeed on :22 and :443.
+
+## 2. Relay path (relay-standin, ordinary Compose network, br-*)
+http://host.docker.internal:18927/       ok      (Windows 127.0.0.1 listener)
+http://supervisor:7091/health            ok
+supervisor:7091                          open
+1.1.1.1:443                              open
+
+rules in Docker Desktop's engine namespace (vm-rules.sh list):
+-A DOCKER-USER -i rakazo-c+ -o rakazo-c+ -j RETURN
+-A DOCKER-USER -d 0.0.0.0/8 -i rakazo-c+ -j DROP
+-A DOCKER-USER -d 10.0.0.0/8 -i rakazo-c+ -j DROP
+-A DOCKER-USER -d 100.64.0.0/10 -i rakazo-c+ -j DROP
+-A DOCKER-USER -d 127.0.0.0/8 -i rakazo-c+ -j DROP
+-A DOCKER-USER -d 169.254.0.0/16 -i rakazo-c+ -j DROP
+-A DOCKER-USER -d 172.16.0.0/12 -i rakazo-c+ -j DROP
+-A DOCKER-USER -d 192.0.0.0/24 -i rakazo-c+ -j DROP
+-A DOCKER-USER -d 192.168.0.0/16 -i rakazo-c+ -j DROP
+-A DOCKER-USER -d 198.18.0.0/15 -i rakazo-c+ -j DROP
+-A DOCKER-USER -d 224.0.0.0/4 -i rakazo-c+ -j DROP
+-A DOCKER-USER -d 240.0.0.0/4 -i rakazo-c+ -j DROP
+-A DOCKER-USER -i eth0 -j ACCEPT                                         (Docker Desktop's own rules from here down)
+-A DOCKER-USER -i eth1 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 3128 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 5555 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 53 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -j REJECT --reject-with icmp-port-unreachable
+-A INPUT -i rakazo-c+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -i rakazo-c+ -j DROP
+ip6tables DOCKER-USER: the same RETURN plus drops for ::1/128 fc00::/7 fe80::/10 ff00::/8
+
+## 3. Screens (network level; "web" is an alpine stand-in, not Rakazo's web app)
+screen-check.sh rs27bot rs27space
+GET /computers/rakazo-bot-rs27bot/screen -> 302
+screen URL shape: http://<computer IP>:6080/…
+containers on rakazo-computer-rs27bot-…: rs27-mini-web-1 rs27-mini-supervisor-1 rakazo-bot-rs27bot
+supervisor fetch: 200 8392 bytes html
+web stand-in fetch: 8400 bytes
+after the screen opened, from the computer:
+<supervisor IP on computer bridge>:7091   open       (same-bridge RETURN; supervisor API still needs its bearer token)
+<web IP on computer bridge>:22            refused
+host.docker.internal:18927                timeout
+
+## 4. Rules removed while the supervisor keeps running (restricted verdict already cached)
+compose stop computer-egress; vm-rules.sh remove -> rakazo-c+ rules: v4 0 (INPUT 0), v6 0
+computer-probe.sh create rs27bot2 -> 200 {"id":"2ea57c78…","resumed":false}   bridge name rakazo-cc9a4142
+host.docker.internal:18927         open       <- computer reaches Windows 127.0.0.1
+host.docker.internal:5173          open       <- and the published web port
+169.254.169.254:80                 refused/unresolved
+1.1.1.1:443                        open
+=> restricted checks once per supervisor lifetime (restrictedEgressVerified, index.ts L1224-L1253); it does not
+   re-check later provisions, so it fails closed only until the first pass.
+
+## 5. Supervisor restarted with the rules missing (fail closed)
+compose restart supervisor
+supervisor log 08:21:04 {"level":"error","message":"restricted computer egress unavailable","error":{"message":"SANDBOX_COMPUTER_EGRESS=restricted is not enforced on this Docker host: …"}}
+computer-probe.sh create rs27bot3 ->
+500 {"error":"SANDBOX_COMPUTER_EGRESS=restricted is not enforced on this Docker host: run infra/compose/restrict-computer-egress.sh on the host, or set SANDBOX_COMPUTER_EGRESS=open (see docs/self-host-docker-computers.md) (a computer bridge reached the host)"}
+
+## 6. Sidecar started again, supervisor NOT restarted
+08:21:28 compose start computer-egress; 08:21:29 rakazo-c+ rules: v4 14 (INPUT 2), v6 7
+computer-probe.sh create rs27bot3 -> 200 {"id":"59ee059f…","resumed":false}
+host.docker.internal:18927 timeout, host.docker.internal:5173 timeout, 1.1.1.1:443 open, example.com:443 open
+rs27bot2 (created in step 4 while the rules were missing; still running on its rakazo-c bridge):
+host.docker.internal:18927 timeout, host.docker.internal:5173 timeout, 1.1.1.1:443 open
+=> the rules key on the bridge name, so they cover computers created while they were missing as soon as they return.

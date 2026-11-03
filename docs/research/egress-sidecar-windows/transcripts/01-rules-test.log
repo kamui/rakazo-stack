@@ -1,0 +1,162 @@
+## Docker: Desktop Docker Desktop 4.97.0 (244584) / Engine 29.9.2 API 1.56
+## WSL networking mode: nat
+## VM firewall before (host-network container)
+iptables: iptables v1.8.13 (nf_tables)
+DOCKER-USER v4:
+-N DOCKER-USER
+-A DOCKER-USER -i eth0 -j ACCEPT
+-A DOCKER-USER -i eth1 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 3128 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 5555 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 53 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -j REJECT --reject-with icmp-port-unreachable
+DOCKER-USER v6:
+-N DOCKER-USER
+-A DOCKER-USER -i eth0 -j ACCEPT
+-A DOCKER-USER -i eth1 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 3128 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 5555 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 53 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -j REJECT --reject-with icmp6-port-unreachable
+INPUT v4:
+-P INPUT ACCEPT
+## Before rules: computer-like network (bridge rs27t-c0)
+  host.docker.internal -> fdc4:f303:9324::254 
+  host.docker.internal:18927 (Windows 127.0.0.1 listener) open
+  <host.docker.internal IPv4>:18927                    open
+  host.docker.internal:5173 (published web)            open
+  host.docker.internal:3100 (published api)            open
+  <host.docker.internal IPv4>:5173                     open
+  gateway.docker.internal:18927                        timeout
+  <bridge gateway>:22                                  refused
+  <bridge gateway>:18927                               refused
+  169.254.169.254:80 (metadata)                        refused
+  192.168.65.1:3128 (DD http proxy)                    open
+  http.docker.internal:3128                            open
+  192.168.65.7:53 (DD DNS, tcp)                        open
+  <WSL distro eth0>:18928 (WSL listener)               open
+  1.1.1.1:443 (internet)                               open
+  example.com:443 (DNS + internet)                     open
+  github.com:22 (SSH out)                              open
+  <WSL tailnet IP>:18928                               open
+  <live api container IP>:3100                         open
+  <live web container IP>:5173                         open
+  <host LAN IP>:5173                                   refused
+  <host LAN IP>:445                                    open
+  DNS lookup example.com (embedded DNS)                ok
+## Before rules: relay-like network (br-*)
+  host.docker.internal -> fdc4:f303:9324::254 
+  host.docker.internal:18927 (Windows 127.0.0.1 listener) open
+  <host.docker.internal IPv4>:18927                    open
+  host.docker.internal:5173 (published web)            open
+  host.docker.internal:3100 (published api)            open
+  <host.docker.internal IPv4>:5173                     open
+  gateway.docker.internal:18927                        timeout
+  <bridge gateway>:22                                  refused
+  <bridge gateway>:18927                               refused
+  169.254.169.254:80 (metadata)                        refused
+  192.168.65.1:3128 (DD http proxy)                    open
+  http.docker.internal:3128                            open
+  192.168.65.7:53 (DD DNS, tcp)                        open
+  <WSL distro eth0>:18928 (WSL listener)               open
+  1.1.1.1:443 (internet)                               open
+  example.com:443 (DNS + internet)                     open
+  github.com:22 (SSH out)                              timeout
+  <WSL tailnet IP>:18928                               open
+  <live api container IP>:3100                         open
+  <live web container IP>:5173                         open
+  <host LAN IP>:5173                                   refused
+  <host LAN IP>:445                                    open
+  DNS lookup example.com (embedded DNS)                ok
+## Apply rules (restrict-computer-egress.sh --apply, prefix rs27t-c)
+applied
+## VM firewall after
+iptables: iptables v1.8.13 (nf_tables)
+DOCKER-USER v4:
+-N DOCKER-USER
+-A DOCKER-USER -i rs27t-c+ -o rs27t-c+ -j RETURN
+-A DOCKER-USER -d 0.0.0.0/8 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d 10.0.0.0/8 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d 100.64.0.0/10 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d 127.0.0.0/8 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d 169.254.0.0/16 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d 172.16.0.0/12 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d 192.0.0.0/24 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d 192.168.0.0/16 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d 198.18.0.0/15 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d 224.0.0.0/4 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d 240.0.0.0/4 -i rs27t-c+ -j DROP
+-A DOCKER-USER -i eth0 -j ACCEPT
+-A DOCKER-USER -i eth1 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 3128 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 5555 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 53 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -j REJECT --reject-with icmp-port-unreachable
+DOCKER-USER v6:
+-N DOCKER-USER
+-A DOCKER-USER -i rs27t-c+ -o rs27t-c+ -j RETURN
+-A DOCKER-USER -d ::1/128 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d fc00::/7 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d fe80::/10 -i rs27t-c+ -j DROP
+-A DOCKER-USER -d ff00::/8 -i rs27t-c+ -j DROP
+-A DOCKER-USER -i eth0 -j ACCEPT
+-A DOCKER-USER -i eth1 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 3128 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 5555 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -m tcp --dport 53 -j ACCEPT
+-A DOCKER-USER ! -i eth0 -o services1 -p tcp -j REJECT --reject-with icmp6-port-unreachable
+INPUT v4:
+-P INPUT ACCEPT
+-A INPUT -i rs27t-c+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -i rs27t-c+ -j DROP
+## After rules: computer-like network (bridge rs27t-c0)
+  host.docker.internal -> fdc4:f303:9324::254 
+  host.docker.internal:18927 (Windows 127.0.0.1 listener) timeout
+  <host.docker.internal IPv4>:18927                    timeout
+  host.docker.internal:5173 (published web)            timeout
+  host.docker.internal:3100 (published api)            timeout
+  <host.docker.internal IPv4>:5173                     timeout
+  gateway.docker.internal:18927                        timeout
+  <bridge gateway>:22                                  timeout
+  <bridge gateway>:18927                               timeout
+  169.254.169.254:80 (metadata)                        timeout
+  192.168.65.1:3128 (DD http proxy)                    timeout
+  http.docker.internal:3128                            timeout
+  192.168.65.7:53 (DD DNS, tcp)                        timeout
+  <WSL distro eth0>:18928 (WSL listener)               timeout
+  1.1.1.1:443 (internet)                               open
+  example.com:443 (DNS + internet)                     open
+  github.com:22 (SSH out)                              open
+  <WSL tailnet IP>:18928                               timeout
+  <live api container IP>:3100                         timeout
+  <live web container IP>:5173                         timeout
+  <host LAN IP>:5173                                   timeout
+  <host LAN IP>:445                                    timeout
+  DNS lookup example.com (embedded DNS)                ok
+## After rules: relay-like network (br-*)
+  host.docker.internal -> fdc4:f303:9324::254 
+  host.docker.internal:18927 (Windows 127.0.0.1 listener) open
+  <host.docker.internal IPv4>:18927                    open
+  host.docker.internal:5173 (published web)            open
+  host.docker.internal:3100 (published api)            open
+  <host.docker.internal IPv4>:5173                     open
+  gateway.docker.internal:18927                        timeout
+  <bridge gateway>:22                                  refused
+  <bridge gateway>:18927                               refused
+  169.254.169.254:80 (metadata)                        refused
+  192.168.65.1:3128 (DD http proxy)                    open
+  http.docker.internal:3128                            open
+  192.168.65.7:53 (DD DNS, tcp)                        open
+  <WSL distro eth0>:18928 (WSL listener)               open
+  1.1.1.1:443 (internet)                               open
+  example.com:443 (DNS + internet)                     open
+  github.com:22 (SSH out)                              open
+  <WSL tailnet IP>:18928                               open
+  <live api container IP>:3100                         open
+  <live web container IP>:5173                         open
+  <host LAN IP>:5173                                   refused
+  <host LAN IP>:445                                    open
+  DNS lookup example.com (embedded DNS)                ok
+## cleanup
+rs27t rules left (v4, any chain or table): 0
+rs27t rules left (v6, any chain or table): 0

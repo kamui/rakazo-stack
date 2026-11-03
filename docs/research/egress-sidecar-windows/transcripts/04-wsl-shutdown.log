@@ -1,0 +1,51 @@
+# `wsl --shutdown` with the rs27-mini project from 02 running, Compose run from the Ubuntu WSL distro
+# (sidecar = alpine:3 + the script bind-mounted from the distro; supervisor's /var/run/docker.sock also from the distro).
+# Shutdown 1 was run by windows-watch.ps1 -Mode WslShutdown (log below). Shutdown 2 was run by the Self-hoster by hand
+# about 16 minutes later; its result was read afterwards with after-restart.sh and docker inspect.
+
+## Shutdown 1 (windows-watch.ps1 log, UTC)
+08:46:54 distros before: * Ubuntu Running 2; docker-desktop Running 2
+08:46:54 wsl --shutdown
+08:47:03 wsl --shutdown returned; distros: * Ubuntu Running 2; docker-desktop Stopped 2
+         (Ubuntu was already running again 9 s later; most likely the T3 Code desktop app reconnecting to it)
+08:47:12 engine up: 29.9.2; distros: * Ubuntu Running 2; docker-desktop Running 2
+08:47:13 rules: v4 14 (INPUT 2), v6 7
+08:47:13 rs27-mini-computer-egress-1    running restarts=0 started=08:47:11.09
+08:47:13 rs27-mini-supervisor-1         running restarts=0 started=08:47:11.07
+08:47:13 rs27-mini-relay-standin-1      running restarts=0 started=08:47:11.09
+08:47:13 rs27-mini-web-1                running restarts=0 started=08:47:11.04
+08:47:13 rakazo-bot-rs27bot             exited exit=255 (killed by the shutdown; RestartPolicy=no)
+08:47:14 live Instance (rakazo-supervisor-1, rakazo-web-1, lemonade-server): running, started=08:47:11
+supervisor 08:47:13 "supervisor listening"; 08:47:21 "restricted computer egress verified"
+=> pass, because the distro was back before the engine restarted containers
+
+## Shutdown 2 (Self-hoster, ~09:03 UTC; T3 Code reopened afterwards)
+engine restarted containers at 09:03:32-34
+rs27-mini-computer-egress-1  exited exit=127 restarts=0 policy=unless-stopped
+  err=OCI runtime create failed: … error mounting "/run/desktop/mnt/host/wsl/docker-desktop-bind-mounts/Ubuntu/<hash>"
+      to rootfs at "/restrict-computer-egress.sh": … not a directory: Are you trying to mount a directory onto a file …
+rs27-mini-supervisor-1       exited exit=127 restarts=0 policy=unless-stopped
+  err=OCI runtime create failed: … error mounting "/run/desktop/mnt/host/wsl/docker-desktop-bind-mounts/Ubuntu/docker.sock"
+      to rootfs at "/var/run/docker.sock": … not a directory …
+rs27-mini-relay-standin-1, rs27-mini-web-1 (no bind mounts): running, started=09:03:34
+live Instance: api, worker, web, postgres, lemonade, honcho running from 09:03:34; its supervisor (same
+  /var/run/docker.sock bind from the distro) was found recreated at 09:05:03, not restarted in place
+09:10:56 rakazo-c+ rules: v4 0 (INPUT 0), v6 0     <- no sidecar, no rules; Docker never retried the failed starts
+=> the sidecar did not come back. Fail closed held only because the test supervisor failed the same way.
+
+## Where the mounts come from (containers started from each CLI, /proc/<pid>/mountinfo root of /var/run/docker.sock)
+started from Windows' docker.exe:   root=/host-services/docker.proxy.sock   (Docker Desktop's own proxy, inside its VM)
+started from the WSL distro:        root=/docker.sock under docker-desktop-bind-mounts/Ubuntu (the distro's socket)
+Bind-mounted files from a WSL path are likewise served from docker-desktop-bind-mounts/<distro>/…, which exists only
+while that distro is running and Docker Desktop's integration has attached it.
+
+## Variant for the reboot test (05): sidecar image with the script built in (mini/egress.Dockerfile, sha256 of the
+## script in the image c2802eef…c3), Compose run from Windows' docker.exe (mini/compose.baked.yaml override)
+docker.exe compose -p rs27-mini -f compose.yaml -f compose.baked.yaml up -d --force-recreate --wait  -> all healthy
+rs27-mini-computer-egress-1 image=rs27-egress:local, no mounts
+rs27-mini-supervisor-1 docker.sock root=/host-services/docker.proxy.sock
+rakazo-c+ rules: v4 14 (INPUT 2), v6 7; supervisor "restricted computer egress verified"
+create (resume) rs27bot -> 200 {"resumed":true,"started":true}
+host.docker.internal:18927 timeout, host.docker.internal:5173 timeout, 1.1.1.1:443 open, example.com:443 open
+SSH recheck from the restricted computer: github.com:22 banner SSH-2.0, ssh.github.com:443 banner SSH-2.0
+control: rs27-canary (alpine, restart unless-stopped, started from WSL with a file bind-mounted from the distro)
