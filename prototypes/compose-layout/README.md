@@ -9,7 +9,7 @@ Files:
 - `relay/lang-code-relay.ts`: the `lang_code` relay, now also adding Lemonade's API key.
 - `tailscale-serve.json`, `honcho/init.sql`: mounted config.
 
-Validated with `docker compose config` for every profile combination (dummy values). Not booted.
+Services are named after the app they run (`lemonade-relay` is the relay in front of Lemonade). Validated with `docker compose config` for every profile combination (dummy values). Not booted.
 
 ## Shape
 
@@ -17,9 +17,9 @@ One compose project. Setup writes `COMPOSE_FILE=rakazo.v0.4.0.images.yml:compose
 
 | Profile | Services | When |
 |---|---|---|
-| (always) | Rakazo's `postgres`, `migrate`, `supervisor`, `api`, `worker`, `web`; `voice-relay` | always |
+| (always) | Rakazo's `postgres`, `migrate`, `supervisor`, `api`, `worker`, `web`; `lemonade-relay` | always |
 | `lemonade` | `lemonade` (upstream image + ffmpeg, built locally) | Linux, Windows. On macOS Lemonade runs natively. |
-| `memory` | `honcho`, `honcho-deriver`, `honcho-db` (pgvector, pg17); no Redis (`CACHE_ENABLED=false`) | when a model provider key is given |
+| `honcho` | `honcho`, `honcho-deriver`, `honcho-db` (pgvector, Postgres 18); no Redis (`CACHE_ENABLED=false`) | when a model provider key is given |
 | `tailscale` | `tailscale` (userspace, Serve → `http://web:5173`) | when Tailscale access is chosen |
 
 ```mermaid
@@ -35,7 +35,7 @@ flowchart LR
     postgres
   end
   subgraph stack["network stack (internal, new)"]
-    relay["voice-relay"]; lemonade; honcho
+    relay["lemonade-relay"]; lemonade; honcho
   end
   subgraph hd["network honcho-data (internal, new)"]
     deriver["honcho-deriver"]; hdb["honcho-db"]
@@ -47,7 +47,7 @@ flowchart LR
   tailscale -->|Serve HTTPS 443| web
   web --> api
   api --- postgres
-  api & worker -->|http://voice-relay:13306/api/v1| relay
+  api & worker -->|http://lemonade-relay:13306/api/v1| relay
   api & worker -->|http://honcho:8000| honcho
   relay -->|Linux/Windows| lemonade
   relay -.->|macOS: host.docker.internal:13305| macLemonade
@@ -61,8 +61,8 @@ flowchart LR
 
 ## Rakazo settings setup writes (all via `.env`; upstream's file already passes them through)
 
-- `MCP_ALLOW_PRIVATE_ENDPOINT=true`, `RAKAZO_OPENAI_COMPAT_PRIVATE_HOSTS=voice-relay`
-- Owner's voice: Self-hosted, Server URL `http://voice-relay:13306/api/v1`
+- `MCP_ALLOW_PRIVATE_ENDPOINT=true`, `RAKAZO_OPENAI_COMPAT_PRIVATE_HOSTS=lemonade-relay`
+- Owner's voice: Self-hosted, Server URL `http://lemonade-relay:13306/api/v1`
 - Default Space memory: `http://honcho:8000` + Honcho admin JWT
 - New generated secrets: `LEMONADE_API_KEY`, `HONCHO_DB_PASSWORD`, `HONCHO_AUTH_JWT_SECRET` (+ admin JWT)
 - macOS: `LEMONADE_UPSTREAM=http://host.docker.internal:13305`
@@ -81,7 +81,7 @@ Sources: Rakazo v0.4.0 `infra/sandboxes/supervisor/src/computer-spec.ts` (per-bo
 
 ## Not checked yet (needs a boot)
 
-- Honcho v3.5.0 migrations and a memory round trip on pgvector pg17 (upstream tests only pg15).
+- Honcho v3.5.0 migrations and a memory round trip on pgvector Postgres 18 (upstream tests only Postgres 15).
 - Relay + key end to end (voice sample, transcription).
 - Tailscale container in userspace mode under Docker Desktop; Serve preserves the Host header (source says yes).
-- A bot computer really can't reach `voice-relay`, `honcho`, `honcho-db` (and on macOS gets 401 from Lemonade).
+- A bot computer really can't reach `lemonade-relay`, `honcho`, `honcho-db` (and on macOS gets 401 from Lemonade).
