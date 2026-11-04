@@ -1,0 +1,3 @@
+{"kind":"embeddings","calls":33,"errors":0,"providers":{"Azure":33},"efforts":{"none":33},"finish":{"none":33},"prompt":601,"cached":0,"completion":0,"reasoning":0,"cost":1.202e-05}
+{"kind":"honcho-chat","calls":32,"errors":0,"providers":{"BaseTen":1,"CoreWeave":2,"DeepInfra":3,"InferenceNet":4,"Makora":3,"Relace":13,"Wafer":6},"efforts":{"low":32},"finish":{"stop":16,"tool_calls":16},"prompt":105629,"cached":44288,"completion":2471,"reasoning":226,"cost":0.007373970799999999}
+{"kind":"rakazo-chat","calls":41,"errors":0,"providers":{"BaseTen":41},"efforts":{"high":41},"finish":{"stop":31,"tool_calls":10},"prompt":365406,"cached":23808,"completion":10917,"reasoning":1812,"cost":0.05741244}
