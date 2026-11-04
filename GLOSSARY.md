@@ -23,3 +23,11 @@ _Avoid_: Install dir, data dir
 **Backup**:
 One encrypted file holding everything needed to bring an Instance back, on the same machine or another. A database dump is one part of a Backup, not a Backup itself.
 _Avoid_: Snapshot, export, dump
+
+**Update**:
+Moving an Instance to the newest versions of rakazo-stack and its components.
+_Avoid_: Upgrade
+
+**Hold**:
+Keeping a component of an Instance at a version the Self-hoster chose, instead of the newest one.
+_Avoid_: Pin

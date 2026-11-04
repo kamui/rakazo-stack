@@ -9,7 +9,8 @@ Words like **Self-hoster** (you, the person running it) and **Instance** (your c
 ## What it is
 
 - **One setup command.** You run `rakazo-stack setup` and give it your keys. It creates all the passwords it needs, writes the settings, and starts everything.
-- **Official releases, not a fork.** It uses fixed versions of Rakazo, Lemonade and Honcho exactly as their makers publish them, and never changes their code.
+- **Official releases, not a fork.** It installs the newest stable releases of Rakazo, Lemonade and Honcho exactly as their makers publish them, and never changes their code.
+- **Updates when you say so.** `rakazo-stack update` moves everything to the newest releases. Nothing updates by itself.
 - **For one person on one computer.** It isn't a hosted service and isn't built for sharing between groups of people.
 - **Private unless you open it up.** By default only your own computer can reach it. If you want to use it from your phone, setup can add Tailscale.
 
@@ -61,13 +62,15 @@ None of these exist yet. This is the plan.
 | Command | What it will do |
 |---|---|
 | An install script you run with `curl … \| sh` | Downloads the `rakazo-stack` program for Linux (including WSL 2) or an Apple-silicon Mac, and checks the download hasn't been tampered with. The address is _not decided yet_. |
-| `rakazo-stack setup` | Asks you questions, then sets everything up and starts it. You can run it again any time: it remembers your answers, never shows your saved keys, and never changes the passwords it created. |
+| `rakazo-stack setup` | Asks you questions, then sets everything up and starts it. You can run it again any time: it remembers your answers, never shows your saved keys, never changes the passwords it created, and never changes versions. |
 | `rakazo-stack setup`, with a no-questions option | Does the same without asking, for scripts. The option's name is _not decided yet_. |
 | `docker compose up -d` | Starts it. Run it from `~/rakazo-stack`. |
 | `docker compose down` | Stops it. Your data is kept. |
 | `docker compose ps` and `docker compose logs` | Shows what's running, and the logs. |
 | `rakazo-stack backup` | Saves your data, settings and keys into one file locked with a passphrase you choose. Rakazo pauses while it runs. |
 | `rakazo-stack restore <file>` | Brings an Instance back from a backup file, on the same computer or a new one, on any supported system. |
+| `rakazo-stack update` | Updates the `rakazo-stack` program, then Rakazo, Lemonade and Honcho, to their newest releases. It shows what will change and asks first, takes a backup, and offers to undo the update if it fails. `setup` and `backup` remind you, at most once a day, when there's something new. |
+| `rakazo-stack update --hold rakazo=v0.5.1` | Keeps one part at a version you choose, for when a new release causes trouble. `--unhold rakazo` lets it update again. |
 
 Everything setup writes goes in one folder, `~/rakazo-stack`, on every system. On Windows that's inside WSL, not on your C: drive. Your data itself lives in Docker's storage.
 
@@ -80,13 +83,16 @@ No. We're still planning v1. Follow [Map: rakazo-stack v1 spec](https://github.c
 Only your AI model provider, plus Docker Desktop if you're at a bigger company. Voice runs on your own computer. Composio's free plan is probably enough for integrations, and integrations are optional.
 
 **Does it change Rakazo?**
-No. It runs Rakazo's own published releases at a fixed version, and adds its extra pieces alongside them.
+No. It runs Rakazo's own published releases, and adds its extra pieces alongside them.
+
+**How do I get new versions?**
+Run `rakazo-stack update`. It installs the newest releases on a best-effort basis: nobody tests each new Rakazo, Lemonade or Honcho release with rakazo-stack before you get it. That's why it takes a backup first and offers to undo a failed update. If a new release breaks something, `--hold` keeps that part where it was.
 
 **Do I need memory?**
 No. Leave the AI provider key blank in setup and memory stays off. If you turn it off later, your saved memories are kept.
 
 **Can I use it on my phone?**
-Yes, with Rakazo's phone app through Tailscale. We tested this on an iPhone, and notifications worked too, though a future change to Rakazo's notification service could stop that. Android hasn't been tested yet. Use the `https://….ts.net` address: the iPhone app won't connect to a plain `http://` Tailscale address.
+Yes, with Rakazo's phone app through Tailscale. We tested this on an iPhone, and notifications worked too, though a future change to Rakazo's notification service could stop that. Android hasn't been tested yet. Use the `https://….ts.net` address: the iPhone app won't connect to a plain `http://` Tailscale address. The phone app updates itself, so if it asks you to update your server, run `rakazo-stack update`.
 
 **Why does dictation in Chrome, Edge or Safari on my computer go to the internet?**
 Those browsers always send your speech to their maker's servers, and Rakazo can't change that. To keep dictation on your own computer, use Firefox, a phone browser, or Rakazo's desktop app.
