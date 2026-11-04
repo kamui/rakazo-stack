@@ -31,3 +31,7 @@ _Avoid_: Upgrade
 **Hold**:
 Keeping a component of an Instance at a version the Self-hoster chose, instead of the newest one.
 _Avoid_: Pin
+
+**Model provider**:
+The outside AI service whose key runs an Instance's models, for chat and, when it can, for memory. The Self-hoster brings their own.
+_Avoid_: AI provider, LLM provider

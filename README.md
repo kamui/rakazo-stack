@@ -21,7 +21,7 @@ Words like **Self-hoster** (you, the person running it) and **Instance** (your c
 | [Rakazo](https://github.com/elie222/rakazo) | The app itself, including the separate "bot computers" its AI agents work in | Always |
 | [Lemonade](https://github.com/lemonade-sdk/lemonade) | Speech and transcription on your own computer, so your voice doesn't go to an outside service | Always. On a Mac it runs outside Docker, so transcription can use the Mac's graphics chip |
 | Lemonade relay | Fixes a small mismatch between Rakazo and Lemonade. It goes away once [Kokoros#144](https://github.com/lucasjinreal/Kokoros/issues/144) is fixed in Lemonade | Always |
-| [Honcho](https://github.com/plastic-labs/honcho) | Long-term memory | Only if you give setup an AI provider key for it |
+| [Honcho](https://github.com/plastic-labs/honcho) | Long-term memory | Only if your model provider can run it: OpenRouter, OpenAI or Gemini |
 | [Tailscale](https://tailscale.com) | Lets your phone and other devices reach it securely, at an address like `https://rakazo.<your-tailnet>.ts.net` | Only if you choose it |
 | Bot-computer firewall | Stops bot computers from reaching your Mac and your home network | Macs only |
 
@@ -35,7 +35,11 @@ Integrations through [Composio](https://composio.dev) are optional. Setup asks f
   - **Linux:** Docker Engine and its Compose plugin, installed from Docker's own website, not Docker Desktop. Your user needs to run `docker` without `sudo`. Setup warns you that this gives your user full control of the computer.
   - **Windows and Mac:** Docker Desktop. It's free for personal use and for companies with fewer than 250 employees and under $10M in revenue. Bigger companies need a paid plan.
   - Minimum versions: Docker Engine API 1.45 and Docker Compose 2.24.4.
-- **An account with an AI model provider.** Bring your own. Setup uses the key to turn on memory; leave it blank to skip memory. Which providers we'll document is _not decided yet_.
+- **An account with a model provider.** Bring your own: setup asks which one and checks your key.
+  - **OpenRouter** (recommended): one key runs chat and memory for everyone on your Instance. Setup picks GLM Flash, which costs about $6 a month for one active user. Turn on **ZDR only** in your OpenRouter privacy settings so providers don't keep your messages.
+  - **OpenAI** or **Gemini**: one key runs chat and memory, but only your admin account gets chat. Everyone else connects their own provider in Rakazo's settings. Gemini needs a paid key.
+  - **Anthropic**: runs chat for everyone, but memory stays off, because Anthropic has no model for searching memories. To use Claude models with memory, use them through OpenRouter.
+  - Leave the key blank and nothing is set up: memory stays off, and each person connects a provider in Rakazo's settings.
 - **Optional:** a Composio key, and a Tailscale account.
 - **Hardware:** the minimum is _not decided yet_. As a guide:
   - Rakazo's downloads are about 9 GB.
@@ -80,7 +84,7 @@ Everything setup writes goes in one folder, `~/rakazo-stack`, on every system. O
 No. We're still planning v1. Follow [Map: rakazo-stack v1 spec](https://github.com/kamui/rakazo-stack/issues/1) to see progress.
 
 **Do I have to pay for anything?**
-Only your AI model provider, plus Docker Desktop if you're at a bigger company. Voice runs on your own computer. Composio's free plan is probably enough for integrations, and integrations are optional.
+Only your model provider, plus Docker Desktop if you're at a bigger company. Voice runs on your own computer. Composio's free plan is probably enough for integrations, and integrations are optional.
 
 **Does it change Rakazo?**
 No. It runs Rakazo's own published releases, and adds its extra pieces alongside them.
@@ -89,7 +93,7 @@ No. It runs Rakazo's own published releases, and adds its extra pieces alongside
 Run `rakazo-stack update`. It installs the newest releases on a best-effort basis: nobody tests each new Rakazo, Lemonade or Honcho release with rakazo-stack before you get it. That's why it takes a backup first and offers to undo a failed update. If a new release breaks something, `--hold` keeps that part where it was.
 
 **Do I need memory?**
-No. Leave the AI provider key blank in setup and memory stays off. If you turn it off later, your saved memories are kept.
+No. Leave the model provider key blank in setup, or use Anthropic, and memory stays off. If you turn it off later, your saved memories are kept.
 
 **Can I use it on my phone?**
 Yes, with Rakazo's phone app through Tailscale. We tested this on an iPhone, and notifications worked too, though a future change to Rakazo's notification service could stop that. Android hasn't been tested yet. Use the `https://….ts.net` address: the iPhone app won't connect to a plain `http://` Tailscale address. The phone app updates itself, so if it asks you to update your server, run `rakazo-stack update`.
