@@ -1,0 +1,5 @@
+# Test only: an outbound HTTP proxy so curl can make tailnet requests through this node.
+services:
+  tailscale:
+    environment:
+      TS_OUTBOUND_HTTP_PROXY_LISTEN: 0.0.0.0:1055

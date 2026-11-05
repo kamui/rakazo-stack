@@ -1,0 +1,14 @@
+== logout (ephemeral node is removed from the tailnet)
+500 Internal Server Error: register request: Post "https://controlplane.tailscale.com/machine/register": context canceled
+exit 0
+== down -v
+ Volume rkz-tstest_tailscale-state Removed 
+ Network rkz-tstest_app Removed 
+ Network rkz-tstest_data Removed 
+ Network rkz-tstest_stack Removed 
+== leftovers
+no containers
+no volumes
+no networks
+== other stacks
+honcho lemonade rakazo ui-gate 

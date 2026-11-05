@@ -1,0 +1,8 @@
+  whispercpp.args                           (empty)
+  whispercpp.backend                        cpu
+{"message":"Model unloaded successfully","model_name":"Whisper-Large-v3-Turbo","status":"success"} HTTP=200 2.328623s
+{"checkpoint":"ggerganov/whisper.cpp:ggml-large-v3-turbo.bin","model_name":"Whisper-Large-v3-Turbo","recipe":"whispercpp","status":"success"} HTTP=200 2.971620s
+2026-11-05 07:02:03.237 [Info] (WhisperServer) Using backend: cpu
+{"text":" Please schedule the quarterly budget review for Thursday at\n 3:30 in the afternoon.\n"} HTTP=200 20.565880s  <- short.16k.wav
+{"text":" Please schedule the quarterly budget review for Thursday at\n 3:30 in the afternoon.\n"} HTTP=200 20.485808s  <- short.16k.wav
+{"text":" Good morning, everyone. Before we start, a few reminders\n about the move to the new office.\n The movers arrive on Monday at 8, so please pack your desks\n by Friday evening and label every box with your name and\n floor number, laptops.\n Chargers and anything fragile should travel with you, not\n with the movers.\n Parking at the new building is on Level 2, and visitor\n badges are available from the front desk.\n If anything is missing after the move, send a short note to\n the facility's team, and they will track it down within two\n days.\n"} HTTP=200 32.490756s  <- long.16k.wav

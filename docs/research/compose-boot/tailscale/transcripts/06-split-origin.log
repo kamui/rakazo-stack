@@ -1,0 +1,37 @@
+== 1. GET https://rkz-test.<tailnet>.ts.net/ over the tailnet (certificate verified by curl)
+status=200 verify=0 http=2
+SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519MLKEM768 / id-ecPublicKey
+subject: CN=rkz-test.<tailnet>.ts.net
+expire date: Feb  3 05:56:43 2027 GMT
+issuer: C=US; O=Let's Encrypt; CN=YE1
+== 2. Host header: Vite only accepts RAKAZO_HOST
+   via Serve (Host = ts.net name): 200
+   direct to web:5173 with Host: web:5173: 403 Blocked request. This host ("web") is not allowed.
+To allow this host, add "web" to `preview.allowedHosts` in vite.confi
+   direct to web:5173 with Host: <ts.net name>: 200
+== 3. Sign in over the tailnet
+status=200
+set-cookie: better-auth.session_token=D2VDBs…; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax
+   get-session with the cookie: {"user":"owner@example.com","session":true}
+   POST /rpc/voice/status through Serve, with cookie: 200 {"json":{"configured":false,"ready":false,"transcribe":false,"provider":null,"voiceId":""}}
+   POST /rpc/voice/status through Serve, no cookie: 401
+   POST /rpc/spaces/list through Serve, with cookie: 200 {"json":{"current":{"id":"b87a6b8e4d878b9d1bed78c4d23ec223","name":"Personal","bots":[],"groups":[],
+   POST /rpc/spaces/list through Serve, no cookie: 401
+== 4. Localhost fallback: sign in at http://127.0.0.1:25173
+   status=200 {"redirect":false,"token":"<redacted>","user":{"name":"Account","email":"owner@example.com","
+set-cookie: better-auth.session_token=mBnwUB…; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax
+   GET / at localhost: 200 <!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" con
+   GET / at localhost with Host: localhost:25173: 200 <!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" con
+== 5. Nothing else on the node: other ports on the ts.net name
+   :80 -> 502
+   :5173 -> 502
+   :3100 -> 502
+   :13306 -> 502

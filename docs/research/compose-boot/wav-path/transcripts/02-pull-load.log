@@ -1,0 +1,4 @@
+pull kokoro-v1 23.7s {"model_name":"kokoro-v1","status":"success"} HTTP=200 
+load kokoro-v1 6.8s {"checkpoint":"mikkoph/kokoro-onnx","model_name":"kokoro-v1","recipe":"kokoro","status":"success"} HTTP=200 
+pull Whisper-Large-v3-Turbo 94.5s {"model_name":"Whisper-Large-v3-Turbo","status":"success"} HTTP=200 
+load Whisper-Large-v3-Turbo 7.7s {"checkpoint":"ggerganov/whisper.cpp:ggml-large-v3-turbo.bin","model_name":"Whisper-Large-v3-Turbo","recipe":"whispercpp","status":"success"} HTTP=200 

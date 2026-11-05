@@ -1,0 +1,22 @@
+== up web (and its deps); tailscale already running
+ Container rkz-tstest-migrate-1 Waiting 
+ Container rkz-tstest-web-1 Waiting 
+ Container rkz-tstest-data-init-1 Waiting 
+ Container rkz-tstest-supervisor-1 Waiting 
+ Container rkz-tstest-postgres-1 Waiting 
+ Container rkz-tstest-web-1 Healthy 
+ Container rkz-tstest-supervisor-1 Healthy 
+ Container rkz-tstest-api-1 Healthy 
+ Container rkz-tstest-data-init-1 Exited 
+ Container rkz-tstest-migrate-1 Exited 
+ Container rkz-tstest-computer-1 Exited 
+ Container rkz-tstest-postgres-1 Healthy 
+api	Up 9 seconds (healthy)
+postgres	Up 25 seconds (healthy)
+supervisor	Up 24 seconds (healthy)
+tailscale	Up 39 seconds
+web	Up Less than a second
+tailscale-1  | 2026/11/05 06:54:43 cert("rkz-test.<tailnet>.ts.net"): starting SetDNS call for _acme-challenge.rkz-test.<tailnet>.ts.net...
+tailscale-1  | 2026/11/05 06:55:14 cert("rkz-test.<tailnet>.ts.net"): did SetDNS for _acme-challenge.rkz-test.<tailnet>.ts.net
+tailscale-1  | 2026/11/05 06:55:15 cert("rkz-test.<tailnet>.ts.net"): requesting cert...
+tailscale-1  | 2026/11/05 06:55:17 cert("rkz-test.<tailnet>.ts.net"): got cert

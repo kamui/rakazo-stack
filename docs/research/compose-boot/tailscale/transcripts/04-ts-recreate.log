@@ -1,0 +1,8 @@
+ Container rkz-tstest-tailscale-1 Starting 
+ Container rkz-tstest-tailscale-1 Started 
+backend: Running
+node before: <id> rkz-test
+node after:  <id> rkz-test
+same node identity: yes
+tailscale-1  | boot: 2026/11/05 06:57:41 serve proxy: unsetting previous config
+tailscale-1  | boot: 2026/11/05 06:57:41 serve proxy: applying serve config

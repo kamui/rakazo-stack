@@ -1,0 +1,34 @@
+== image: GitHub latest is v1.104.5 (no Docker Hub tag yet); using v1.104.4
+== start tailscale only (auth key from env at run time)
+ Container rkz-tstest-tailscale-1 Created 
+ Container rkz-tstest-tailscale-1 Starting 
+ Container rkz-tstest-tailscale-1 Started 
+backend: Running
+1.104.4
+{
+  "BackendState": "Running",
+  "MagicDNSSuffix": "<tailnet>.ts.net",
+  "CertDomains": [
+    "rkz-test.<tailnet>.ts.net"
+  ],
+  "Self": {
+    "DNSName": "rkz-test.<tailnet>.ts.net.",
+    "HostName": "rkz-test",
+    "Online": true
+  }
+}
+tailscale-1  | 2026/11/05 06:54:42 magicsock: [warning] failed to force-set UDP read buffer size to 7340032: operation not permitted; using kernel default values (impacts throughput only)
+tailscale-1  | 2026/11/05 06:54:42 magicsock: [warning] failed to force-set UDP write buffer size to 7340032: operation not permitted; using kernel default values (impacts throughput only)
+tailscale-1  | 2026/11/05 06:54:42 ipnext: active extensions: captiveportal, acme, portlist, posture, clientupdate, conn25, connreject, favorites, relayserver, routecheck, serviceclientprefs, taildrop
+tailscale-1  | 2026/11/05 06:54:42 health(warnable=wantrunning-false): error: Tailscale is stopped.
+tailscale-1  | 2026/11/05 06:54:42 health(warnable=warming-up): error: Tailscale is starting. Please wait.
+tailscale-1  | 2026/11/05 06:54:42 health(warnable=wantrunning-false): ok
+tailscale-1  | 2026/11/05 06:54:42 control: control server key from https://controlplane.tailscale.com: ts2021=[fSeS+], legacy=[nlFWp]
+tailscale-1  | 2026/11/05 06:54:43 health(warnable=warming-up): ok
+tailscale-1  | boot: 2026/11/05 06:54:43 serve proxy: unsetting previous config
+tailscale-1  | boot: 2026/11/05 06:54:43 serve proxy: applying serve config
+tailscale-1  | 2026/11/05 06:54:43 serve: creating a new proxy handler for http://web:5173
+tailscale-1  | 2026/11/05 06:54:43 health(warnable=tls-cert-pending): error: Fetching TLS certificate via ACME for: rkz-test.<tailnet>.ts.net
+tailscale-1  | 2026/11/05 06:54:43 cert("rkz-test.<tailnet>.ts.net"): registered ACME account.
+tailscale-1  | 2026/11/05 06:54:43 cert("rkz-test.<tailnet>.ts.net"): acme: using dns-01: Funnel is not enabled for rkz-test.<tailnet>.ts.net:443
+tailscale-1  | 2026/11/05 06:54:43 cert("rkz-test.<tailnet>.ts.net"): starting SetDNS call for _acme-challenge.rkz-test.<tailnet>.ts.net...

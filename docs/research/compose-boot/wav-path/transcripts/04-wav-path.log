@@ -1,0 +1,27 @@
+## Synthesize
+POST /audio/speech short: HTTP 200 | codec_name=pcm_f32le|sample_fmt=flt|sample_rate=24000|channels=1 format_name=wav|duration=5.675000 
+POST /audio/speech long: HTTP 200 | codec_name=pcm_f32le|sample_fmt=flt|sample_rate=24000|channels=1 format_name=wav|duration=31.450000 
+## Encode like a browser upload (WebM, Opus, 48 kHz mono)
+short.webm: codec_name=opus|sample_fmt=fltp|sample_rate=48000|channels=1 format_name=matroska,webm|duration=5.683000 
+long.webm: codec_name=opus|sample_fmt=fltp|sample_rate=48000|channels=1 format_name=matroska,webm|duration=31.458000 
+## Relay conversion: ffmpeg -i in.webm -ar 16000 -ac 1 -c:a pcm_s16le out.wav
+short.16k.wav: codec_name=pcm_s16le|sample_fmt=s16|sample_rate=16000|channels=1 format_name=wav|duration=5.675000 
+long.16k.wav: codec_name=pcm_s16le|sample_fmt=s16|sample_rate=16000|channels=1 format_name=wav|duration=31.450000 
+## Control conversion, no resample: ffmpeg -i in.webm -ac 1 -c:a pcm_s16le out.wav
+short.48k.wav: codec_name=pcm_s16le|sample_fmt=s16|sample_rate=48000|channels=1 format_name=wav|duration=5.675000 
+## Expected: Please schedule the quarterly budget review for Thursday at three thirty in the afternoon.
+POST /audio/transcriptions [check 2, 1st] short.16k.wav (audio/wav): HTTP 200 in 17.83s
+  -> {"text":" Please schedule the quarterly budget review for Thursday at\n 3:30 in the afternoon.\n"}
+POST /audio/transcriptions [check 2, warm] short.16k.wav (audio/wav): HTTP 200 in 19.93s
+  -> {"text":" Please schedule the quarterly budget review for Thursday at\n 3:30 in the afternoon.\n"}
+POST /audio/transcriptions [check 2, warm] short.16k.wav (audio/wav): HTTP 200 in 18.38s
+  -> {"text":" Please schedule the quarterly budget review for Thursday at\n 3:30 in the afternoon.\n"}
+POST /audio/transcriptions [control a: raw WebM] short.webm (audio/webm): HTTP 500 in 0.01s
+  -> {"error":{"message":"Transcription failed: whisper-server returned status 400: Invalid request","type":"audio_processing_error"}}
+POST /audio/transcriptions [control b: 48 kHz WAV] short.48k.wav (audio/wav): HTTP 200 in 18.17s
+  -> {"text":" Please schedule the quarterly budget review for Thursday at\n 3:30 in the afternoon.\n"}
+POST /audio/transcriptions [extra: kokoro native WAV] short.kokoro.wav (audio/wav): HTTP 200 in 19.68s
+  -> {"text":" Please schedule the quarterly budget review for Thursday at\n 3:30 in the afternoon.\n"}
+## Expected: Good morning, everyone. Before we start, a few reminders about the move to the new office. The movers arrive on Monday at eight, so please pack your desks by Friday evening and label every box with your name and floor number. Laptops, chargers and anything fragile should travel with you, not with the movers. Parking at the new building is on level two, and visitor badges are available from the front desk. If anything is missing after the move, send a short note to the facilities team and they will track it down within two days.
+POST /audio/transcriptions [control c: ~30 s 16 kHz WAV] long.16k.wav (audio/wav): HTTP 200 in 29.51s
+  -> {"text":" Good morning, everyone. Before we start, a few reminders\n about the move to the new office.\n The movers arrive on Monday at 8, so please pack your desks\n by Friday evening and label every box with your name and\n floor number, laptops.\n Chargers and anything fragile should travel with you, not\n with the movers.\n Parking at the new building is on Level 2, and visitor\n badges are available from the front desk.\n If anything is missing after the move, send a short note to\n the facility's team, and they will track it down within two\n days.\n"}
