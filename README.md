@@ -76,6 +76,8 @@ None of these exist yet. This is the plan.
 | `rakazo-stack update` | Updates the `rakazo-stack` program, then Rakazo, Lemonade and Honcho, to their newest releases. It shows what will change and asks first, takes a backup, and offers to undo the update if it fails. `setup` and `backup` remind you, at most once a day, when there's something new. |
 | `rakazo-stack update --hold rakazo=v0.5.1` | Keeps one part at a version you choose, for when a new release causes trouble. `--unhold rakazo` lets it update again. |
 
+On Windows, type `docker.exe` instead of `docker` in these commands, for example `docker.exe compose up -d`, still run from `~/rakazo-stack` in WSL. Plain `docker` in WSL can leave parts of it unable to start after you restart your computer. If that happens, the next `rakazo-stack setup` or `rakazo-stack update` fixes it.
+
 Everything setup writes goes in one folder, `~/rakazo-stack`, on every system. On Windows that's inside WSL, not on your C: drive. Your data itself lives in Docker's storage.
 
 ## FAQ
