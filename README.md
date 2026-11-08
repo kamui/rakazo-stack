@@ -23,7 +23,7 @@ Words like **Self-hoster** (you, the person running it) and **Instance** (your c
 | Lemonade relay | Fixes a small mismatch between Rakazo and Lemonade. It goes away once [Kokoros#144](https://github.com/lucasjinreal/Kokoros/issues/144) is fixed in Lemonade | Always |
 | [Honcho](https://github.com/plastic-labs/honcho) | Long-term memory | Only if your model provider can run it: OpenRouter, OpenAI or Gemini |
 | [Tailscale](https://tailscale.com) | Lets your phone and other devices reach it securely, at an address like `https://rakazo.<your-tailnet>.ts.net` | Only if you choose it |
-| Bot-computer firewall | Stops bot computers from reaching your Mac and your home network | Macs only |
+| Bot-computer firewall | Stops bot computers from reaching your computer, your home network and your Tailscale devices | Always |
 
 Setup also creates your admin account in Rakazo and connects your voice to Lemonade. If you turned memory on, it connects that too. If any of these steps fails, it tells you how to finish it in Rakazo's settings.
 
@@ -104,8 +104,8 @@ Those browsers always send your speech to their maker's servers, and Rakazo can'
 **Does voice use my graphics card?**
 Only transcription, and only on Apple-silicon Macs. Everything else runs on the processor, and graphics-card support on Linux and Windows isn't planned for v1.
 
-**Why can't bot computers reach my home network on a Mac?**
-On a Mac, the voice engines run outside Docker and can't be password-protected. To stop the code that bot computers run from getting at them, v1 blocks bot computers from reaching your Mac, your home network and your Tailscale devices. You can't turn this off. They can still reach the internet.
+**Why can't bot computers reach my computer or my home network?**
+Bot computers run code that AI agents write, so on every system v1 keeps them away from your own computer, your home network and your Tailscale devices. On a Mac this also protects the voice engines, which run outside Docker and can't be password-protected. You can't turn this off. They can still reach the internet.
 
 **Does it keep running when I log out?**
 Not on Windows or Mac, because Docker Desktop stops when you log out. A version that keeps running is not planned for v1.
