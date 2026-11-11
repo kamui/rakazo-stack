@@ -1,0 +1,178 @@
+=== baseline: nothing from rkz-hw running
+  vm: total=15818 used=4846 cache=7718 avail=10557 MiB
+  vm-proc containerd-shim               115 MiB
+  vm-proc dockerd                         0 MiB
+  vm-proc containerd                      0 MiB
+  win com.docker.backend          281 MiB
+  win com.docker.build             24 MiB
+  win Docker Desktop              279 MiB
+  win vmmemWSL                  14050 MiB
+=== stage 1: memory off (Rakazo + relay + Lemonade)
+ Container rkz-hw-worker-1 Started 
+ Container rkz-hw-web-1 Started 
+--- idle, no voice models loaded
+  rkz-hw-api-1                        292 MiB
+  rkz-hw-lemonade-1                    29 MiB
+  rkz-hw-lemonade-relay-1               4 MiB
+  rkz-hw-postgres-1                   107 MiB
+  rkz-hw-supervisor-1                 189 MiB
+  rkz-hw-web-1                        161 MiB
+  rkz-hw-worker-1                     271 MiB
+  TOTAL                              1053 MiB
+  vm: total=15818 used=5896 cache=8506 avail=9490 MiB
+  vm-proc containerd-shim               114 MiB
+  vm-proc dockerd                         0 MiB
+  vm-proc containerd                      0 MiB
+  win com.docker.backend          316 MiB
+  win com.docker.build             22 MiB
+  win Docker Desktop              280 MiB
+  win vmmemWSL                  13844 MiB
+pull Whisper-Large-v3-Turbo 200 97.491029s
+load Whisper-Large-v3-Turbo 200 3.002086s
+pull kokoro-v1 200 28.478668s
+load kokoro-v1 200 5.355352s
+--- idle, Large-v3-Turbo + kokoro-v1 loaded
+  rkz-hw-api-1                        233 MiB
+  rkz-hw-lemonade-1                  4546 MiB
+  rkz-hw-lemonade-relay-1              16 MiB
+  rkz-hw-postgres-1                    92 MiB
+  rkz-hw-supervisor-1                 180 MiB
+  rkz-hw-web-1                        165 MiB
+  rkz-hw-worker-1                     218 MiB
+  TOTAL                              5450 MiB
+  vm: total=15818 used=8908 cache=6679 avail=6491 MiB
+  vm-proc containerd-shim               102 MiB
+  vm-proc dockerd                         0 MiB
+  vm-proc containerd                      0 MiB
+  win com.docker.backend          304 MiB
+  win com.docker.build             22 MiB
+  win Docker Desktop              245 MiB
+  win vmmemWSL                  15154 MiB
+stt 200 10.501381s
+stt 200 10.157370s
+stt 200 10.354213s
+  lemonade peak during 3x long.wav transcription (Large-v3-Turbo): 4600 MiB
+unload Turbo 200 2.305129s
+pull Small 200 27.100886s
+load Small 200 0.612522s
+--- idle, Whisper-Small + kokoro-v1 loaded
+  rkz-hw-api-1                        233 MiB
+  rkz-hw-lemonade-1                  3881 MiB
+  rkz-hw-lemonade-relay-1              14 MiB
+  rkz-hw-postgres-1                    91 MiB
+  rkz-hw-supervisor-1                 180 MiB
+  rkz-hw-web-1                        163 MiB
+  rkz-hw-worker-1                     220 MiB
+  TOTAL                              4782 MiB
+  vm: total=15818 used=7935 cache=7030 avail=7466 MiB
+  vm-proc containerd-shim               111 MiB
+  vm-proc dockerd                         0 MiB
+  vm-proc containerd                      0 MiB
+  win com.docker.backend          296 MiB
+  win com.docker.build             21 MiB
+  win Docker Desktop              228 MiB
+  win vmmemWSL                  15034 MiB
+=== stage 2: + Honcho
+ Container rkz-hw-migrate-1 Skipped: condition "service_completed_successfully" of service "migrate" not reached: interrupted by the unmet condition "service_healthy" of service "honcho" 
+dependency failed to start: container rkz-hw-honcho-1 is unhealthy
+not healthy:
+rkz-hw-honcho-deriver-1 Created
+rkz-hw-honcho-1 Restarting (1) 27 seconds ago
+rkz-hw-honcho-db-1 Up 8 minutes (healthy)
+rkz-hw-worker-1 Up 12 minutes (healthy)
+rkz-hw-web-1 Up 12 minutes
+rkz-hw-api-1 Up 13 minutes (healthy)
+rkz-hw-migrate-1 Exited (0) 7 minutes ago
+rkz-hw-supervisor-1 Up 13 minutes (healthy)
+rkz-hw-lemonade-relay-1 Up 13 minutes
+rkz-hw-postgres-1 Up 13 minutes (healthy)
+rkz-hw-lemonade-1 Up 13 minutes (healthy)
+rkz-hw-data-init-1 Exited (0) 7 minutes ago
+rkz-hw-computer-1 Exited (0) 7 minutes ago
+--- idle, with Honcho
+  rkz-hw-api-1                        233 MiB
+  rkz-hw-honcho-1                       0 MiB
+  rkz-hw-honcho-db-1                   61 MiB
+  rkz-hw-lemonade-1                  3184 MiB
+  rkz-hw-lemonade-relay-1              12 MiB
+  rkz-hw-postgres-1                    90 MiB
+  rkz-hw-supervisor-1                 159 MiB
+  rkz-hw-web-1                        129 MiB
+  rkz-hw-worker-1                     227 MiB
+  TOTAL                              4095 MiB
+  vm: total=15818 used=7515 cache=7812 avail=7885 MiB
+  vm-proc containerd-shim               124 MiB
+  vm-proc dockerd                         0 MiB
+  vm-proc containerd                      0 MiB
+  win com.docker.backend          310 MiB
+  win com.docker.build             22 MiB
+  win Docker Desktop              231 MiB
+  win vmmemWSL                  15281 MiB
+=== stage 3: + Tailscale (not logged in; no auth key)
+ Container rkz-hw-migrate-1 interrupted by the unmet condition "service_healthy" of service "honcho" 
+dependency failed to start: container rkz-hw-honcho-1 is unhealthy
+--- idle, with Honcho and Tailscale
+  rkz-hw-api-1                        235 MiB
+  rkz-hw-honcho-1                       0 MiB
+  rkz-hw-honcho-db-1                   59 MiB
+  rkz-hw-lemonade-1                  3137 MiB
+  rkz-hw-lemonade-relay-1              11 MiB
+  rkz-hw-postgres-1                    90 MiB
+  rkz-hw-supervisor-1                 163 MiB
+  rkz-hw-tailscale-1                   24 MiB
+  rkz-hw-web-1                        125 MiB
+  rkz-hw-worker-1                     227 MiB
+  TOTAL                              4071 MiB
+  vm: total=15818 used=7673 cache=7788 avail=7727 MiB
+  vm-proc containerd-shim               122 MiB
+  vm-proc dockerd                         0 MiB
+  vm-proc containerd                      0 MiB
+  win com.docker.backend          311 MiB
+  win com.docker.build             21 MiB
+  win Docker Desktop              234 MiB
+  win vmmemWSL                  15237 MiB
+=== stage 4: + one bot computer (same limits and options the supervisor uses)
+--- idle, with one bot computer
+  rkz-hw-api-1                        232 MiB
+  rkz-hw-computer-probe               142 MiB
+  rkz-hw-honcho-1                       0 MiB
+  rkz-hw-honcho-db-1                   59 MiB
+  rkz-hw-lemonade-1                  3115 MiB
+  rkz-hw-lemonade-relay-1              12 MiB
+  rkz-hw-postgres-1                    90 MiB
+  rkz-hw-supervisor-1                 160 MiB
+  rkz-hw-tailscale-1                   21 MiB
+  rkz-hw-web-1                        123 MiB
+  rkz-hw-worker-1                     224 MiB
+  TOTAL                              4178 MiB
+  vm: total=15818 used=7776 cache=7819 avail=7627 MiB
+  vm-proc containerd-shim               132 MiB
+  vm-proc dockerd                         0 MiB
+  vm-proc containerd                      0 MiB
+  win com.docker.backend          305 MiB
+  win com.docker.build             21 MiB
+  win Docker Desktop              232 MiB
+  win vmmemWSL                  15430 MiB
+/usr/bin/chromium
+--- one bot computer with a browser open (/usr/bin/chromium)
+  rkz-hw-api-1                        232 MiB
+  rkz-hw-computer-probe               159 MiB
+  rkz-hw-honcho-1                       0 MiB
+  rkz-hw-honcho-db-1                   59 MiB
+  rkz-hw-lemonade-1                  3115 MiB
+  rkz-hw-lemonade-relay-1              11 MiB
+  rkz-hw-postgres-1                    91 MiB
+  rkz-hw-supervisor-1                 160 MiB
+  rkz-hw-tailscale-1                   22 MiB
+  rkz-hw-web-1                        123 MiB
+  rkz-hw-worker-1                     224 MiB
+  TOTAL                              4196 MiB
+  vm: total=15818 used=7668 cache=7823 avail=7735 MiB
+  vm-proc containerd-shim               122 MiB
+  vm-proc dockerd                         0 MiB
+  vm-proc containerd                      0 MiB
+  win com.docker.backend          299 MiB
+  win com.docker.build             21 MiB
+  win Docker Desktop              231 MiB
+  win vmmemWSL                  15413 MiB
+=== done

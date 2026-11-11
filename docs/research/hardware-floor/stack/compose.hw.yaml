@@ -1,0 +1,131 @@
+# Throwaway measurement layer over Rakazo's unmodified v0.10.0 compose file, for #42 (RAM and disk only).
+# Follows the decided layout: unmodified Lemonade image, relay, Honcho without Redis, inline configs, Tailscale userspace.
+services:
+  api:
+    ports: !reset []
+    networks: [stack]
+  worker:
+    networks: [stack]
+
+  lemonade:
+    profiles: [lemonade]
+    image: ghcr.io/lemonade-sdk/lemonade-server:v2026.45.3
+    restart: unless-stopped
+    environment:
+      LEMONADE_API_KEY: ${LEMONADE_API_KEY:?}
+    ports: ["127.0.0.1:${HW_LEMONADE_PORT}:13305"]
+    volumes:
+      - lemonade-models:/opt/lemonade/.cache/huggingface
+      - lemonade-llama:/opt/lemonade/llama
+      - lemonade-data:/opt/lemonade/.cache/lemonade
+      - lemonade-config:/opt/lemonade/.config/lemonade
+    networks: [stack, egress]
+
+  lemonade-relay:
+    image: oven/bun:1.4.4-alpine
+    restart: unless-stopped
+    user: bun
+    command: ["bun", "/relay/lang-code-relay.ts"]
+    environment:
+      UPSTREAM: http://lemonade:13305
+      LEMONADE_API_KEY: ${LEMONADE_API_KEY:?}
+      PORT: "13306"
+    configs:
+      - source: relay
+        target: /relay/lang-code-relay.ts
+    networks: [stack, egress]
+
+  honcho:
+    profiles: [honcho]
+    image: ghcr.io/plastic-labs/honcho:v3.6.1
+    restart: unless-stopped
+    entrypoint: ["sh", "docker/entrypoint.sh"]
+    environment: &honcho-env
+      DB_CONNECTION_URI: postgresql+psycopg://honcho:${HONCHO_DB_PASSWORD:?}@honcho-db:5432/honcho
+      AUTH_USE_AUTH: "true"
+      AUTH_JWT_SECRET: ${HONCHO_AUTH_JWT_SECRET:?}
+      CACHE_ENABLED: "false"
+      TIKTOKEN_CACHE_DIR: /tiktoken
+      LLM_OPENAI_API_KEY: ${MODEL_PROVIDER_API_KEY:?}
+    depends_on:
+      honcho-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    volumes:
+      - honcho-tiktoken:/tiktoken
+    networks: [stack, honcho-data, egress]
+
+  honcho-deriver:
+    profiles: [honcho]
+    image: ghcr.io/plastic-labs/honcho:v3.6.1
+    restart: unless-stopped
+    entrypoint: ["/app/.venv/bin/python", "-m", "src.deriver"]
+    environment: *honcho-env
+    volumes:
+      - honcho-tiktoken:/tiktoken
+    depends_on:
+      honcho:
+        condition: service_healthy
+    networks: [honcho-data, egress]
+
+  honcho-db:
+    profiles: [honcho]
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: honcho
+      POSTGRES_PASSWORD: ${HONCHO_DB_PASSWORD:?}
+      POSTGRES_DB: honcho
+    volumes:
+      - honcho-pgdata:/var/lib/postgresql
+    configs:
+      - source: honcho-init
+        target: /docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U honcho -d honcho"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [honcho-data]
+
+  tailscale:
+    profiles: [tailscale]
+    image: tailscale/tailscale:v1.104.4
+    restart: unless-stopped
+    environment:
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+      TS_AUTH_ONCE: "true"
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    networks: [app]
+
+configs:
+  relay:
+    file: ./relay/lang-code-relay.ts
+  honcho-init:
+    content: |
+      CREATE EXTENSION IF NOT EXISTS vector;
+      CREATE EXTENSION IF NOT EXISTS pg_trgm;
+      CREATE EXTENSION IF NOT EXISTS btree_gin;
+
+volumes:
+  lemonade-models:
+  lemonade-llama:
+  lemonade-data:
+  lemonade-config:
+  honcho-pgdata:
+  honcho-tiktoken:
+  tailscale-state:
+
+networks:
+  stack:
+    internal: true
+  honcho-data:
+    internal: true
+  egress:
