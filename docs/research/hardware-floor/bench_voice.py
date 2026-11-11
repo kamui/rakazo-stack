@@ -44,12 +44,26 @@ def call(base, key, path, *, body=None, fields=None, files=None, timeout=1800):
     return time.perf_counter() - t0, payload
 
 
+NUMBERS = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen " \
+    "seventeen eighteen nineteen twenty".split()
+DECADES = {"20s": "twenties", "30s": "thirties", "40s": "forties", "50s": "fifties"}
+
+
 def words(text):
+    """LibriSpeech-style words: lowercase, no punctuation, small numbers spelled out. Mid-word splits still count."""
     t = text.lower().replace("-", " ")
     t = re.sub(r"\bmr\b\.?", "mister", t)
     t = re.sub(r"\bmrs\b\.?", "missus", t)
     t = re.sub(r"[^a-z0-9' ]+", " ", t)
-    return t.split()
+    out = []
+    for w in t.split():
+        w = w.strip("'")
+        w = DECADES.get(w, w)
+        if w.isdigit() and int(w) < len(NUMBERS):
+            w = NUMBERS[int(w)]
+        if w:
+            out.append(w)
+    return out
 
 
 def wer(ref, hyp):
@@ -77,7 +91,7 @@ def main():
     out = open(a.out, "a")
 
     def emit(**rec):
-        rec = {"label": a.label, "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), **rec}
+        rec = {"label": a.label, "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "loadavg": round(os.getloadavg()[0], 2), **rec}
         out.write(json.dumps(rec) + "\n"); out.flush()
         print(json.dumps(rec), flush=True)
 
@@ -107,12 +121,14 @@ def main():
         if a.accuracy:
             errs = total = 0
             busy = 0.0
+            per_clip = []
             for clip in refs["accuracy"]:
                 dt, text = transcribe(model, clip)
                 e, n = wer(clip["text"], text)
                 errs, total, busy = errs + e, total + n, busy + dt
+                per_clip.append({"id": clip["id"], "errors": e, "text": text.strip()})
             emit(kind="accuracy", model=model, clips=len(refs["accuracy"]), words=total, errors=errs,
-                 wer=round(errs / total, 4), seconds=round(busy, 1))
+                 wer=round(errs / total, 4), seconds=round(busy, 1), per_clip=per_clip)
 
     if a.tts:
         emit(kind="load", model="kokoro-v1", seconds=round(load("kokoro-v1"), 3))
