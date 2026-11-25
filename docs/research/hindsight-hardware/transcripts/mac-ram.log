@@ -250,8 +250,8 @@ tailscale/tailscale:v1.104.4	179MB
 oven/bun:1.4.4-alpine	173MB
 postgres:<none>	663MB
 busybox:1	6.22MB
- 76M	/Users/jack/rs46-mac-work/lemonade
-1.9G	/Users/jack/rs46-mac-work/hf
-1.5G	/Users/jack/rs46-mac-work/hf/hub/models--ggerganov--whisper.cpp
-348M	/Users/jack/rs46-mac-work/hf/hub/models--mikkoph--kokoro-onnx
+ 76M	~/rs46-mac-work/lemonade
+1.9G	~/rs46-mac-work/hf
+1.5G	~/rs46-mac-work/hf/hub/models--ggerganov--whisper.cpp
+348M	~/rs46-mac-work/hf/hub/models--mikkoph--kokoro-onnx
 === done 2026-11-25T07:46:17Z
