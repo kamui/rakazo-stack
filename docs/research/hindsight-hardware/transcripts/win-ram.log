@@ -1,0 +1,181 @@
+=== 2026-11-25T06:03:25Z baseline: nothing from rs46 running
+  vm: total=15818 used=3797 cache=9890 avail=11691 MiB
+  win com.docker.backend          326 MiB
+  win com.docker.build             20 MiB
+  win Docker Desktop              287 MiB
+  win vmmemWSL                  13701 MiB
+=== stage 1: memory off (Rakazo + relay + Lemonade)
+ Container rs46-worker-1 Started 
+ Container rs46-web-1 Started 
+--- idle, no voice models loaded
+  rs46-api-1                          325 MiB
+  rs46-lemonade-1                      30 MiB
+  rs46-lemonade-relay-1                 5 MiB
+  rs46-postgres-1                      84 MiB
+  rs46-supervisor-1                   180 MiB
+  rs46-web-1                          173 MiB
+  rs46-worker-1                       336 MiB
+  TOTAL                              1133 MiB
+  vm: total=15818 used=4806 cache=10316 avail=10661 MiB
+  win com.docker.backend          335 MiB
+  win com.docker.build             20 MiB
+  win Docker Desktop              299 MiB
+  win vmmemWSL                  14765 MiB
+pull Whisper-Small 200 26.527896s
+load Whisper-Small 200 1.343051s
+pull kokoro-v1 200 24.500438s
+load kokoro-v1 200 4.765244s
+--- idle, Whisper-Small + kokoro-v1 loaded
+  rs46-api-1                          268 MiB
+  rs46-lemonade-1                    3032 MiB
+  rs46-lemonade-relay-1                11 MiB
+  rs46-postgres-1                      78 MiB
+  rs46-supervisor-1                   183 MiB
+  rs46-web-1                          175 MiB
+  rs46-worker-1                       220 MiB
+  TOTAL                              3967 MiB
+  vm: total=15818 used=6922 cache=8735 avail=8550 MiB
+  win com.docker.backend          352 MiB
+  win com.docker.build             20 MiB
+  win Docker Desktop              293 MiB
+  win vmmemWSL                  15109 MiB
+stt 200 1.910536s
+tts 200 0.970930s
+--- idle, Whisper-Small + kokoro-v1 after one transcription and one reply
+  rs46-api-1                          267 MiB
+  rs46-lemonade-1                    3323 MiB
+  rs46-lemonade-relay-1                12 MiB
+  rs46-postgres-1                      78 MiB
+  rs46-supervisor-1                   182 MiB
+  rs46-web-1                          174 MiB
+  rs46-worker-1                       221 MiB
+  TOTAL                              4257 MiB
+  vm: total=15818 used=7220 cache=8379 avail=8253 MiB
+  win com.docker.backend          350 MiB
+  win com.docker.build             22 MiB
+  win Docker Desktop              288 MiB
+  win vmmemWSL                  15125 MiB
+=== stage 2: + Hindsight
+ Container rs46-hindsight-1 Starting 
+ Container rs46-hindsight-1 Started 
+  hindsight peak from start until 20 s after healthy: 1607 MiB
+  hindsight healthy after about 68s
+--- idle, with Hindsight (empty)
+  rs46-api-1                          268 MiB
+  rs46-hindsight-1                   1601 MiB
+  rs46-hindsight-db-1                  82 MiB
+  rs46-lemonade-1                    3086 MiB
+  rs46-lemonade-relay-1                 9 MiB
+  rs46-postgres-1                      76 MiB
+  rs46-supervisor-1                   180 MiB
+  rs46-web-1                          170 MiB
+  rs46-worker-1                       223 MiB
+  TOTAL                              5695 MiB
+  vm: total=15818 used=8527 cache=7139 avail=6925 MiB
+  win: (powershell.exe unavailable)
+seeded 500 in 19s
+20 recalls: median 0.43s max 0.48s
+  hindsight peak while seeding 500 memories and running 20 recalls: 1697 MiB
+--- with Hindsight, 30 s after seeding 500 memories and 20 recalls
+  rs46-api-1                          268 MiB
+  rs46-hindsight-1                   1469 MiB
+  rs46-hindsight-db-1                 165 MiB
+  rs46-lemonade-1                    3062 MiB
+  rs46-lemonade-relay-1                 9 MiB
+  rs46-postgres-1                      76 MiB
+  rs46-supervisor-1                   178 MiB
+  rs46-web-1                          166 MiB
+  rs46-worker-1                       229 MiB
+  TOTAL                              5622 MiB
+  vm: total=15818 used=8444 cache=6979 avail=6993 MiB
+  win com.docker.backend          336 MiB
+  win com.docker.build             20 MiB
+  win Docker Desktop              293 MiB
+  win vmmemWSL                  15148 MiB
+--- with Hindsight, 150 s after use
+  rs46-api-1                          250 MiB
+  rs46-hindsight-1                   1376 MiB
+  rs46-hindsight-db-1                 157 MiB
+  rs46-lemonade-1                    2906 MiB
+  rs46-lemonade-relay-1                 7 MiB
+  rs46-postgres-1                      73 MiB
+  rs46-supervisor-1                   128 MiB
+  rs46-web-1                          116 MiB
+  rs46-worker-1                       214 MiB
+  TOTAL                              5227 MiB
+  vm: total=15818 used=8152 cache=7514 avail=7293 MiB
+  win com.docker.backend          336 MiB
+  win com.docker.build             20 MiB
+  win Docker Desktop              293 MiB
+  win vmmemWSL                  15327 MiB
+=== stage 3: + Tailscale (not logged in; no auth key)
+ Container rs46-api-1 Waiting 
+ Container rs46-api-1 Healthy 
+--- idle, with Hindsight and Tailscale
+  rs46-api-1                          246 MiB
+  rs46-hindsight-1                   1373 MiB
+  rs46-hindsight-db-1                 157 MiB
+  rs46-lemonade-1                    2888 MiB
+  rs46-lemonade-relay-1                 7 MiB
+  rs46-postgres-1                      73 MiB
+  rs46-supervisor-1                   130 MiB
+  rs46-tailscale-1                     29 MiB
+  rs46-web-1                          108 MiB
+  rs46-worker-1                       210 MiB
+  TOTAL                              5221 MiB
+  vm: total=15818 used=8143 cache=7293 avail=7302 MiB
+  win com.docker.backend          337 MiB
+  win com.docker.build             20 MiB
+  win Docker Desktop              298 MiB
+  win vmmemWSL                  15348 MiB
+=== stage 4: + one bot computer (same limits and options the supervisor uses)
+--- idle, with one bot computer (ghcr.io/elie222/rakazo/computer:v0.15.0)
+  rs46-api-1                          246 MiB
+  rs46-computer-probe                 153 MiB
+  rs46-hindsight-1                   1372 MiB
+  rs46-hindsight-db-1                 158 MiB
+  rs46-lemonade-1                    2886 MiB
+  rs46-lemonade-relay-1                 7 MiB
+  rs46-postgres-1                      73 MiB
+  rs46-supervisor-1                   129 MiB
+  rs46-tailscale-1                     23 MiB
+  rs46-web-1                          107 MiB
+  rs46-worker-1                       210 MiB
+  TOTAL                              5364 MiB
+  vm: total=15818 used=8230 cache=7440 avail=7213 MiB
+  win com.docker.backend          331 MiB
+  win com.docker.build             20 MiB
+  win Docker Desktop              285 MiB
+  win vmmemWSL                  15343 MiB
+--- one bot computer with a browser open (/usr/bin/chromium)
+  rs46-api-1                          242 MiB
+  rs46-computer-probe                 180 MiB
+  rs46-hindsight-1                   1360 MiB
+  rs46-hindsight-db-1                 126 MiB
+  rs46-lemonade-1                    2864 MiB
+  rs46-lemonade-relay-1                 6 MiB
+  rs46-postgres-1                      72 MiB
+  rs46-supervisor-1                   127 MiB
+  rs46-tailscale-1                     22 MiB
+  rs46-web-1                          101 MiB
+  rs46-worker-1                       208 MiB
+  TOTAL                              5308 MiB
+  vm: total=15818 used=8182 cache=7490 avail=7260 MiB
+  win com.docker.backend          332 MiB
+  win com.docker.build             20 MiB
+  win Docker Desktop              285 MiB
+  win vmmemWSL                  15360 MiB
+=== disk
+VOLUME NAME                                                        LINKS     SIZE
+rs46_webassets                                                     1         47.27MB
+rs46_lemonade-config                                               1         47B
+rs46_lemonade-models                                               1         841.4MB
+rs46_hindsight-pgdata                                              1         119.7MB
+rs46_lemonade-data                                                 1         66.54MB
+rs46_appdata                                                       4         0B
+rs46_ingress                                                       1         0B
+rs46_pgdata                                                        1         74.27MB
+rs46_tailscale-state                                               1         653B
+rs46_lemonade-llama                                                1         0B
+=== done 2026-11-25T06:15:36Z
+exit=0
