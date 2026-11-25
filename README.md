@@ -36,7 +36,7 @@ Integrations through [Composio](https://composio.dev) are optional. Setup asks f
   - **Windows and Mac:** Docker Desktop. It's free for personal use and for companies with fewer than 250 employees and under $10M in revenue. Bigger companies need a paid plan.
   - Minimum versions: Docker Engine API 1.45 and Docker Compose 2.24.4.
 - **An account with a model provider.** Bring your own: setup asks which one and checks your key.
-  - **OpenRouter** (recommended): one key runs chat and memory for everyone on your Instance. Setup picks GLM Flash, which costs roughly $3–11 a month for one active user, chat and memory together. That's an estimate, not yet measured. Turn on **ZDR only** in your OpenRouter privacy settings so providers don't keep your messages.
+  - **OpenRouter** (recommended): one key runs chat and memory for everyone on your Instance. Setup picks GLM Flash. In our test it cost about $4–5 a month for one active user sending 30 messages a day, chat and memory together. Turn on **ZDR only** in your OpenRouter privacy settings so providers don't keep your messages.
   - **OpenAI** or **Gemini**: one key runs chat and memory, but only your admin account gets chat. Everyone else connects their own provider in Rakazo's settings. Gemini needs a paid key.
   - **Anthropic**: like OpenRouter, one key runs chat and memory for everyone on your Instance.
   - Leave the key blank and nothing is set up: memory stays off, and each person connects a provider in Rakazo's settings.
