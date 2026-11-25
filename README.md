@@ -98,6 +98,9 @@ Run `rakazo-stack update`. It installs the newest releases on a best-effort basi
 **Do I need memory?**
 No. Leave the model provider key blank in setup and memory stays off. If you turn it off later, your saved memories are kept.
 
+**Does memory send my conversations anywhere else?**
+Only to your model provider, the same one chat uses. After each reply, Rakazo sends that turn to Hindsight, and Hindsight asks your model provider to pick out facts worth remembering. With OpenAI or Gemini, memory runs on the admin's key for everyone, so other people's conversations are learned through the admin's account. To keep only facts that bots save on purpose, turn off **Learn from conversations** under **Settings → Memory → Edit**, in each Space.
+
 **Can I use Honcho for memory instead?**
 Not in v1, which uses Hindsight. Honcho is planned as an option for a later version.
 
