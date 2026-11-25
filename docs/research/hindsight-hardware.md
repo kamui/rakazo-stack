@@ -168,7 +168,7 @@ Image sizes are Docker's uncompressed sizes (`docker image inspect`), as in #42.
 - **Hindsight retries consolidation for ever without a model.** With the dummy key, every seeded memory queued a consolidation task. The worker retried it with backoff for the whole run, and logged 57 `ERROR` or traceback lines. That didn't change RAM, but an Instance whose model key is wrong or out of credit will log this continuously. Setup's checks or the README's troubleshooting should mention it.
 - **Rakazo v0.16.0 has no published images** (also found in [#45](https://github.com/kamui/rakazo-stack/issues/45)). This run used a local build of the tag.
 - **The supervisor without a socket stays healthy**, so `wait_healthy` worked the same as in #42.
-- **`stack/measure-mac.sh` is committed without its execute bit** (mode 100644; `measure-ram.sh` and `make-env.sh` are 100755). So step 5 of [`mac.md`](hindsight-hardware/mac.md), `./measure-mac.sh`, fails with `permission denied` on a fresh clone. The Mac run used `bash ./measure-mac.sh` and left the script unchanged.
+- **`stack/measure-mac.sh` was first committed without its execute bit**, so step 5 of [`mac.md`](hindsight-hardware/mac.md) (`./measure-mac.sh`) failed with `permission denied`. The Mac run used `bash ./measure-mac.sh` with the script unchanged. The script is executable now.
 - **The Mac run used Rakazo v0.15.0's images** (`app` and `computer`), because v0.16.0 still returned 404 on GHCR.
 
 ## Open questions / follow-ups
