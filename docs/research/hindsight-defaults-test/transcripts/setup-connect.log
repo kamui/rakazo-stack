@@ -1,0 +1,18 @@
+== detect (read-only SQL, no password)
+   {"owner" : false, "defaultSpace" : false, "hindsight" : false, "aiConsents" : []}
+== bootstrap-owner
+Account verified
+== sign in
+-> POST /api/auth/sign-in/email
+   body: {"email":"owner@example.com","password":"<redacted>"}
+<- 200 {"redirect":false,"token":"<redacted>","user":{"name":"Account","email":"owner@example.com","emailVerified":true,"image":null,"createdAt":"2026-11-25T05:28:24.924Z","updatedAt":"2026-11-25T05:28:24.924Z","deactivatedAt":null,"id":"0ce048ba-b70d-401a-9943-c9a3ad827718"}}
+== memory.connectProvider
+-> POST /rpc/memory/connectProvider
+   body: {"json":{"provider":"hindsight","settings":{"mode":"local","baseUrl":"http://hindsight:8888"},"credentials":{"apiKey":"<redacted>"}}}
+<- 200 {"json":{"provider":"hindsight","settings":{"mode":"local","baseUrl":"http://hindsight:8888"},"defaultMemoryScope":"isolated","updatedAt":"2026-11-25T05:28:25.390Z","connectionLabel":"Self-hosted (http://hindsight:8888)"}}
+== sign out
+-> POST /api/auth/sign-out
+   body: {}
+<- 200 {"success":true}
+== detect after
+   {"owner" : true, "defaultSpace" : true, "hindsight" : true, "aiConsents" : []}

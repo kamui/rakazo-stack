@@ -1,0 +1,108 @@
+# Throwaway #45 stack: Rakazo v0.16.0's unmodified infra/compose/docker-compose.images.yml plus this layer.
+#   OPENROUTER_API_KEY="$(cat <key file>)" docker compose -p rs45 --env-file .env \
+#     -f rakazo.v0.16.0.images.yml -f compose.override.yml up -d
+# The key is only ever in the shell environment of that command, never in a file.
+x-hook: &hook
+  NODE_OPTIONS: --import=/hook/hook.mjs
+  OR_LOG_DIR: /orlog
+
+services:
+  # No Docker socket: this host runs another Rakazo install, and the test needs no bot computers.
+  supervisor:
+    volumes: !override
+      - appdata:/data
+    environment:
+      DOCKER_SOCKET: /nonexistent/docker.sock
+
+  api:
+    environment:
+      <<: *hook
+      HOOK_SVC: rakazo-api
+    volumes:
+      - ./hook:/hook:ro
+      - ./orlog:/orlog
+    networks: [app, data, stack]
+
+  worker:
+    environment:
+      <<: *hook
+      HOOK_SVC: rakazo-worker
+    volumes:
+      - ./hook:/hook:ro
+      - ./orlog:/orlog
+    networks: [app, data, stack]
+
+  # Measurement only: Hindsight's LLM base URL points here. Forwards every request unchanged to
+  # OpenRouter and logs its shape and usage, never headers or message text.
+  or-proxy:
+    image: oven/bun:1.4.4-alpine
+    restart: "no"
+    command: ["bun", "/hook/proxy.mjs"]
+    environment:
+      OR_LOG_DIR: /orlog
+    volumes:
+      - ./hook:/hook:ro
+      - ./orlog:/orlog
+    networks: [hindsight-llm, egress]
+
+  hindsight-db:
+    image: pgvector/pgvector:pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782
+    restart: "no"
+    shm_size: 1g
+    environment:
+      POSTGRES_USER: hindsight
+      POSTGRES_PASSWORD: ${HINDSIGHT_DB_PASSWORD:?}
+      POSTGRES_DB: hindsight
+    volumes:
+      - hindsight-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hindsight -d hindsight"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [hindsight-data]
+
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight-api:1.3.0@sha256:c054765e9196fb1fe63497be06bcb55256c9024cc9314f951dc59858985ab242
+    restart: "no"
+    stop_grace_period: 75s
+    environment:
+      HINDSIGHT_API_DATABASE_URL: postgresql://hindsight:${HINDSIGHT_DB_PASSWORD:?}@hindsight-db:5432/hindsight
+      HINDSIGHT_API_TENANT_EXTENSION: hindsight_api.extensions.builtin.tenant:ApiKeyTenantExtension
+      HINDSIGHT_API_TENANT_API_KEY: ${HINDSIGHT_TENANT_API_KEY:?}
+      HINDSIGHT_API_LLM_PROVIDER: openrouter
+      HINDSIGHT_API_LLM_API_KEY: ${OPENROUTER_API_KEY:?}
+      HINDSIGHT_API_LLM_MODEL: "~z-ai/glm-flash-latest"
+      HINDSIGHT_API_LLM_REASONING_EFFORT: low
+      HINDSIGHT_API_LLM_EXTRA_BODY: '{"provider":{"zdr":true,"data_collection":"deny"}}'
+      HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL: BAAI/bge-small-en-v1.5
+      HINDSIGHT_API_RERANKER_LOCAL_MODEL: hindsight-ai/hs-rerank-1
+      HINDSIGHT_API_RERANKER_MAX_CANDIDATES: "100"
+      HINDSIGHT_API_WORKER_ID: hindsight
+      HINDSIGHT_API_MCP_ENABLED: "false"
+      # Measurement only (see or-proxy). Without it Hindsight calls https://openrouter.ai/api/v1.
+      HINDSIGHT_API_LLM_BASE_URL: http://or-proxy:8080/api/v1
+    depends_on:
+      hindsight-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/health', timeout=2)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    networks: [stack, hindsight-data, hindsight-llm]
+
+volumes:
+  hindsight-pgdata:
+
+networks:
+  stack:
+    internal: true
+  hindsight-data:
+    internal: true
+  # In the real stack Hindsight joins an egress network itself; here it reaches OpenRouter only
+  # through or-proxy.
+  hindsight-llm:
+    internal: true
+  egress: {}

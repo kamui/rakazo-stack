@@ -1,0 +1,527 @@
+05:28:40	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	411	3516		6	
+05:29:59	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	68				
+05:30:00	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	615	3464	3328	128	
+05:30:01	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	65				
+05:30:01	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	61				
+05:30:01	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1105	4612	576	87	
+05:30:02	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	950	3692		79	
+05:30:02	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	77				
+05:30:03	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	63				
+05:30:03	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	71				
+05:30:03	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	4187	5078		222	22
+05:30:03	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	86				
+05:30:03	recall	rerank	local	hindsight-ai/hs-rerank-1	success	124				
+05:30:05	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	578	3458		127	10
+05:30:05	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	59				
+05:30:07	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	62				
+05:30:07	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	56				
+05:30:07	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1735	5324	18	164	1
+05:30:08	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1518	4087		293	63
+05:30:09	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	59				
+05:30:09	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	60				
+05:30:09	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	106				
+05:30:09	recall	rerank	local	hindsight-ai/hs-rerank-1	success	85				
+05:30:10	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	62				
+05:30:10	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1593	4832		141	87
+05:30:11	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	568	3456		57	
+05:30:11	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	60				
+05:30:11	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	96				
+05:30:11	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1319	5116		331	
+05:30:12	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	57				
+05:30:13	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	60				
+05:30:13	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	66				
+05:30:13	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	2199	5289	18	167	1
+05:30:13	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1942	4286		592	43
+05:30:13	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:30:14	recall	rerank	local	hindsight-ai/hs-rerank-1	success	73				
+05:30:15	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	127				
+05:30:15	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	55				
+05:30:15	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	103				
+05:30:15	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1557	4788		220	58
+05:30:16	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1474	3789	18	153	16
+05:30:17	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	59				
+05:30:17	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	102				
+05:30:17	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3545	5644		699	106
+05:30:18	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:30:18	recall	rerank	local	hindsight-ai/hs-rerank-1	success	108				
+05:30:18	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	106				
+05:30:19	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2554	3462		89	
+05:30:21	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	99				
+05:30:21	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:30:21	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	2643	5971	18	243	40
+05:30:22	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	52				
+05:30:23	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2542	3935		298	29
+05:30:24	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	55				
+05:30:24	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	50				
+05:30:24	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1174	6113		175	22
+05:30:25	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	50				
+05:30:26	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	122				
+05:30:26	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	89				
+05:30:26	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	4571	6295	18	423	110
+05:30:31	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	89				
+05:30:37	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	58				
+05:30:37	recall	rerank	local	hindsight-ai/hs-rerank-1	success	170				
+05:30:39	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2913	4177	18	384	1
+05:30:39	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	48				
+05:30:39	recall	rerank	local	hindsight-ai/hs-rerank-1	success	165				
+05:30:41	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	62				
+05:30:41	recall	rerank	local	hindsight-ai/hs-rerank-1	success	167				
+05:30:42	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	113				
+05:30:42	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	63				
+05:30:42	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1900	4199		326	
+05:30:42	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	768	3637		124	
+05:30:42	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1476	5904		168	
+05:30:43	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2996	3473		87	
+05:30:44	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	47				
+05:30:44	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	91				
+05:30:44	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	4240	6293		767	
+05:30:44	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	104				
+05:30:46	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	50				
+05:30:48	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	91				
+05:30:48	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1542	3869		261	88
+05:30:48	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	4836	6293		739	33
+05:30:49	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	46				
+05:30:50	recall	rerank	local	hindsight-ai/hs-rerank-1	success	120				
+05:30:50	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	104				
+05:30:53	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	57				
+05:30:53	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	780	6035		142	
+05:30:54	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:30:54	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1036	6036		198	18
+05:30:55	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1315	3914		262	1
+05:30:55	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2623	3875		322	32
+05:30:55	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	65				
+05:30:55	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1276	6054		233	53
+05:30:56	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	61				
+05:30:56	recall	rerank	local	hindsight-ai/hs-rerank-1	success	132				
+05:30:57	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	59				
+05:30:57	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	838	6009		170	40
+05:30:58	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	137				
+05:30:58	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	115				
+05:30:58	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	2398	6444		1035	309
+05:30:58	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2513	3463		202	7
+05:31:00	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	82				
+05:31:01	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	90				
+05:31:01	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	58				
+05:31:01	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	5463	6583	2304	422	181
+05:31:02	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2354	4107		354	
+05:31:04	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:31:04	recall	rerank	local	hindsight-ai/hs-rerank-1	success	131				
+05:31:05	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	117				
+05:31:06	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	57				
+05:31:06	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1207	6446	2304	193	
+05:31:08	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	64				
+05:31:08	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2928	4149		322	
+05:31:08	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3011	3817	18	320	47
+05:31:08	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1722	6509	576	227	87
+05:31:08	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:31:08	recall	rerank	local	hindsight-ai/hs-rerank-1	success	142				
+05:31:09	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	713	3457		51	
+05:31:09	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:31:09	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	980	6464		182	
+05:31:10	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	57				
+05:31:10	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	54				
+05:31:11	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	123				
+05:31:11	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	124				
+05:31:11	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	14844	7199	18	1373	698
+05:31:14	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1089	3846		408	35
+05:31:14	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	857	3793		127	
+05:31:14	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	47				
+05:31:14	recall	rerank	local	hindsight-ai/hs-rerank-1	success	158				
+05:31:15	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	120				
+05:31:17	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3372	4141	18	340	39
+05:31:18	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	57				
+05:31:18	recall	rerank	local	hindsight-ai/hs-rerank-1	success	153				
+05:31:20	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	92				
+05:31:20	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	861	3464	2112	124	1
+05:31:21	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	53				
+05:31:23	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1895	4174		271	44
+05:31:23	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	683	3609	3328	80	
+05:31:25	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:31:25	recall	rerank	local	hindsight-ai/hs-rerank-1	success	154				
+05:31:25	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	97				
+05:31:26	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	96				
+05:31:26	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	105				
+05:31:26	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1009	3729	3328	158	
+05:31:26	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	5088	7256		637	330
+05:31:27	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	113				
+05:31:27	recall	rerank	local	hindsight-ai/hs-rerank-1	success	467				
+05:31:27	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	106				
+05:31:31	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	50				
+05:31:31	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	4232	7085		249	423
+05:31:36	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	60				
+05:31:36	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1969	7124	576	250	92
+05:31:38	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	59				
+05:31:38	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1546	7084		175	44
+05:31:40	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	57				
+05:31:40	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	2801	7183		484	77
+05:31:42	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	55				
+05:31:43	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	128				
+05:31:43	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	11322	7934		1419	293
+05:31:54	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	119				
+05:31:54	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	88				
+05:31:55	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3277	8749		853	101
+05:31:58	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	83				
+05:31:58	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	50				
+05:31:58	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	2456	8984		171	
+05:32:01	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	50				
+05:32:01	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	82				
+05:32:01	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1714	9043		246	
+05:32:03	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	59				
+05:32:45	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	5261	4140	3328	1206	5
+05:32:45	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3490	3559		247	
+05:32:45	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3502	4319	3328	747	4
+05:32:46	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	50				
+05:32:46	recall	rerank	local	hindsight-ai/hs-rerank-1	success	227				
+05:32:50	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	306				
+05:32:51	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	149				
+05:32:51	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	7151	10004		1846	166
+05:32:53	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	4185	3822		332	71
+05:32:54	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	55				
+05:32:54	recall	rerank	local	hindsight-ai/hs-rerank-1	success	245				
+05:32:57	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1304	3477		147	
+05:32:57	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	100				
+05:32:58	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	109				
+05:32:58	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	178				
+05:32:59	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	118				
+05:32:59	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	9940	12834		1994	706
+05:33:01	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3984	4141	18	608	61
+05:33:02	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	63				
+05:33:02	recall	rerank	local	hindsight-ai/hs-rerank-1	success	529				
+05:33:05	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	110				
+05:33:08	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2775	4176		535	66
+05:33:08	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3766	4000	18	540	35
+05:33:08	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	59				
+05:33:09	recall	rerank	local	hindsight-ai/hs-rerank-1	success	437				
+05:33:09	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	148				
+05:33:09	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	114				
+05:33:10	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	16479	14997		1948	1264
+05:33:12	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	157				
+05:33:12	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	61				
+05:33:13	recall	rerank	local	hindsight-ai/hs-rerank-1	success	535				
+05:33:22	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:33:22	recall	rerank	local	hindsight-ai/hs-rerank-1	success	506				
+05:33:26	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	113				
+05:33:26	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	103				
+05:33:27	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	8647	14095		1400	781
+05:33:27	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	6512	4031		516	296
+05:33:27	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2904	3763	2112	475	17
+05:33:27	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	45				
+05:33:27	recall	rerank	local	hindsight-ai/hs-rerank-1	success	542				
+05:33:31	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	68				
+05:33:31	recall	rerank	local	hindsight-ai/hs-rerank-1	success	639				
+05:33:33	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	142				
+05:33:33	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1603	4201	1152	322	
+05:33:35	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	103				
+05:33:35	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	94				
+05:33:35	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	118				
+05:33:35	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	17723	4250	3328	491	52
+05:33:35	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1095	3609		130	21
+05:33:35	recall	rerank	local	hindsight-ai/hs-rerank-1	success	524				
+05:33:35	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3465	10284		286	246
+05:33:39	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	93				
+05:33:39	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1848	10122		426	114
+05:33:41	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	53				
+05:33:41	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1595	9070		211	87
+05:33:43	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:33:43	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1971	9316		294	136
+05:33:45	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	55				
+05:33:45	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1006	9889		193	48
+05:33:46	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	55				
+05:33:46	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	136				
+05:33:46	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	11654	15477	576	2020	1067
+05:33:53	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	159				
+05:33:53	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3460	4030		801	
+05:33:57	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	176				
+05:33:58	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	283				
+05:33:59	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	91				
+05:33:59	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	6566	12964		1104	1310
+05:34:05	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	89				
+05:34:06	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	6780	12964		1381	776
+05:34:12	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:34:12	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1778	7491		266	134
+05:34:14	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	54				
+05:34:14	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3161	10016		197	258
+05:34:18	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	58				
+05:34:18	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	7677	7905	2304	622	536
+05:34:25	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:34:25	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1551	7608		184	46
+05:34:27	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	129				
+05:34:27	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	7313	16705		1961	1098
+05:34:35	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	373				
+05:34:35	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	118				
+05:34:35	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	4397	13773	4032	1562	531
+05:34:40	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	414				
+05:34:40	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	90				
+05:34:41	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	4521	15701		690	200
+05:34:45	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	112				
+05:35:03	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:35:03	recall	rerank	local	hindsight-ai/hs-rerank-1	success	62				
+05:35:03	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	103				
+05:35:03	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3285	5289		758	227
+05:35:06	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	45				
+05:35:06	recall	rerank	local	hindsight-ai/hs-rerank-1	success	43				
+05:35:06	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	101				
+05:35:06	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	83				
+05:35:07	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3418	6224		353	264
+05:35:08	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1725	3595		155	
+05:35:09	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	46				
+05:35:09	recall	rerank	local	hindsight-ai/hs-rerank-1	success	101				
+05:35:10	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	84				
+05:35:10	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	81				
+05:35:10	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	92				
+05:35:10	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	9584	6774	512	354	1957
+05:35:13	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1551	3918	3392	405	4
+05:35:13	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	49				
+05:35:13	recall	rerank	local	hindsight-ai/hs-rerank-1	success	119				
+05:35:14	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	110				
+05:35:15	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2629	4106	18	332	65
+05:35:15	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:35:15	recall	rerank	local	hindsight-ai/hs-rerank-1	success	136				
+05:35:18	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	111				
+05:35:19	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2595	4139		368	5
+05:35:19	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1514	3612	3328	165	
+05:35:19	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	54				
+05:35:19	recall	rerank	local	hindsight-ai/hs-rerank-1	success	143				
+05:35:20	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	93				
+05:35:20	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	14341	6774	3840	332	2952
+05:35:21	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	90				
+05:35:22	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	104				
+05:35:28	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3289	3861		528	9
+05:35:30	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	58				
+05:35:30	recall	rerank	local	hindsight-ai/hs-rerank-1	success	132				
+05:35:31	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	111				
+05:35:33	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3950	4047	18	540	4
+05:35:34	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	49				
+05:35:34	recall	rerank	local	hindsight-ai/hs-rerank-1	success	131				
+05:35:34	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	54				
+05:35:35	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1901	6686	2304	157	147
+05:35:36	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	54				
+05:35:37	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3351	6689	18	156	209
+05:35:37	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	96				
+05:35:38	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1582	4195		582	
+05:35:39	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	110				
+05:35:40	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	105				
+05:35:40	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	17370	7218	2304	1326	1982
+05:35:58	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	113				
+05:35:58	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	89				
+05:35:58	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3877	7840		536	121
+05:36:02	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	97				
+05:39:37	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1333	3602		158	
+05:39:39	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	90				
+05:39:39	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	83				
+05:39:39	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1967	4704	19	167	11
+05:39:41	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	85				
+05:40:05	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	68				
+05:40:05	recall	rerank	local	hindsight-ai/hs-rerank-1	success	94				
+05:40:10	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1649	3891		304	
+05:40:11	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	108				
+05:40:12	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	100				
+05:40:12	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1361	4820		249	1
+05:40:13	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	87				
+05:40:15	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	46				
+05:40:15	recall	rerank	local	hindsight-ai/hs-rerank-1	success	90				
+05:40:21	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2501	4065		459	49
+05:40:23	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	120				
+05:40:23	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	102				
+05:40:24	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1716	4889	576	379	24
+05:40:25	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	104				
+05:40:28	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	46				
+05:40:28	recall	rerank	local	hindsight-ai/hs-rerank-1	success	107				
+05:40:31	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1120	4111		343	
+05:40:31	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1004	3720		274	29
+05:40:32	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	89				
+05:40:32	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	97				
+05:40:32	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	112				
+05:40:32	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	2973	5030		409	
+05:40:35	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	97				
+05:40:36	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	46				
+05:40:36	recall	rerank	local	hindsight-ai/hs-rerank-1	success	114				
+05:40:39	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2462	3867	1152	64	
+05:40:42	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	52				
+05:40:42	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	53				
+05:40:42	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	848	5409		172	
+05:40:43	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	45				
+05:40:44	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	59				
+05:40:44	recall	rerank	local	hindsight-ai/hs-rerank-1	success	92				
+05:40:46	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1953	4075		302	
+05:40:48	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	94				
+05:40:48	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	89				
+05:40:48	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3228	5667	1216	761	243
+05:40:51	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	89				
+05:40:52	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	46				
+05:40:53	recall	rerank	local	hindsight-ai/hs-rerank-1	success	99				
+05:40:54	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3365	4255	2112	384	
+05:40:57	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	108				
+05:40:57	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	2591	5626		683	
+05:40:57	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	106				
+05:41:00	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	92				
+05:41:01	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	58				
+05:41:01	recall	rerank	local	hindsight-ai/hs-rerank-1	success	116				
+05:41:05	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	814	3658	2112	78	1
+05:41:06	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	59				
+05:41:06	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	66				
+05:41:06	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	824	6112		145	
+05:41:07	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	51				
+05:41:09	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	50				
+05:41:09	recall	rerank	local	hindsight-ai/hs-rerank-1	success	121				
+05:41:12	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1821	3985		221	
+05:41:14	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	90				
+05:41:14	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	86				
+05:41:14	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	1095	6221		408	
+05:41:15	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	94				
+05:41:17	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:41:17	recall	rerank	local	hindsight-ai/hs-rerank-1	success	131				
+05:41:21	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1496	4206		326	
+05:41:23	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	100				
+05:41:23	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	90				
+05:41:23	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3720	6369		715	203
+05:41:27	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	91				
+05:41:29	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:41:30	recall	rerank	local	hindsight-ai/hs-rerank-1	success	110				
+05:41:32	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2070	4248		285	33
+05:41:32	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1654	3680		268	32
+05:41:34	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	124				
+05:41:34	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	113				
+05:41:34	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	4371	6463		1404	442
+05:41:39	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	111				
+05:41:40	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	46				
+05:41:40	recall	rerank	local	hindsight-ai/hs-rerank-1	success	131				
+05:41:44	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1745	4002		266	
+05:41:46	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	106				
+05:41:46	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	120				
+05:41:47	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	5889	7174		872	359
+05:41:53	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	96				
+05:41:54	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	47				
+05:41:54	recall	rerank	local	hindsight-ai/hs-rerank-1	success	169				
+05:41:56	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2845	4187		289	41
+05:41:59	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	100				
+05:41:59	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	4167	7217	576	887	124
+05:41:59	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	97				
+05:42:03	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	89				
+05:42:06	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	56				
+05:42:06	recall	rerank	local	hindsight-ai/hs-rerank-1	success	156				
+05:42:10	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1387	4236		270	
+05:42:10	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	787	3547		87	
+05:42:11	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	112				
+05:42:11	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	106				
+05:42:12	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	8674	7286		1170	540
+05:42:20	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	95				
+05:42:23	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	63				
+05:42:23	recall	rerank	local	hindsight-ai/hs-rerank-1	success	152				
+05:42:25	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	731	3642		114	
+05:42:25	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	91				
+05:42:26	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	95				
+05:42:26	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	2055	7618	2304	345	12
+05:42:28	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	53				
+05:42:29	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	97				
+05:42:29	recall	rerank	local	hindsight-ai/hs-rerank-1	success	519				
+05:43:01	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3886	3846	2432	800	6
+05:43:05	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	154				
+05:43:05	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	155				
+05:43:06	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3663	8185		930	112
+05:43:09	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	168				
+05:47:32	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	62				
+05:47:32	recall	rerank	local	hindsight-ai/hs-rerank-1	success	634				
+05:47:58	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	675	3692	3392	116	1
+05:47:58	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	5364	4180	18	860	5
+05:48:03	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	259				
+05:48:03	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	298				
+05:48:04	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	8775	9290	2304	1745	375
+05:48:13	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	246				
+05:48:13	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	48				
+05:48:13	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	721	6482		164	25
+05:48:14	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	54				
+05:48:16	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	55				
+05:48:16	recall	rerank	local	hindsight-ai/hs-rerank-1	success	966				
+05:48:22	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1418	4212	3392	563	31
+05:48:22	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	1671	3689		293	
+05:48:24	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	128				
+05:48:24	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	124				
+05:48:25	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	9472	8783	2304	1628	465
+05:48:34	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	99				
+05:48:34	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:48:34	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3108	8127		224	193
+05:48:38	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	84				
+05:48:38	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	110				
+05:48:38	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3427	9361	1216	823	388
+05:48:41	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	160				
+05:48:43	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	53				
+05:48:43	recall	rerank	local	hindsight-ai/hs-rerank-1	success	975				
+05:48:47	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2397	4052		416	51
+05:48:49	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	128				
+05:48:49	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	120				
+05:48:50	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	3949	8755		893	335
+05:48:54	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	93				
+05:48:56	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	49				
+05:48:56	recall	rerank	local	hindsight-ai/hs-rerank-1	success	1017				
+05:49:02	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2067	4099		362	
+05:49:02	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	3457	3619		310	63
+05:49:06	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	136				
+05:49:06	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	123				
+05:49:06	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	7524	9699	4032	1616	962
+05:49:14	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	119				
+05:49:16	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	45				
+05:49:16	recall	rerank	local	hindsight-ai/hs-rerank-1	success	885				
+05:49:21	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2865	3991	18	336	50
+05:49:23	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	102				
+05:49:24	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	12776	9849	18	1400	1642
+05:49:24	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	115				
+05:49:36	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	91				
+05:49:36	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	83				
+05:49:37	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	4540	6462		597	174
+05:49:41	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	124				
+05:49:44	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	49				
+05:49:44	recall	rerank	local	hindsight-ai/hs-rerank-1	success	1211				
+05:49:47	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	2461	4184		258	61
+05:49:50	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	98				
+05:49:50	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	120				
+05:49:50	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	2168	8910		796	191
+05:49:53	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	159				
+05:49:53	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	14264	9818	18	1601	1298
+05:49:53	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	99				
+05:50:07	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	155				
+05:50:10	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	48				
+05:50:10	recall	rerank	local	hindsight-ai/hs-rerank-1	success	771				
+05:50:14	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	4657	4247	18	398	56
+05:50:14	retain	retain_extract_facts	openrouter	~z-ai/glm-flash-latest	success	4903	3761	3346	852	6
+05:50:19	retain	embedding_document	local	BAAI/bge-small-en-v1.5	success	176				
+05:50:19	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	114				
+05:50:19	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	8382	10110		1428	784
+05:50:27	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	7844	11246	2304	1081	386
+05:50:28	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	111				
+05:50:28	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	92				
+05:50:35	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	126				
+05:50:35	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	94				
+05:50:36	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	8803	9438		592	470
+05:50:45	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	141				
+05:50:45	consolidation	embedding_query	local	BAAI/bge-small-en-v1.5	success	103				
+05:50:45	consolidation	consolidation	openrouter	~z-ai/glm-flash-latest	success	7788	12024		1035	369
+05:50:53	consolidation	embedding_document	local	BAAI/bge-small-en-v1.5	success	133				
+05:54:54	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:54:54	recall	rerank	local	hindsight-ai/hs-rerank-1	success	964				
+05:54:55	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	45				
+05:54:55	recall	rerank	local	hindsight-ai/hs-rerank-1	success	986				
+05:54:56	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	48				
+05:54:56	recall	rerank	local	hindsight-ai/hs-rerank-1	success	955				
+05:54:57	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:54:57	recall	rerank	local	hindsight-ai/hs-rerank-1	success	977				
+05:54:58	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:54:58	recall	rerank	local	hindsight-ai/hs-rerank-1	success	987				
+05:54:59	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	56				
+05:54:59	recall	rerank	local	hindsight-ai/hs-rerank-1	success	944				
+05:55:00	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	46				
+05:55:00	recall	rerank	local	hindsight-ai/hs-rerank-1	success	917				
+05:55:01	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:55:01	recall	rerank	local	hindsight-ai/hs-rerank-1	success	1549				
+05:55:03	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	46				
+05:55:03	recall	rerank	local	hindsight-ai/hs-rerank-1	success	2005				
+05:55:05	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:55:05	recall	rerank	local	hindsight-ai/hs-rerank-1	success	1488				
+05:55:07	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	52				
+05:55:07	recall	rerank	local	hindsight-ai/hs-rerank-1	success	1719				
+05:55:08	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	51				
+05:55:08	recall	rerank	local	hindsight-ai/hs-rerank-1	success	1592				
+05:55:10	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	50				
+05:55:10	recall	rerank	local	hindsight-ai/hs-rerank-1	success	2203				
+05:55:12	recall	embedding_query	local	BAAI/bge-small-en-v1.5	success	45				
+05:55:12	recall	rerank	local	hindsight-ai/hs-rerank-1	success	1933				

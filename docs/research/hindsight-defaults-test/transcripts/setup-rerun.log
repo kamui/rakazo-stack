@@ -1,0 +1,6 @@
+== re-run
+== detect (read-only SQL, no password)
+   {"owner" : true, "defaultSpace" : true, "hindsight" : true, "aiConsents" : []}
+== nothing missing
+== stored row
+hindsight|{"mode": "local", "baseUrl": "http://hindsight:8888"}|isolated

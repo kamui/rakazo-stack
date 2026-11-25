@@ -1,0 +1,100 @@
+=== types: obs
+Q: What's my dog's name, and when does she need her vaccinations?
+   34 results in 1.04s; expected facts found: 3/3 ['Pepper', 'May', 'Graça']; first relevant at rank 1
+   1. Pepper needs her vaccinations renewed every May at the vet on Rua da Graça.
+   2. Sam and Alex have a dog named Pepper, a beagle.
+   3. Sam and Alex are planning a two-week Japan trip from 3–17 October 2027, landing at Haneda at 7am on 3 October and flying home from Kansai at 10pm on 17 October.
+   4. Inês will visit the user at home on 28–29 November 2026.
+   5. Inês is allergic to nuts.
+Q: What should I keep in mind when cooking for Alex and me?
+   36 results in 1.05s; expected facts found: 3/3 ['vegetarian', 'coriander', 'mushroom']; first relevant at rank 1
+   1. The assistant planned a nut-free, vegetarian, coriander-free Saturday dinner menu for 28 November 2026 (red pepper & tomato soup, chickpea & spinach curry with 
+   2. The household cooking rules are: vegetarian, no coriander, no mushrooms.
+   3. The household's favourite dish so far is chickpea & spinach curry.
+   4. Alex loves jazz and bouldering. (2026-11-25 05:43: Trip wishlist includes: Ghibli Museum (tickets on sale 10 Sep 2027), jazz kissa in Tokyo and jazz bar in Osak
+   5. The assistant recommended quick-carb, low-fibre pre-run foods (banana with peanut butter, toast with jam, oatmeal) and carbs plus protein after runs.
+Q: Which days do I run these days?
+   36 results in 1.02s; expected facts found: 1/1 ['Saturday']; first relevant at rank 1
+   1. The user runs on Tuesdays, Thursdays and Saturdays, usually early in the morning. (2026-11-25 05:50: User's running schedule updated to Tuesdays, Thursdays and 
+   2. From 25 November 2026 onward, the user's long run is on Saturdays instead of Sundays. (2026-11-25 05:50: User's running schedule updated to Tuesdays, Thursdays 
+   3. The Japan trip covers Tokyo, Hakone, Kyoto, Nara and Osaka, with a detailed day-by-day itinerary including a rest day on Wednesday 13 October in Kyoto. (2026-11
+   4. In 2027, 3 and 17 October fall on Sundays, not Saturdays, so the Japan trip flight dates may need double-checking.
+   5. The Saiho-ji moss temple in Japan requires an advance reservation. (2026-11-25 05:43: Trip wishlist includes: Ghibli Museum (tickets on sale 10 Sep 2027), jazz 
+Q: When is Alex's birthday, and what kind of gifts do I prefer to give?
+   36 results in 1.04s; expected facts found: 2/2 ['March 14', 'experience']; first relevant at rank 1
+   1. Alex's birthday is on March 14.
+   2. The user is planning experience-based gifts for Alex's birthday on 14 March 2027, including a jazz evening at Hot Clube de Portugal and a guided bouldering sess
+   3. The user prefers giving experiences rather than things as gifts.
+   4. The assistant planned a nut-free, vegetarian, coriander-free Saturday dinner menu for 28 November 2026 (red pepper & tomato soup, chickpea & spinach curry with 
+   5. Alex loves jazz and bouldering. (2026-11-25 05:43: Trip wishlist includes: Ghibli Museum (tickets on sale 10 Sep 2027), jazz kissa in Tokyo and jazz bar in Osak
+Q: Who is visiting me soon, and is there anything I need to know about her diet?
+   36 results in 1.05s; expected facts found: 2/2 ['Inês', 'nut']; first relevant at rank 1
+   1. Inês will visit the user at home on 28–29 November 2026.
+   2. The assistant planned a nut-free, vegetarian, coriander-free Saturday dinner menu for 28 November 2026 (red pepper & tomato soup, chickpea & spinach curry with 
+   3. The assistant recommended quick-carb, low-fibre pre-run foods (banana with peanut butter, toast with jam, oatmeal) and carbs plus protein after runs.
+   4. Sam and Alex are planning a two-week Japan trip from 3–17 October 2027, landing at Haneda at 7am on 3 October and flying home from Kansai at 10pm on 17 October.
+   5. Inês is the user's sister and is visiting from Porto.
+Q: Where am I travelling in October, and with whom?
+   36 results in 1.02s; expected facts found: 2/2 ['Japan', 'Alex']; first relevant at rank 1
+   1. The Japan trip covers Tokyo, Hakone, Kyoto, Nara and Osaka, with a detailed day-by-day itinerary including a rest day on Wednesday 13 October in Kyoto. (2026-11
+   2. Sam and Alex are planning a two-week Japan trip from 3–17 October 2027, landing at Haneda at 7am on 3 October and flying home from Kansai at 10pm on 17 October.
+   3. Logistics for the 3–17 October 2027 Japan trip: Suica on phones, no JR Pass (take the Shinkansen Tokyo→Odawara and Odawara→Kyoto instead), one carry-on each, an
+   4. In 2027, 3 and 17 October fall on Sundays, not Saturdays, so the Japan trip flight dates may need double-checking.
+   5. The Japan trip route is Tokyo (~5 nights near Shimokitazawa/Kichijoji), a 1-night Hakone ryokan with private onsen (Alex has tattoos), a Kyoto machiya (~4–5 nig
+Q: What do I do for work, and who is Rosa?
+   36 results in 0.98s; expected facts found: 2/2 ['graphic design', 'Rosa']; first relevant at rank 1
+   1. Rosa is the user's client and runs a bakery.
+   2. On 25 November 2026 the user asked for a formal email to Rosa about the logo drafts; the assistant drafted it signed 'Sam' and the user requested a more formal 
+   3. New logo drafts for Rosa's bakery will be ready and sent on Friday, 27 November 2026.
+   4. The user works from home as a graphic designer, mostly for small bakeries and cafés.
+   5. The user is planning experience-based gifts for Alex's birthday on 14 March 2027, including a jazz evening at Hot Clube de Portugal and a guided bouldering sess
+=== types: all
+Q: What's my dog's name, and when does she need her vaccinations?
+   76 results in 1.62s; expected facts found: 3/3 ['Pepper', 'May', 'Graça']; first relevant at rank 1
+   1. Pepper (user's pet) needs her vaccinations renewed every May at the vet on Rua da Graça | When: Every May | Where: Vet on Rua da Graça | Involving: Pepper (user
+   2. Pepper needs her vaccinations renewed every May at the vet on Rua da Graça.
+   3. Pepper's vaccinations happen every May at the vet on Rua da Graça. | When: Every May | Where: Rua da Graça | Involving: Pepper (user's beagle)
+   4. Pepper's vaccinations are due every May at the vet on Rua da Graça | When: every May | Where: Rua da Graça | Involving: user's pet Pepper
+   5. Sam and Alex have a dog named Pepper, a beagle.
+Q: What should I keep in mind when cooking for Alex and me?
+   78 results in 2.07s; expected facts found: 3/3 ['vegetarian', 'coriander', 'mushroom']; first relevant at rank 1
+   1. Sam is vegetarian and dislikes coriander; Alex doesn't eat mushrooms. House rules for cooking: vegetarian, no coriander, no mushrooms. | Involving: Sam (user), 
+   2. Assistant planned a nut-free, vegetarian, coriander-free Saturday dinner menu for 28 Nov (red pepper & tomato soup, chickpea & spinach curry with lemon rice and
+   3. The assistant planned a nut-free, vegetarian, coriander-free Saturday dinner menu for 28 November 2026 (red pepper & tomato soup, chickpea & spinach curry with 
+   4. The household cooking rules are: vegetarian, no coriander, no mushrooms.
+   5. User is vegetarian and dislikes coriander; Alex avoids mushrooms; Inês must have nut-free food. | Involving: user, Alex, Inês
+Q: Which days do I run these days?
+   78 results in 1.56s; expected facts found: 1/1 ['Saturday']; first relevant at rank 1
+   1. The user runs on Tuesdays, Thursdays and Saturdays, usually early in the morning. (2026-11-25 05:50: User's running schedule updated to Tuesdays, Thursdays and 
+   2. From 25 November 2026 onward, the user's long run is on Saturdays instead of Sundays. (2026-11-25 05:50: User's running schedule updated to Tuesdays, Thursdays 
+   3. User's running schedule updated to Tuesdays, Thursdays and Saturdays, with the long run on Saturday mornings. | Involving: user
+   4. User is training for a half marathon in April, running on Tuesdays, Thursdays and Sundays, usually early in the morning. | When: race in April 2027; runs on Tue
+   5. User runs on Tuesdays, Thursdays and Sundays, usually early in the morning | Involving: user
+Q: When is Alex's birthday, and what kind of gifts do I prefer to give?
+   78 results in 1.79s; expected facts found: 2/2 ['March 14', 'experience']; first relevant at rank 1
+   1. Alex's birthday is on March 14.
+   2. Alex's birthday is 14 March; Alex likes jazz and bouldering, and user prefers giving experiences over things as gifts. | When: 14 March | Involving: Alex (user'
+   3. The user is planning experience-based gifts for Alex's birthday on 14 March 2027, including a jazz evening at Hot Clube de Portugal and a guided bouldering sess
+   4. Alex loves jazz and bouldering; user is planning experience-based gifts for Alex's birthday on 14 March (2027), with ideas including a jazz evening at Hot Clube
+   5. Alex's birthday is on March 14, and Alex loves jazz and bouldering. | When: March 14 | Involving: Alex (user's acquaintance)
+Q: Who is visiting me soon, and is there anything I need to know about her diet?
+   78 results in 1.66s; expected facts found: 2/2 ['Inês', 'nut']; first relevant at rank 1
+   1. Inês is allergic to nuts and will visit the user next weekend (28–29 November 2026); user may host her | When: visit planned for 28–29 November 2026 | Where: us
+   2. Inês will visit the user at home on 28–29 November 2026.
+   3. The assistant planned a nut-free, vegetarian, coriander-free Saturday dinner menu for 28 November 2026 (red pepper & tomato soup, chickpea & spinach curry with 
+   4. Inês is visiting the user, with a Saturday dinner planned (curry + rice menu) that lands right after the Saturday long run. | Involving: Inês (user's visitor)
+   5. User's sister Inês lives in Porto and is nut-allergic; she is visiting 28–29 November 2026. | When: 2026-11-28 to 2026-11-29 | Where: Lisbon (visit); Porto (hom
+Q: Where am I travelling in October, and with whom?
+   78 results in 2.27s; expected facts found: 2/2 ['Japan', 'Alex']; first relevant at rank 1
+   1. User and Alex plan a two-week Japan trip in October (Tokyo → Hakone → Kyoto → Osaka); Ghibli tickets and Saiho-ji reservation still to be booked. | When: Octobe
+   2. The Japan trip covers Tokyo, Hakone, Kyoto, Nara and Osaka, with a detailed day-by-day itinerary including a rest day on Wednesday 13 October in Kyoto. (2026-11
+   3. Sam and Alex are planning a two-week Japan trip from 3–17 October 2027, landing at Haneda at 7am on 3 October and flying home from Kansai at 10pm on 17 October.
+   4. Sam and Alex are planning a two-week Japan trip from 3–17 October 2027: land at Haneda 7am 3 Oct, fly home from Kansai 10pm 17 Oct. Route: Tokyo (~5 nights, nea
+   5. User is planning a Japan trip (3–17 October 2027) covering Tokyo, Hakone, Kyoto, Nara and Osaka, with a detailed day-by-day itinerary including a rest day on We
+Q: What do I do for work, and who is Rosa?
+   78 results in 2.00s; expected facts found: 2/2 ['graphic design', 'Rosa']; first relevant at rank 1
+   1. Rosa is the user's client and runs a bakery.
+   2. User's client Rosa runs a bakery; new logo drafts for her bakery will be ready and sent on Friday, 27 November 2026. | When: 2026-11-27 | Involving: Rosa (user'
+   3. User asked for a formal email to Rosa about the logo drafts; the assistant drafted it signed 'Sam', and the user requested a more formal version. | When: Novemb
+   4. On 25 November 2026 the user asked for a formal email to Rosa about the logo drafts; the assistant drafted it signed 'Sam' and the user requested a more formal 
+   5. New logo drafts for Rosa's bakery will be ready and sent on Friday, 27 November 2026.
