@@ -1,6 +1,6 @@
 # Is Hindsight's recall fast enough on slow CPUs and Apple silicon?
 
-Ticket: kamui/rakazo-stack#47. Versions: Hindsight v1.3.0 (commit `93788619`), image `ghcr.io/vectorize-io/hindsight-api:1.3.0` (`sha256:c054765e…`), `pgvector/pgvector:pg18` (`sha256:38681dc6…`, PostgreSQL 18.7, pgvector 0.8.7) and Rakazo v0.16.0 (commit `6e24f7e6`). Measured on one x86-64 host: an AMD Ryzen 9 7900X (12 cores / 24 threads, Zen 4, AVX-512) running Docker Desktop 29.9.3 on Windows with the WSL 2 backend (24 CPUs and 15.45 GiB in the Docker VM). Apple silicon was not measured (section 6). No model provider key was used and nothing was spent.
+Ticket: kamui/rakazo-stack#47. Versions: Hindsight v1.3.0 (commit `93788619`), image `ghcr.io/vectorize-io/hindsight-api:1.3.0` (`sha256:c054765e…`), `pgvector/pgvector:pg18` (`sha256:38681dc6…`, PostgreSQL 18.7, pgvector 0.8.7) and Rakazo v0.16.0 (commit `6e24f7e6`). Measured on one x86-64 host: an AMD Ryzen 9 7900X (12 cores / 24 threads, Zen 4, AVX-512) running Docker Desktop 29.9.3 on Windows with the WSL 2 backend (24 CPUs and 15.45 GiB in the Docker VM). Apple silicon was measured afterwards, on an M3 Pro MacBook Pro (section 6a). No model provider key was used and nothing was spent.
 
 ## Answer
 
@@ -29,9 +29,9 @@ Ticket: kamui/rakazo-stack#47. Versions: Hindsight v1.3.0 (commit `93788619`), i
 - **Why not the other two:**
   - FlashRank is fast, but its model isn't in the image: it downloads 33 MB from Hugging Face on first use, and the stack's `hindsight` service has no internet. It also changes about half of the top 5.
   - `low` alone doesn't fix the two-at-once case.
-- **Apple silicon is unmeasured.** [measure.sh](hindsight-recall-latency/measure.sh) runs the whole measurement on a Mac in about an hour (section 6).
-  - The x86 numbers settle the decision: with the cap, a Mac core would have to be about 11 times slower than a Zen 4 desktop core before two recalls at once timed out.
-  - Running it on a Mac is a confirmation task, not a blocker.
+- **Apple silicon confirms the choice** (section 6a). On an M3 Pro under Docker Desktop, limited to 4 CPUs, capped `mid` took **1.88 s** two at once (max 2.04 s) and 4.80 s four at once.
+  - Per recall, an M3 Pro core was a little faster than the Zen 4 desktop.
+  - Without the cap, four at once on 4 CPUs reached the timeout (p95 15.2 s).
 
 ## Details
 
@@ -148,13 +148,13 @@ An earlier FlashRank run on the same 2 cores / 4 threads, before the reboot, gav
 - **Leave Rakazo's `recallBudget` at its default (`mid`).** With the cap, `mid` costs the same as `low`.
 - **Hardware text.** On a CPU much slower than a current desktop, the first reply of a conversation can still wait about 3–4 s for memory. That's worth saying in [Re-measure the hardware an Instance needs with Hindsight](https://github.com/kamui/rakazo-stack/issues/46)'s README text. It's not a reason to raise the 4-thread minimum.
 
-### 6. Apple silicon (not measured)
+### 6. Apple silicon: how to measure it
 
-There was no Mac here.
+The x86 run had no Mac. This section is how to run the measurement on one; section 6a has the results.
 
 - Upstream lists macOS on Apple silicon as fully supported ([installation.md#L13-L18](https://github.com/vectorize-io/hindsight/blob/v1.3.0/hindsight-docs/docs/developer/installation.md?plain=1#L13-L18)), and the image is published for linux/arm64.
 - Under Docker Desktop, Hindsight runs inside a Linux VM, so Metal isn't available. Hindsight never selects Torch's MPS backend anyway ([local_device.py](https://github.com/vectorize-io/hindsight/blob/v1.3.0/hindsight-api-slim/hindsight_api/engine/local_device.py)).
-- So the reranker runs on arm64 CPU kernels instead of x86's AVX-512 ones. How that compares per core is the open part (**unverified**).
+- So the reranker runs on arm64 CPU kernels instead of x86's AVX-512 ones. How that compares per core was the open part, and section 6a measured it.
 - The decision doesn't hang on it: with the candidate cap, two recalls at once took 4.0 s on the ⅓-speed stand-in. A Mac core would have to be about 11× slower than a Zen 4 desktop core to reach the timeout.
 
 **To finish it**, on an Apple-silicon Mac with Docker Desktop running (about 1 hour and about 8 GB of disk; no key needed):
@@ -217,11 +217,11 @@ Median / p95 in seconds. The x86 column is the closest x86 measurement from sect
 
 ## Open questions / follow-ups
 
-- **task:** Run [measure.sh](hindsight-recall-latency/measure.sh) on an Apple-silicon Mac (an 8 GB M1 or M2 if possible) and on a real slow 4-thread x86 machine (an Intel N100 or a 6th–8th-generation i3 or i5), and post the output on #47.
+- **task:** Run [measure.sh](hindsight-recall-latency/measure.sh) on a real slow 4-thread x86 machine (an Intel N100 or a 6th–8th-generation i3 or i5) and, if one is available, an 8 GB M1 or M2. Post the output on #47. An 18 GB M3 Pro is done (section 6a).
 - **task:** Put `HINDSIGHT_API_RERANKER_MAX_CANDIDATES=100` in the `hindsight` service's environment wherever the compose layout from [#10](https://github.com/kamui/rakazo-stack/issues/10) lists Hindsight's variables. Add a recall timing (`mid`, two at once, under 15 s) to the canary from #32.
 - **research:** Recall latency on real memories. Measure on a bank built by LLM extraction (observations, the type Rakazo recalls by default), which [Run Hindsight on the default models through Rakazo](https://github.com/kamui/rakazo-stack/issues/45) will produce. Check that observation text length doesn't change the picture.
 - **grilling:** Should setup offer FlashRank at all? It's faster on slow CPUs, but it needs a model download on a service that has no internet, and it changes results.
-- **Unverified in this research:** that the ½ and ⅓ stand-ins match a real slow CPU (no AVX-512, smaller caches); arm64 per-core speed for this model; what a FlashRank boot does with no network; how long real observations are.
+- **Unverified in this research:** that the ½ and ⅓ stand-ins match a real slow CPU (no AVX-512, smaller caches); what a FlashRank boot does with no network; how long real observations are.
 
 ## Sources
 
@@ -229,7 +229,7 @@ Hindsight v1.3.0 (https://github.com/vectorize-io/hindsight/tree/v1.3.0):
 - `hindsight-api-slim/hindsight_api/config.py` (reranker, budget and consolidation defaults), `_thread_limits.py`, `engine/cross_encoder.py`, `engine/local_device.py`, `hindsight-api-slim/pyproject.toml`
 - `docker/standalone/Dockerfile`
 - `hindsight-docs/docs/developer/installation.md` (Supported Platforms, Hardware)
-- Local runs of `ghcr.io/vectorize-io/hindsight-api:1.3.0` (amd64) on `pgvector/pgvector:pg18`, with Hindsight's `[phases]` recall log lines, the FlashRank 0.2.10 package and the `hs-rerank-1` `config.json` read from the image
+- Local runs of `ghcr.io/vectorize-io/hindsight-api:1.3.0` (amd64, and arm64 on the Mac in section 6a) on `pgvector/pgvector:pg18`, with Hindsight's `[phases]` recall log lines, the FlashRank 0.2.10 package and the `hs-rerank-1` `config.json` read from the image
 
 Rakazo v0.16.0 (https://github.com/elie222/rakazo/tree/v0.16.0):
 - `packages/adapters/src/providers/memory/hindsight/hindsight-client.ts`, `hindsight-memory-provider.ts`
