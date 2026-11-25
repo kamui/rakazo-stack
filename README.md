@@ -101,6 +101,9 @@ No. Leave the model provider key blank in setup and memory stays off. If you tur
 **Does memory send my conversations anywhere else?**
 Only to your model provider, the same one chat uses. After each reply, Rakazo sends that turn to Hindsight, and Hindsight asks your model provider to pick out facts worth remembering. With OpenAI or Gemini, memory runs on the admin's key for everyone, so other people's conversations are learned through the admin's account. To keep only facts that bots save on purpose, turn off **Learn from conversations** under **Settings → Memory → Edit**, in each Space.
 
+**How do I turn on memory in another Space?**
+Setup turns memory on only in your first Space. Memory is set per Space, and only a Space's owner can connect it, so people you invite turn it on in their own Spaces. In that Space, open **Settings → Memory**, choose **Connect memory provider**, then **Hindsight**, open **Advanced** and choose **Self-hosted**. Enter `http://hindsight:8888`, and paste the key from the `HINDSIGHT_API_TENANT_API_KEY` line in `~/rakazo-stack/secrets.env`. Hindsight can only be reached from inside rakazo-stack, so the key works only by typing it into Rakazo, and Rakazo keeps each Space's memory separate.
+
 **Can I use Honcho for memory instead?**
 Not in v1, which uses Hindsight. Honcho is planned as an option for a later version.
 
