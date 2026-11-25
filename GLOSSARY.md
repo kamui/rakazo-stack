@@ -24,6 +24,14 @@ _Avoid_: Install dir, data dir
 One encrypted file holding everything needed to bring an Instance back, on the same machine or another. A database dump is one part of a Backup, not a Backup itself.
 _Avoid_: Snapshot, export, dump
 
+**Component**:
+One of the upstream projects an Instance runs, such as Rakazo, Lemonade, Hindsight or Tailscale. Each has its own version, which an Update moves and a Hold keeps.
+_Avoid_: Service, dependency, package
+
+**Checklist**:
+The list of steps left for the Self-hoster to do by hand, printed at the end of every setup run.
+_Avoid_: To-do list, manual steps
+
 **Update**:
 Moving an Instance to the newest versions of rakazo-stack and its components.
 _Avoid_: Upgrade

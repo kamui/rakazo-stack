@@ -1,0 +1,10 @@
+# Hindsight, not Honcho, is v1's memory
+
+Planning started with Honcho as v1's memory, and many early tickets assume it. When Rakazo v0.12.0 added a Hindsight memory provider, v1 switched to Hindsight and moved Honcho to a later version ([#44](https://github.com/kamui/rakazo-stack/issues/44)). Hindsight runs its embeddings and reranker on the CPU inside its own image. So any of the four v1 Model providers, Anthropic included, can run memory with one key, there's no hosted embeddings model to keep fixed for an Instance's life, and a provider switch never touches stored memories. Hindsight also learns from every finished conversation, where Rakazo v0.4.0 only ever wrote explicit conclusions to Honcho ([#37](https://github.com/kamui/rakazo-stack/issues/37), [#38](https://github.com/kamui/rakazo-stack/issues/38), [#50](https://github.com/kamui/rakazo-stack/issues/50)).
+
+## Consequences
+
+- Memory data is stored in Hindsight's own schema in `hindsight-db`. Offering Honcho later means a new option for new Instances, or a migration, not a configuration switch.
+- Hindsight costs more than Honcho did: about 1 GiB more RAM and a 6.4 GB image, which raised the published minimums to 16 GB RAM and 35 GB of free disk ([#46](https://github.com/kamui/rakazo-stack/issues/46)), and about $2.4–3.7 a month in Model provider spend ([#45](https://github.com/kamui/rakazo-stack/issues/45)).
+- Memory needs three settings Hindsight's defaults don't give: `shm_size: 1g` on its database ([#48](https://github.com/kamui/rakazo-stack/issues/48)), a capped reranker (`HINDSIGHT_API_RERANKER_MAX_CANDIDATES=100`, [#47](https://github.com/kamui/rakazo-stack/issues/47)), and an egress network for the Model provider ([#45](https://github.com/kamui/rakazo-stack/issues/45)).
+- Honcho tickets [#7](https://github.com/kamui/rakazo-stack/issues/7), [#12](https://github.com/kamui/rakazo-stack/issues/12), [#13](https://github.com/kamui/rakazo-stack/issues/13), [#37](https://github.com/kamui/rakazo-stack/issues/37) and [#38](https://github.com/kamui/rakazo-stack/issues/38) stay on record for the later Honcho option.
