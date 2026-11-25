@@ -1,0 +1,87 @@
+$ ./measure.sh
+== machine
+Darwin arm64
+Apple M3 Pro
+5
+6
+19327352832
+docker server 29.9.2 linux/arm64
+docker VM: 11 CPUs, 8319369216 bytes, Docker Desktop
+image arm64 ghcr.io/vectorize-io/hindsight-api@sha256:c054765e9196fb1fe63497be06bcb55256c9024cc9314f951dc59858985ab242
+== seed 5000 memories (chunks mode, no LLM)
+api ready after 57s
+done in 104s
+== reranker: default
+api ready after 57s
+SUM {"label": "default-cold", "budget": "mid", "conc": 1, "runs": 1, "errors": 0, "median": 2.223, "p95": 2.223, "min": 2.223, "max": 2.223, "mean_results": 87, "wall": 2.22}
+SUM {"label": "default", "budget": "low", "conc": 1, "runs": 60, "errors": 0, "median": 1.231, "p95": 1.864, "min": 0.836, "max": 2.461, "mean_results": 85.6, "wall": 78.76}
+SUM {"label": "default", "budget": "mid", "conc": 1, "runs": 60, "errors": 0, "median": 2.086, "p95": 2.447, "min": 1.978, "max": 2.936, "mean_results": 85.8, "wall": 127.8}
+SUM {"label": "default", "budget": "high", "conc": 1, "runs": 60, "errors": 0, "median": 2.069, "p95": 2.16, "min": 1.963, "max": 2.217, "mean_results": 85.7, "wall": 124.45}
+SUM {"label": "default-conc2", "budget": "mid", "conc": 2, "runs": 60, "errors": 0, "median": 3.585, "p95": 3.693, "min": 3.428, "max": 3.845, "mean_results": 85.8, "wall": 107.39}
+SUM {"label": "default-conc4", "budget": "mid", "conc": 4, "runs": 60, "errors": 0, "median": 6.489, "p95": 6.626, "min": 5.912, "max": 6.855, "mean_results": 85.8, "wall": 97.31}
+  [phases] reranking=5938ms, generate_query_embedding=145ms, parallel_retrieval=33ms, entity_build=2ms, token_filtering=
+  [phases] reranking=5687ms, generate_query_embedding=179ms, parallel_retrieval=35ms, rrf_merge=2ms, entity_build=2ms, t
+== reranker: cand100
+api ready after 56s
+SUM {"label": "cand100-cold", "budget": "mid", "conc": 1, "runs": 1, "errors": 0, "median": 0.834, "p95": 0.834, "min": 0.834, "max": 0.834, "mean_results": 89, "wall": 0.83}
+SUM {"label": "cand100", "budget": "low", "conc": 1, "runs": 60, "errors": 0, "median": 0.74, "p95": 0.772, "min": 0.699, "max": 0.789, "mean_results": 86.2, "wall": 44.46}
+SUM {"label": "cand100", "budget": "mid", "conc": 1, "runs": 60, "errors": 0, "median": 0.744, "p95": 0.785, "min": 0.71, "max": 0.856, "mean_results": 86.0, "wall": 44.95}
+SUM {"label": "cand100", "budget": "high", "conc": 1, "runs": 60, "errors": 0, "median": 0.747, "p95": 0.774, "min": 0.705, "max": 0.806, "mean_results": 86.1, "wall": 44.81}
+SUM {"label": "cand100-conc2", "budget": "mid", "conc": 2, "runs": 60, "errors": 0, "median": 1.232, "p95": 1.27, "min": 1.197, "max": 1.285, "mean_results": 86.0, "wall": 37.13}
+SUM {"label": "cand100-conc4", "budget": "mid", "conc": 4, "runs": 60, "errors": 0, "median": 2.245, "p95": 2.765, "min": 2.149, "max": 2.818, "mean_results": 86.0, "wall": 34.92}
+  [phases] reranking=2609ms, generate_query_embedding=92ms, parallel_retrieval=45ms, entity_build=7ms, rrf_merge=1ms, to
+  [phases] reranking=2603ms, generate_query_embedding=60ms, parallel_retrieval=49ms, entity_build=2ms, rrf_merge=0ms, to
+== reranker: flashrank
+api ready after 32s
+SUM {"label": "flashrank-cold", "budget": "mid", "conc": 1, "runs": 1, "errors": 0, "median": 1.376, "p95": 1.376, "min": 1.376, "max": 1.376, "mean_results": 86, "wall": 1.38}
+SUM {"label": "flashrank", "budget": "low", "conc": 1, "runs": 60, "errors": 0, "median": 0.752, "p95": 1.243, "min": 0.547, "max": 1.333, "mean_results": 85.5, "wall": 50.18}
+SUM {"label": "flashrank", "budget": "mid", "conc": 1, "runs": 60, "errors": 0, "median": 1.31, "p95": 1.376, "min": 1.249, "max": 1.413, "mean_results": 85.4, "wall": 78.81}
+SUM {"label": "flashrank", "budget": "high", "conc": 1, "runs": 60, "errors": 0, "median": 1.314, "p95": 1.379, "min": 1.255, "max": 1.387, "mean_results": 85.4, "wall": 78.95}
+SUM {"label": "flashrank-conc2", "budget": "mid", "conc": 2, "runs": 60, "errors": 0, "median": 1.878, "p95": 2.009, "min": 1.771, "max": 2.334, "mean_results": 85.4, "wall": 56.74}
+SUM {"label": "flashrank-conc4", "budget": "mid", "conc": 4, "runs": 60, "errors": 0, "median": 3.454, "p95": 3.643, "min": 3.166, "max": 3.767, "mean_results": 85.4, "wall": 51.93}
+  [phases] reranking=3155ms, generate_query_embedding=104ms, parallel_retrieval=31ms, entity_build=2ms, token_filtering=
+  [phases] reranking=3147ms, generate_query_embedding=154ms, parallel_retrieval=37ms, entity_build=2ms, token_filtering=
+
+$ CPUS=4 KEEP=1 ./measure.sh
+== machine
+Darwin arm64
+Apple M3 Pro
+5
+6
+19327352832
+docker server 29.9.2 linux/arm64
+docker VM: 11 CPUs, 8319369216 bytes, Docker Desktop
+image arm64 ghcr.io/vectorize-io/hindsight-api@sha256:c054765e9196fb1fe63497be06bcb55256c9024cc9314f951dc59858985ab242
+== seed 5000 memories (chunks mode, no LLM)
+api ready after 56s
+done in 92s
+== reranker: default
+api ready after 56s
+SUM {"label": "default-cold", "budget": "mid", "conc": 1, "runs": 1, "errors": 0, "median": 2.513, "p95": 2.513, "min": 2.513, "max": 2.513, "mean_results": 87, "wall": 2.51}
+SUM {"label": "default", "budget": "low", "conc": 1, "runs": 60, "errors": 0, "median": 1.345, "p95": 2.245, "min": 0.968, "max": 2.434, "mean_results": 85.7, "wall": 90.84}
+SUM {"label": "default", "budget": "mid", "conc": 1, "runs": 60, "errors": 0, "median": 2.421, "p95": 2.532, "min": 2.274, "max": 2.772, "mean_results": 85.8, "wall": 145.8}
+SUM {"label": "default", "budget": "high", "conc": 1, "runs": 60, "errors": 0, "median": 2.436, "p95": 2.544, "min": 2.285, "max": 2.62, "mean_results": 85.8, "wall": 146.16}
+SUM {"label": "default-conc2", "budget": "mid", "conc": 2, "runs": 60, "errors": 0, "median": 5.643, "p95": 5.844, "min": 5.322, "max": 5.863, "mean_results": 85.8, "wall": 169.48}
+SUM {"label": "default-conc4", "budget": "mid", "conc": 4, "runs": 60, "errors": 0, "median": 14.637, "p95": 15.213, "min": 14.003, "max": 15.281, "mean_results": 85.8, "wall": 220.22}
+  [phases] reranking=13840ms, generate_query_embedding=82ms, parallel_retrieval=72ms, entity_build=2ms, rrf_merge=1ms, t
+  [phases] reranking=13959ms, generate_query_embedding=99ms, parallel_retrieval=70ms, entity_build=2ms, rrf_merge=0ms, t
+== reranker: cand100
+api ready after 56s
+SUM {"label": "cand100-cold", "budget": "mid", "conc": 1, "runs": 1, "errors": 0, "median": 0.899, "p95": 0.899, "min": 0.899, "max": 0.899, "mean_results": 89, "wall": 0.9}
+SUM {"label": "cand100", "budget": "low", "conc": 1, "runs": 60, "errors": 0, "median": 0.841, "p95": 0.9, "min": 0.781, "max": 0.966, "mean_results": 85.8, "wall": 50.47}
+SUM {"label": "cand100", "budget": "mid", "conc": 1, "runs": 60, "errors": 0, "median": 0.842, "p95": 0.893, "min": 0.787, "max": 0.985, "mean_results": 85.9, "wall": 50.5}
+SUM {"label": "cand100", "budget": "high", "conc": 1, "runs": 60, "errors": 0, "median": 0.842, "p95": 0.9, "min": 0.786, "max": 0.917, "mean_results": 86, "wall": 50.62}
+SUM {"label": "cand100-conc2", "budget": "mid", "conc": 2, "runs": 60, "errors": 0, "median": 1.883, "p95": 1.981, "min": 1.775, "max": 2.043, "mean_results": 85.9, "wall": 56.47}
+SUM {"label": "cand100-conc4", "budget": "mid", "conc": 4, "runs": 60, "errors": 0, "median": 4.798, "p95": 4.998, "min": 4.541, "max": 5.044, "mean_results": 85.9, "wall": 71.98}
+  [phases] reranking=4418ms, generate_query_embedding=110ms, parallel_retrieval=85ms, entity_build=2ms, rrf_merge=1ms, t
+  [phases] reranking=4338ms, generate_query_embedding=119ms, parallel_retrieval=77ms, entity_build=2ms, rrf_merge=0ms, t
+== reranker: flashrank
+api ready after 32s
+SUM {"label": "flashrank-cold", "budget": "mid", "conc": 1, "runs": 1, "errors": 0, "median": 1.477, "p95": 1.477, "min": 1.477, "max": 1.477, "mean_results": 86, "wall": 1.48}
+SUM {"label": "flashrank", "budget": "low", "conc": 1, "runs": 60, "errors": 0, "median": 0.792, "p95": 1.308, "min": 0.56, "max": 1.394, "mean_results": 85.4, "wall": 52.69}
+SUM {"label": "flashrank", "budget": "mid", "conc": 1, "runs": 60, "errors": 0, "median": 1.378, "p95": 1.463, "min": 1.292, "max": 1.497, "mean_results": 85.3, "wall": 82.96}
+SUM {"label": "flashrank", "budget": "high", "conc": 1, "runs": 60, "errors": 0, "median": 1.395, "p95": 1.471, "min": 1.301, "max": 1.549, "mean_results": 85.3, "wall": 83.48}
+SUM {"label": "flashrank-conc2", "budget": "mid", "conc": 2, "runs": 60, "errors": 0, "median": 2.717, "p95": 2.845, "min": 2.462, "max": 2.903, "mean_results": 85.3, "wall": 81.43}
+SUM {"label": "flashrank-conc4", "budget": "mid", "conc": 4, "runs": 60, "errors": 0, "median": 6.864, "p95": 7.317, "min": 6.399, "max": 7.57, "mean_results": 85.3, "wall": 103.52}
+  [phases] reranking=6441ms, generate_query_embedding=96ms, parallel_retrieval=77ms, entity_build=2ms, rrf_merge=1ms, to
+  [phases] reranking=6655ms, generate_query_embedding=79ms, parallel_retrieval=32ms, entity_build=2ms, rrf_merge=1ms, to

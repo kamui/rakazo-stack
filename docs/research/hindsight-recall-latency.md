@@ -176,6 +176,45 @@ docker volume rm hsr-pgdata hsr-flashrank; docker network rm hsr-net
 
 Paste both files into the ticket. The stack's choice holds if `MAX_CANDIDATES=100` with 2 at once stays well under 15 s, say under 5 s. The run was smoke-tested on this x86 host (2 recalls per measurement).
 
+### 6a. Apple silicon (measured)
+
+- **Machine.** MacBook Pro (`Mac15,6`), Apple M3 Pro, 11 cores (5 performance, 6 efficiency), 18 GB, macOS 27.2.1 (26B131). Docker Desktop 4.97.0 (engine 29.9.2, `linux/arm64`, kernel 7.0.14-linuxkit), with its default VM of 11 CPUs and 7.75 GiB.
+- **Software.** The same image digests as the x86 run: `hindsight-api:1.3.0` `sha256:c054765e…`, pulled as `arm64`, and `pgvector/pgvector:pg18` `sha256:38681dc6…` (PostgreSQL 18.7).
+- **Run.** The two commands from section 6, unchanged, on 2026-11-25 from 05:21 to 06:15 UTC. `measure.sh` needed no changes on macOS. Raw output: [results/mac.log](hindsight-recall-latency/results/mac.log). Each warm measurement ran 60 recalls, each cold one a single recall, and no recall failed.
+- **Host load.** Docker Desktop had just been started and ran nothing else. Before the run the load average was 2.8 / 2.0 / 1.7 and 0.87 GB of swap was in use. By the end, swap was 3.9 GB, and macOS background services (XProtect, media indexing, `logd`) were using about 3–4 cores. Processes weren't sampled during the run, so how much they overlapped the timings is **unverified**.
+- **Boot.** 56–57 s with the local reranker and 32 s with FlashRank. Seeding 5,000 memories took 92–104 s.
+
+Median / p95 in seconds. The x86 column is the closest x86 measurement from sections 3 and 4, with its stand-in named; "24T" is the unrestricted 2-run smoke test.
+
+| SUM label (budget) | Mac, full VM (11 CPUs) | Mac, `CPUS=4` | x86 |
+| --- | --- | --- | --- |
+| `default-cold` (`mid`) | 2.22 | 2.51 | 2.97, 2.95 (`--cpus 4`) |
+| `default` `low` | 1.23 / 1.86 | 1.35 / 2.25 | 1.80 / 3.03 (`--cpus 4`) |
+| `default` `mid` | 2.09 / 2.45 | 2.42 / 2.53 | 3.07 / 3.27 (`--cpus 4`); 2.09 (24T) |
+| `default` `high` | 2.07 / 2.16 | 2.44 / 2.54 | 3.17 / 3.63 (`--cpus 4`) |
+| `default-conc2` (`mid`, 2 at once) | 3.59 / 3.69 | 5.64 / 5.84 | 5.13 / 5.92 (2C/4T) |
+| `default-conc4` (`mid`, 4 at once) | 6.49 / 6.63 | **14.64 / 15.21 (max 15.28)** | 8.78 / 9.35 (2C/4T) |
+| `cand100-cold` (`mid`) | 0.83 | 0.90 | |
+| `cand100` `low` | 0.74 / 0.77 | 0.84 / 0.90 | 2.68 / 2.89 (½) |
+| `cand100` `mid` | 0.74 / 0.79 | 0.84 / 0.89 | 0.94 (24T); 2.64 / 2.85 (½) |
+| `cand100` `high` | 0.75 / 0.77 | 0.84 / 0.90 | |
+| **`cand100-conc2`** (`mid`, 2 at once) | **1.23 / 1.27** | **1.88 / 1.98 (max 2.04)** | 3.48 / 4.07 (½); 4.01 / 4.43 (⅓) |
+| `cand100-conc4` (`mid`, 4 at once) | 2.25 / 2.77 | 4.80 / 5.00 (max 5.04) | |
+| `flashrank-cold` (`mid`) | 1.38 | 1.48 | |
+| `flashrank` `low` | 0.75 / 1.24 | 0.79 / 1.31 | 0.73 / 1.07 (2C/4T) |
+| `flashrank` `mid` | 1.31 / 1.38 | 1.38 / 1.46 | 1.14 / 1.35 (2C/4T); 1.83 (24T) |
+| `flashrank` `high` | 1.31 / 1.38 | 1.40 / 1.47 | 1.32 (2C/4T, before the reboot) |
+| `flashrank-conc2` (`mid`, 2 at once) | 1.88 / 2.01 | 2.72 / 2.85 | 2.06 / 2.26 (2C/4T) |
+| `flashrank-conc4` (`mid`, 4 at once) | 3.45 / 3.64 | 6.86 / 7.32 | |
+
+- **The 15 s recall timeout is not at risk with `HINDSIGHT_API_RERANKER_MAX_CANDIDATES=100`.** On 4 CPUs, two recalls at once took 1.88 s (max 2.04 s, about 7× headroom), and four at once took at most 5.04 s.
+- **Per recall, the M3 Pro is a little faster than the Zen 4 desktop.** With 4 CPUs, a single default `mid` recall took 2.42 s against 3.07 s on x86. Two at once was about the same (5.64 s against 5.13 s on 2C/4T).
+- **Without the cap, four at once on 4 CPUs reaches the timeout.** Its p95 was 15.21 s, and Hindsight logged `reranking=13840–13959ms`. That is 2.6× the two-at-once time, where x86 2C/4T scaled 1.7×.
+  - With the cap, the same case took 4.80 s, which strengthens section 5's recommendation.
+  - `--cpus 4` is a CFS quota spread over all 11 VM CPUs, so the work may have landed on efficiency cores. Why it scales worse than on x86 is **unverified**.
+- **The reranker is still the cost.** In the `[phases]` lines it takes 2.6–14.0 s, retrieval 31–85 ms and the query embedding 60–180 ms.
+- **FlashRank is slower than the cap here** (1.31 s against 0.74 s for `mid` on the full VM). The cap also beat FlashRank on the unrestricted x86 host. So on this Mac, FlashRank has no speed advantage to weigh against its download and its changed results.
+
 ## Open questions / follow-ups
 
 - **task:** Run [measure.sh](hindsight-recall-latency/measure.sh) on an Apple-silicon Mac (an 8 GB M1 or M2 if possible) and on a real slow 4-thread x86 machine (an Intel N100 or a 6th–8th-generation i3 or i5), and post the output on #47.
