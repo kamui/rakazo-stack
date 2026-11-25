@@ -1,0 +1,33 @@
+== Docker default /dev/shm (64 MB)
+db /dev/shm: shm              64M  1.1M   63M   2% /dev/shm
+postgres PostgreSQL 18.7 (Debian 18.7-1.
+pgvector 0.8.7
+done in 493s
+memory_units: 15000 rows, 10 MB
+-- one new bank
+PATCH /v1/default/banks/shm64m-one/config OK 200 0.23 {"bank_id":"shm64m-one","config":{"recall_prefer_observations":false,"retain_strategies":null,"m
+POST /v1/default/banks/shm64m-one/memories OK 200 0.08 {"success":true,"bank_id":"shm64m-one","items_count":1,"async":false,"operation_id":null,"opera
+-- two new banks at once
+PATCH /v1/default/banks/shm64m-b/config HTTP 500 0.1 {"detail":"could not resize shared memory segment \"/PostgreSQL.252041970\" to 63999840 bytes: No
+POST /v1/default/banks/shm64m-b/memories HTTP 500 0.09 {"detail":"could not resize shared memory segment \"/PostgreSQL.2054783162\" to 63999840 bytes:
+PATCH /v1/default/banks/shm64m-a/config HTTP 500 0.09 {"detail":"could not resize shared memory segment \"/PostgreSQL.3539194028\" to 63999840 bytes: 
+POST /v1/default/banks/shm64m-a/memories HTTP 500 0.09 {"detail":"could not resize shared memory segment \"/PostgreSQL.3482909080\" to 63999840 bytes:
+-- the same index build by hand
+DEBUG:  building index "hsr48_t" on table "memory_units" with request for 1 parallel workers
+ERROR:  could not resize shared memory segment "/PostgreSQL.484393748" to 63999488 bytes: No space left on device
+NOTICE:  index "hsr48_t" does not exist, skipping
+-- db /dev/shm now: shm                65536  3496     62040   6% /dev/shm
+== shm_size 1g on the database
+db /dev/shm: shm             1.0G  1.1M 1023M   1% /dev/shm
+-- one new bank
+PATCH /v1/default/banks/shm1g-one/config OK 200 0.16 {"bank_id":"shm1g-one","config":{"recall_budget_function":"fixed","consolidation_max_memories_per
+POST /v1/default/banks/shm1g-one/memories OK 200 0.11 {"success":true,"bank_id":"shm1g-one","items_count":1,"async":false,"operation_id":null,"operati
+-- two new banks at once
+PATCH /v1/default/banks/shm1g-b/config OK 200 0.13 {"bank_id":"shm1g-b","config":{"recall_budget_function":"fixed","consolidation_max_memories_per_rou
+POST /v1/default/banks/shm1g-b/memories OK 200 0.13 {"success":true,"bank_id":"shm1g-b","items_count":1,"async":false,"operation_id":null,"operation_i
+PATCH /v1/default/banks/shm1g-a/config OK 200 0.2 {"bank_id":"shm1g-a","config":{"recall_budget_function":"fixed","consolidation_max_memories_per_roun
+POST /v1/default/banks/shm1g-a/memories OK 200 0.08 {"success":true,"bank_id":"shm1g-a","items_count":1,"async":false,"operation_id":null,"operation_i
+-- the same index build by hand
+DEBUG:  building index "hsr48_t" on table "memory_units" with request for 1 parallel workers
+DEBUG:  using 2 parallel workers
+-- db /dev/shm now: shm              1048576  3496   1045080   1% /dev/shm
