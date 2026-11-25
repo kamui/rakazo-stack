@@ -36,16 +36,14 @@ Integrations through [Composio](https://composio.dev) are optional. Setup asks f
   - **Windows and Mac:** Docker Desktop. It's free for personal use and for companies with fewer than 250 employees and under $10M in revenue. Bigger companies need a paid plan.
   - Minimum versions: Docker Engine API 1.45 and Docker Compose 2.24.4.
 - **An account with a model provider.** Bring your own: setup asks which one and checks your key.
-  - **OpenRouter** (recommended): one key runs chat and memory for everyone on your Instance. Setup picks GLM Flash, which costs roughly $3–11 a month for one active user, chat and memory together. That's an estimate, not yet measured. Turn on **ZDR only** in your OpenRouter privacy settings so providers don't keep your messages.
+  - **OpenRouter** (recommended): one key runs chat and memory for everyone on your Instance. Setup picks GLM Flash. In our test it cost about $4–5 a month for one active user sending 30 messages a day, chat and memory together. Turn on **ZDR only** in your OpenRouter privacy settings so providers don't keep your messages.
   - **OpenAI** or **Gemini**: one key runs chat and memory, but only your admin account gets chat. Everyone else connects their own provider in Rakazo's settings. Gemini needs a paid key.
   - **Anthropic**: like OpenRouter, one key runs chat and memory for everyone on your Instance.
   - Leave the key blank and nothing is set up: memory stays off, and each person connects a provider in Rakazo's settings.
 - **Optional:** a Composio key, and a Tailscale account.
-- **Hardware:** the minimum is _not decided yet_. As a guide:
-  - Rakazo's downloads are about 9 GB.
-  - The voice models are about 2 GB.
-  - Memory is about a 2 GB download and takes about 6.5 GB of disk.
-  - Docker Desktop on Windows needs at least 8 GB of RAM.
+- **Hardware:** at least 4 processor threads, 16 GB of RAM and 35 GB of free disk space. 8 threads and 50 GB of free disk space are recommended. If your computer has less, setup warns you and carries on.
+  - A fresh install uses about 16 GB of disk. An update briefly needs more, because it keeps the old version until the new one works.
+  - Rakazo's downloads are about 9 GB, the voice models about 2 GB, and memory about 2 GB.
 
 ## Where it runs
 
@@ -103,6 +101,14 @@ Only to your model provider, the same one chat uses. After each reply, Rakazo se
 
 **How do I turn on memory in another Space?**
 Setup turns memory on only in your first Space. Memory is set per Space, and only a Space's owner can connect it, so people you invite turn it on in their own Spaces. In that Space, open **Settings → Memory**, choose **Connect memory provider**, then **Hindsight**, open **Advanced** and choose **Self-hosted**. Enter `http://hindsight:8888`, and paste the key from the `HINDSIGHT_API_TENANT_API_KEY` line in `~/rakazo-stack/secrets.env`. Hindsight can only be reached from inside rakazo-stack, so the key works only by typing it into Rakazo, and Rakazo keeps each Space's memory separate.
+
+**Can memory get things wrong?**
+Yes. Three things to know:
+- Memory learns from what bots say as well as from what you say, so a bot's guess can be saved as a fact about you.
+- A new memory can take up to about 2 minutes before bots can recall it.
+- Clearing a conversation also deletes everything memory learned from it. Facts a bot saved on purpose, for example after you said "remember that…", are kept.
+
+Bots can't delete a single memory from Hindsight. To remove a wrong one learned from a conversation, clear that conversation. A bot's own notes are separate: click the bot's name at the top of the chat and open **Memory** to edit or delete them.
 
 **Can I use Honcho for memory instead?**
 Not in v1, which uses Hindsight. Honcho is planned as an option for a later version.
