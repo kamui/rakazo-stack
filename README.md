@@ -9,7 +9,7 @@ Words like **Self-hoster** (you, the person running it) and **Instance** (your c
 ## What it is
 
 - **One setup command.** You run `rakazo-stack setup` and give it your keys. It creates all the passwords it needs, writes the settings, and starts everything.
-- **Official releases, not a fork.** It installs the newest stable releases of Rakazo, Lemonade and Honcho exactly as their makers publish them, and never changes their code.
+- **Official releases, not a fork.** It installs the newest stable releases of Rakazo, Lemonade and Hindsight exactly as their makers publish them, and never changes their code.
 - **Updates when you say so.** `rakazo-stack update` moves everything to the newest releases. Nothing updates by itself.
 - **For one person on one computer.** It isn't a hosted service and isn't built for sharing between groups of people.
 - **Private unless you open it up.** By default only your own computer can reach it. If you want to use it from your phone, setup can add Tailscale.
@@ -21,7 +21,7 @@ Words like **Self-hoster** (you, the person running it) and **Instance** (your c
 | [Rakazo](https://github.com/elie222/rakazo) | The app itself, including the separate "bot computers" its AI agents work in | Always |
 | [Lemonade](https://github.com/lemonade-sdk/lemonade) | Speech and transcription on your own computer, so your voice doesn't go to an outside service | Always. On a Mac it runs outside Docker, so transcription can use the Mac's graphics chip |
 | Lemonade relay | Fixes a small mismatch between Rakazo and Lemonade. It goes away once [Kokoros#144](https://github.com/lucasjinreal/Kokoros/issues/144) is fixed in Lemonade | Always |
-| [Honcho](https://github.com/plastic-labs/honcho) | Long-term memory | Only if your model provider can run it: OpenRouter, OpenAI or Gemini |
+| [Hindsight](https://github.com/vectorize-io/hindsight) | Long-term memory | Only if you give setup a model provider key |
 | [Tailscale](https://tailscale.com) | Lets your phone and other devices reach it securely, at an address like `https://rakazo.<your-tailnet>.ts.net` | Only if you choose it |
 | Bot-computer firewall | Stops bot computers from reaching your computer, your home network and your Tailscale devices | Always |
 
@@ -36,14 +36,15 @@ Integrations through [Composio](https://composio.dev) are optional. Setup asks f
   - **Windows and Mac:** Docker Desktop. It's free for personal use and for companies with fewer than 250 employees and under $10M in revenue. Bigger companies need a paid plan.
   - Minimum versions: Docker Engine API 1.45 and Docker Compose 2.24.4.
 - **An account with a model provider.** Bring your own: setup asks which one and checks your key.
-  - **OpenRouter** (recommended): one key runs chat and memory for everyone on your Instance. Setup picks GLM Flash, which costs about $6 a month for one active user. Turn on **ZDR only** in your OpenRouter privacy settings so providers don't keep your messages.
+  - **OpenRouter** (recommended): one key runs chat and memory for everyone on your Instance. Setup picks GLM Flash, which costs roughly $3–11 a month for one active user, chat and memory together. That's an estimate, not yet measured. Turn on **ZDR only** in your OpenRouter privacy settings so providers don't keep your messages.
   - **OpenAI** or **Gemini**: one key runs chat and memory, but only your admin account gets chat. Everyone else connects their own provider in Rakazo's settings. Gemini needs a paid key.
-  - **Anthropic**: runs chat for everyone, but memory stays off, because Anthropic has no model for searching memories. To use Claude models with memory, use them through OpenRouter.
+  - **Anthropic**: like OpenRouter, one key runs chat and memory for everyone on your Instance.
   - Leave the key blank and nothing is set up: memory stays off, and each person connects a provider in Rakazo's settings.
 - **Optional:** a Composio key, and a Tailscale account.
 - **Hardware:** the minimum is _not decided yet_. As a guide:
   - Rakazo's downloads are about 9 GB.
   - The voice models are about 2 GB.
+  - Memory is about a 2 GB download and takes about 6.5 GB of disk.
   - Docker Desktop on Windows needs at least 8 GB of RAM.
 
 ## Where it runs
@@ -73,7 +74,7 @@ None of these exist yet. This is the plan.
 | `docker compose ps` and `docker compose logs` | Shows what's running, and the logs. |
 | `rakazo-stack backup` | Saves your data, settings and keys into one file locked with a passphrase you choose. Rakazo pauses while it runs. |
 | `rakazo-stack restore <file>` | Brings an Instance back from a backup file, on the same computer or a new one, on any supported system. |
-| `rakazo-stack update` | Updates the `rakazo-stack` program, then Rakazo, Lemonade and Honcho, to their newest releases. It shows what will change and asks first, takes a backup, and offers to undo the update if it fails. `setup` and `backup` remind you, at most once a day, when there's something new. |
+| `rakazo-stack update` | Updates the `rakazo-stack` program, then Rakazo, Lemonade and Hindsight, to their newest releases. It shows what will change and asks first, takes a backup, and offers to undo the update if it fails. `setup` and `backup` remind you, at most once a day, when there's something new. |
 | `rakazo-stack update --hold rakazo=v0.5.1` | Keeps one part at a version you choose, for when a new release causes trouble. `--unhold rakazo` lets it update again. |
 
 On Windows, type `docker.exe` instead of `docker` in these commands, for example `docker.exe compose up -d`, still run from `~/rakazo-stack` in WSL. Plain `docker` in WSL can leave parts of it unable to start after you restart your computer. If that happens, the next `rakazo-stack setup` or `rakazo-stack update` fixes it.
@@ -92,10 +93,13 @@ Only your model provider, plus Docker Desktop if you're at a bigger company. Voi
 No. It runs Rakazo's own published releases, and adds its extra pieces alongside them.
 
 **How do I get new versions?**
-Run `rakazo-stack update`. It installs the newest releases on a best-effort basis: nobody tests each new Rakazo, Lemonade or Honcho release with rakazo-stack before you get it. That's why it takes a backup first and offers to undo a failed update. If a new release breaks something, `--hold` keeps that part where it was.
+Run `rakazo-stack update`. It installs the newest releases on a best-effort basis: nobody tests each new Rakazo, Lemonade or Hindsight release with rakazo-stack before you get it. That's why it takes a backup first and offers to undo a failed update. If a new release breaks something, `--hold` keeps that part where it was.
 
 **Do I need memory?**
-No. Leave the model provider key blank in setup, or use Anthropic, and memory stays off. If you turn it off later, your saved memories are kept.
+No. Leave the model provider key blank in setup and memory stays off. If you turn it off later, your saved memories are kept.
+
+**Can I use Honcho for memory instead?**
+Not in v1, which uses Hindsight. Honcho is planned as an option for a later version.
 
 **Can I use it on my phone?**
 Yes, with Rakazo's phone app through Tailscale. We tested this on an iPhone, and notifications worked too, though a future change to Rakazo's notification service could stop that. Android hasn't been tested yet. Use the `https://….ts.net` address: the iPhone app won't connect to a plain `http://` Tailscale address. The phone app updates itself, so if it asks you to update your server, run `rakazo-stack update`.
