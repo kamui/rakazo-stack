@@ -1,6 +1,6 @@
 # rakazo-stack v1 spec
 
-This is the build spec for rakazo-stack v1: what it installs, what it needs, and how each command works on Linux, Windows (WSL 2) and Apple-silicon macOS. It was written from the decisions on [Map: rakazo-stack v1 spec](https://github.com/kamui/rakazo-stack/issues/1) and the tickets it links. Each rule links the ticket that decided it. Where an older ticket and a newer one disagree, the newer one wins, and this spec states only the result.
+This is the build spec for rakazo-stack v1: what it installs, what it needs, and how each command works on Linux, Windows (WSL 2) and Apple-silicon macOS. It was written from the decisions on [Map: rakazo-stack v1 spec](https://github.com/kamui/rakazo-stack/issues/1) and the tickets it links. Each rule links the ticket that decided it. Where an older ticket and a newer one disagree, the newer one wins, and this spec states only the result. Decisions made while reviewing this spec, with no ticket of their own, cite the map ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
 
 Terms such as Self-hoster, Instance, Instance URL, Instance folder, Component, Backup, Update, Hold, Model provider and Checklist are defined in [GLOSSARY.md](../GLOSSARY.md). Three of Rakazo's own terms are used as Rakazo uses them:
 
@@ -32,7 +32,7 @@ Terms such as Self-hoster, Instance, Instance URL, Instance folder, Component, B
 18. [Distribution of the program](#18-distribution-of-the-program)
 19. [Testing and CI](#19-testing-and-ci)
 20. [Known limitations to document](#20-known-limitations-to-document)
-21. [Open questions](#21-open-questions)
+21. [Left to the implementation](#21-left-to-the-implementation)
 
 ## 1. Scope
 
@@ -83,7 +83,7 @@ From the map's "Out of scope" list ([#1](https://github.com/kamui/rakazo-stack/i
 | Docker Desktop for Linux | No | Own VM, needs a GUI session, no restricted egress ([#18](https://github.com/kamui/rakazo-stack/issues/18)). |
 | Podman, OrbStack, Colima, Engine inside WSL 2 | No | ([#4](https://github.com/kamui/rakazo-stack/issues/4), [#18](https://github.com/kamui/rakazo-stack/issues/18)) |
 
-On Windows and macOS the Instance runs only while the Self-hoster is signed in, because Docker Desktop stops at sign-out. This is documented, not worked around ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
+On Windows and macOS the Instance runs only while the Self-hoster is signed in, because Docker Desktop stops at sign-out. This is documented, not worked around ([#1](https://github.com/kamui/rakazo-stack/issues/1)). Setup doesn't check whether Docker Desktop starts at sign-in; the README says that if it doesn't, the Instance stays down until Docker Desktop is opened ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
 
 ## 3. Requirements and preflight
 
@@ -154,7 +154,8 @@ On Windows every Docker check runs against `docker.exe` (see [Windows](#windows-
 rakazo-stack installs the latest stable release of each Component, best effort, rather than a tested set ([#32](https://github.com/kamui/rakazo-stack/issues/32)). See [ADR 0002](adr/0002-latest-stable-not-pinned.md).
 
 - **Rakazo:** GitHub's "latest release" of `elie222/rakazo` (prereleases skipped). Setup fetches `infra/compose/docker-compose.images.yml` and `infra/compose/restrict-computer-egress.sh` from that same tag, unmodified ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
-  - **Releases without images.** If the tag has no `app` or no `computer` image on GHCR, setup and update walk back to the newest release that has both, and say which release they skipped and why. A later `update` picks up the skipped release once its images appear. The program never builds Rakazo images locally ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#45](https://github.com/kamui/rakazo-stack/issues/45)). (Rakazo v0.16.0 shipped with neither image.)
+  - **Releases without images.** If the tag has no `app` or no `computer` image on GHCR, setup and update walk back to the newest release that has both, and say which release they skipped and why. A later `update` picks up the skipped release once its images appear. The program never builds Rakazo images locally ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#45](https://github.com/kamui/rakazo-stack/issues/45)). (Rakazo v0.16.0 was tagged a day before its images were published.)
+  - The same rule covers every Component resolved from GitHub releases: a Hindsight or Lemonade release whose image (or, on macOS, whose embeddable tarball) isn't published yet is skipped the same way ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
   - Rakazo's Postgres is whatever its compose file uses (today `postgres:16`, pinned by digest upstream) ([#31](https://github.com/kamui/rakazo-stack/issues/31), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
 - **Hindsight:** GitHub's latest release of `vectorize-io/hindsight`. Release `vX.Y.Z` maps to image tag `X.Y.Z` (Hindsight's tags have no `v`) ([#44](https://github.com/kamui/rakazo-stack/issues/44)). Tested on 1.3.0.
 - **`hindsight-db`:** `pgvector/pgvector:pg18`. It floats within PostgreSQL 18 (minors and security fixes), never to a new major ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
@@ -174,7 +175,7 @@ rakazo-stack installs the latest stable release of each Component, best effort, 
 
 ### Floors and Holds
 
-- Each program release knows the lowest version of each Component it can drive. "Latest" has no ceiling ([#32](https://github.com/kamui/rakazo-stack/issues/32)). The Rakazo floor must be at least the first release with the Hindsight memory provider (see [Open questions](#21-open-questions)).
+- Each program release knows the lowest version of each Component it can drive. "Latest" has no ceiling ([#32](https://github.com/kamui/rakazo-stack/issues/32)). v1's floors are **Rakazo v0.16.0**, where setup's memory connect call was proven ([#45](https://github.com/kamui/rakazo-stack/issues/45)), and **Hindsight 1.3.0**, the version tested ([#1](https://github.com/kamui/rakazo-stack/issues/1)). If no release at or above the floor has published images, setup stops and says so.
 - `rakazo-stack update --hold <component>=<version>` keeps a Component at that version; `--unhold <component>` releases it. Holds live in `settings.json` ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 - A Hold below the floor is refused. If a newer program raises the floor above an existing Hold, `update` moves that Component to latest and says so in its confirmation; with `--yes` it stops instead, so a Hold is never dropped silently ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 
@@ -355,12 +356,12 @@ Setup **stops before changing anything** on a failed preflight or invalid input:
 1. **Lock and preflight** ([§3](#preflight)).
 2. **Questions** (wizard) or `settings.json` plus environment variables (no-questions mode).
 3. **Check keys.** Model provider key, then on OpenRouter the ZDR only probe ([§8](#zdr-only-probe)), then the Composio key ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#36](https://github.com/kamui/rakazo-stack/issues/36), [#39](https://github.com/kamui/rakazo-stack/issues/39)).
-4. **Resolve versions** for every Component that will run, skipping Rakazo releases without images ([§4](#how-versions-are-resolved)).
+4. **Resolve versions** for every Component that will run, skipping releases without published images ([§4](#how-versions-are-resolved)).
 5. **Write the Instance folder.** Generate missing secrets; write `secrets.env`, `settings.json`, the fetched Rakazo compose file and egress script, the bundled layer file and build folders, and `.env`; apply modes ([#29](https://github.com/kamui/rakazo-stack/issues/29), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
 6. **macOS only: native Lemonade** ([§9](#macos-native-lemond)): download and verify `lemond`, write the plist, load the LaunchAgent, set `whispercpp.backend=metal` ([#17](https://github.com/kamui/rakazo-stack/issues/17)).
 7. **Build and pull.** Build `lemonade-relay` and `computer-egress`; pull the other images by digest.
 8. **Start.** `docker compose up -d --wait` ([#32](https://github.com/kamui/rakazo-stack/issues/32)). On Windows, first force-recreate any of the Instance's containers that WSL's `docker` made ([below](#windows-docker-through-dockerexe)) ([#41](https://github.com/kamui/rakazo-stack/issues/41)).
-9. **Voice models.** After a free-disk check, pull and load `kokoro-v1` and that OS's Whisper model through the relay, then run one speech and one transcription so the first-load cost (17 s for Whisper on Metal) happens during setup ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#24](https://github.com/kamui/rakazo-stack/issues/24), [#42](https://github.com/kamui/rakazo-stack/issues/42)).
+9. **Voice models.** Linux and Windows: set `whispercpp.backend=cpu` against the running Lemonade, never `auto`, which picked Vulkan on a software renderer in [#24](https://github.com/kamui/rakazo-stack/issues/24) ([#1](https://github.com/kamui/rakazo-stack/issues/1)). After a free-disk check, pull and load `kokoro-v1` and that OS's Whisper model through the relay, then run one speech and one transcription so the first-load cost (17 s for Whisper on Metal) happens during setup ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#24](https://github.com/kamui/rakazo-stack/issues/24), [#42](https://github.com/kamui/rakazo-stack/issues/42)).
 10. **Tailscale** (if on): read the device name Tailscale assigned (for example `rakazo-1` on a clash), derive the Instance URL, and if it differs from what `.env` holds, rewrite `.env` and recreate Rakazo's services ([#8](https://github.com/kamui/rakazo-stack/issues/8)).
 11. **Egress check.** Look for `restricted computer egress verified` in the supervisor log. If it's missing, add a checklist item that bot computers are off until it's fixed, with the cause. Never fall back to open egress ([#26](https://github.com/kamui/rakazo-stack/issues/26), [#40](https://github.com/kamui/rakazo-stack/issues/40)).
 12. **Database-only settings** ([below](#database-only-settings-in-rakazo)).
@@ -373,7 +374,7 @@ Setup **stops before changing anything** on a failed preflight or invalid input:
 - Never regenerate a secret; never print a pasted key ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
 - Rewrite the stack files and `.env`, re-apply file modes, and re-run steps 6–13 idempotently.
 - Turning memory **on** later: generate Hindsight's secrets, resolve and start Hindsight, connect the default Space ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
-- Turning memory **off** (`off`, or a blank key): drop the `hindsight` profile so `hindsight` and `hindsight-db` stop; keep `hindsight-pgdata`. Nothing is deleted unless separately asked ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
+- Turning memory **off** (`off`, or a blank key): drop the `hindsight` profile so `hindsight` and `hindsight-db` stop; keep `hindsight-pgdata`. Nothing is deleted unless separately asked ([#9](https://github.com/kamui/rakazo-stack/issues/9)). Setup doesn't disconnect memory in Rakazo; it finds the Spaces still connected (`SELECT "spaceId" FROM space_memory_configs WHERE provider = 'hindsight'`, read-only) and adds a checklist item for each ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
 - A re-run started by the install one-liner with a newer program behaves the same: it keeps recorded versions and changes nothing a newer program needs except stack files. If recorded versions are below the new floor, it stops with "run `rakazo-stack update`" ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#35](https://github.com/kamui/rakazo-stack/issues/35)).
 
 ### Database-only settings in Rakazo
@@ -416,6 +417,7 @@ Every run ends with a checklist of what is left to do by hand ([#9](https://gith
 - No Model provider key: each person connects a provider in **Settings → Models**; the Owner connects one before creating a bot, because Rakazo's onboarding stops at "Connect a model" ([#24](https://github.com/kamui/rakazo-stack/issues/24), [#36](https://github.com/kamui/rakazo-stack/issues/36)).
 - OpenAI or Gemini: other people connect their own provider in Rakazo ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
 - Switched away from OpenAI or Gemini: remove the old connection in **Settings → Models**, because until then it stays the Owner's default ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
+- Memory off but a Space still connected to Hindsight: that Space's owner disconnects it under **Settings → Memory**, because until then each reply first tries a recall that fails ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
 - Memory on: how to turn memory on in another Space: **Settings → Memory → Connect memory provider → Hindsight → Advanced → Self-hosted**, `http://hindsight:8888`, and the key from the `HINDSIGHT_API_TENANT_API_KEY` line in `~/rakazo-stack/secrets.env` ([#49](https://github.com/kamui/rakazo-stack/issues/49)).
 - Tailscale on: enable MagicDNS and HTTPS certificates in the Tailscale admin console, and turn off key expiry for the device ([#8](https://github.com/kamui/rakazo-stack/issues/8), [#24](https://github.com/kamui/rakazo-stack/issues/24)).
 - "For private dictation, use Firefox or the Rakazo desktop app" ([#15](https://github.com/kamui/rakazo-stack/issues/15)).
@@ -494,6 +496,7 @@ Voice is Lemonade only, out of the box: `kokoro-v1` for speech, Whisper for tran
 | Where Lemonade runs | `lemonade` container, unmodified upstream image | native `lemond` LaunchAgent |
 | Whisper model | `Whisper-Small` (6.2% WER; 1.9 s / 4.5 s for 6 s / 29 s clips on 4 Zen 4 cores) | `Whisper-Large-v3-Turbo` on Metal (about 0.9 s / 1.3 s) |
 | Kokoro | CPU | CPU (its Mac build has no GPU path) |
+| Whisper backend | `cpu` ([#42](https://github.com/kamui/rakazo-stack/issues/42), [#1](https://github.com/kamui/rakazo-stack/issues/1)) | `metal` |
 | Threads | Lemonade's default (4); no `-t` | default; no `-t` |
 
 Sources: ([#16](https://github.com/kamui/rakazo-stack/issues/16), [#17](https://github.com/kamui/rakazo-stack/issues/17), [#42](https://github.com/kamui/rakazo-stack/issues/42)).
@@ -511,6 +514,7 @@ Sources: ([#16](https://github.com/kamui/rakazo-stack/issues/16), [#17](https://
 - **Image:** built locally from a Bun Alpine base fixed in the program (`oven/bun:1.4.4-alpine` today), plus Alpine's ffmpeg (`~=8.1`), with the relay's code copied in. It runs as user `bun` ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#31](https://github.com/kamui/rakazo-stack/issues/31), [#41](https://github.com/kamui/rakazo-stack/issues/41)).
 - **Converts every transcription upload** to 16 kHz mono WAV (`ffmpeg -i <in> -ar 16000 -ac 1 -c:a pcm_s16le <out>.wav`) before forwarding it. Browsers upload WebM/Opus (and probably MP4/AAC on Safari), which whisper-server can't decode without ffmpeg ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#24](https://github.com/kamui/rakazo-stack/issues/24)).
 - **Rewrites `lang_code`** on `/audio/speech`: Rakazo sends Kokoro's one-letter codes (`a`, `b`, `e`, `f`, `h`, `i`, `j`, `p`, `z`), which Kokoros passes to espeak as-is. The relay maps them to `en-us`, `en-gb-x-rp`, `es`, `fr-fr`, `hi`, `it`, `ja`, `pt-br`, `cmn`. This part goes away once [lucasjinreal/Kokoros#144](https://github.com/lucasjinreal/Kokoros/issues/144) ships in Lemonade; the relay stays for the conversion ([#1](https://github.com/kamui/rakazo-stack/issues/1), [#17](https://github.com/kamui/rakazo-stack/issues/17)).
+- **Joins Whisper's line breaks** in transcription text: newlines become single spaces, because Whisper breaks lines at its segment boundaries, even mid-sentence ([#24](https://github.com/kamui/rakazo-stack/issues/24), [#1](https://github.com/kamui/rakazo-stack/issues/1)).
 - **Adds `Authorization: Bearer $LEMONADE_API_KEY`** to every request. Only the relay holds the key ([#10](https://github.com/kamui/rakazo-stack/issues/10)).
 - Forwards to `UPSTREAM`: `http://lemonade:13305` on Linux/Windows, `http://host.docker.internal:<lemond port>` on macOS. Idle timeout 255 s, because transcription can take tens of seconds before the first byte.
 - Rakazo accepts the relay as a private endpoint because of `MCP_ALLOW_PRIVATE_ENDPOINT=true` and `RAKAZO_OPENAI_COMPAT_PRIVATE_HOSTS=lemonade-relay`. A bare service name is refused without the second setting ([#2](https://github.com/kamui/rakazo-stack/issues/2), [#10](https://github.com/kamui/rakazo-stack/issues/10)).
@@ -571,6 +575,7 @@ v1's memory is Hindsight, replacing Honcho, which is planned as a later option (
 | `HINDSIGHT_API_RERANKER_LOCAL_MODEL` | `hindsight-ai/hs-rerank-1` (pinned) |
 | `HINDSIGHT_API_RERANKER_MAX_CANDIDATES` | `100` |
 | `HINDSIGHT_API_WORKER_ID` | `hindsight` (stable, so in-flight tasks survive a restart) |
+| `HINDSIGHT_API_MCP_ENABLED` | `false` (Rakazo doesn't use Hindsight's MCP endpoint) ([#44](https://github.com/kamui/rakazo-stack/issues/44), [#1](https://github.com/kamui/rakazo-stack/issues/1)) |
 
 - **Why `RERANKER_MAX_CANDIDATES=100`:** the CPU reranker is over 90% of each recall. With Hindsight's default of 300 candidates, two recalls at once on a slow 4-thread CPU reached 14–16 s, past Rakazo's 15 s recall timeout, after which Rakazo replies without memory. With 100: about 3× faster, 89–93% of the top 5 unchanged, same top result. On an M3 Pro limited to 4 CPUs, two at once take 1.9 s. FlashRank and `recallBudget: low` were rejected ([#47](https://github.com/kamui/rakazo-stack/issues/47)).
 - **Why `shm_size: 1g` on `hindsight-db`:** every new bank builds three partial HNSW indexes on the shared `memory_units` table. Once that table passes 8 MB, Postgres builds them in parallel, and pgvector's segment takes 61 MB of Docker's 64 MB default `/dev/shm`. Without the setting, every new bank after the first failed (HTTP 500 `could not resize shared memory segment`), so a bot added later, or a Space switched to the Shared scope, never got memory. The `hindsight` container doesn't need it ([#48](https://github.com/kamui/rakazo-stack/issues/48)).
@@ -601,7 +606,7 @@ Documented in one README FAQ; the stack changes nothing ([#45](https://github.co
 
 - localhost works fully, microphone included, because browsers treat localhost as secure ([#6](https://github.com/kamui/rakazo-stack/issues/6), [#8](https://github.com/kamui/rakazo-stack/issues/8)).
 - **Why `BETTER_AUTH_URL` stays on loopback with Tailscale:** Rakazo trusts only `WEB_ORIGIN`, `BETTER_AUTH_URL`, its mobile app origins and their loopback twins. With all four on `ts.net`, sign-in at localhost fails with 403 `INVALID_ORIGIN`. With `BETTER_AUTH_URL` on `127.0.0.1`, password sign-in works at both addresses. Costs: the session cookie loses `Secure` and its `__Secure-` prefix (it still travels only over HTTPS on the tailnet or over loopback), and passkeys work only at the `ts.net` address ([#24](https://github.com/kamui/rakazo-stack/issues/24)).
-- Bring-your-own: the proxy, certificates and firewall are the Self-hoster's. Mutually exclusive with Tailscale ([#8](https://github.com/kamui/rakazo-stack/issues/8)).
+- Bring-your-own: the proxy, certificates and firewall are the Self-hoster's. Mutually exclusive with Tailscale ([#8](https://github.com/kamui/rakazo-stack/issues/8)). `web` stays on `127.0.0.1:5173`, so the proxy must run on the same machine; setup doesn't offer a wider bind, and the docs say so ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
 
 ### Tailscale
 
@@ -720,7 +725,7 @@ Asks nothing, so `update` and cron can run it. Manual only: the program installs
 |---|---|
 | `settings.json`, `secrets.env` | `.env`, compose files, build folders, `logs/` (setup rewrites them) |
 | `pg_dump` of Rakazo's database | Docker images |
-| `pg_dump` of `hindsight-db` (when memory is on) | Lemonade volumes and macOS's `~/rakazo-stack/lemonade/` (setup re-downloads them) |
+| `pg_dump` of `hindsight-db` whenever `hindsight-pgdata` exists, even with memory off | Lemonade volumes and macOS's `~/rakazo-stack/lemonade/` (setup re-downloads them) |
 | `appdata` volume (bot computer homes, home revisions, artifacts, attachments), minus `appdata/staging/` and `appdata/mcp-packages/` | `webassets` volume |
 | `tailscale-state` volume | |
 | The program version, and each Component's recorded version and digest | |
@@ -731,7 +736,7 @@ Sources: ([#30](https://github.com/kamui/rakazo-stack/issues/30), [#32](https://
 
 1. Lock.
 2. Stop Rakazo's `api`, `worker` and `supervisor`, and the bot computers (not Compose services; found by the `rakazo.managed=true` label). Postgres keeps running.
-3. Dump each database inside its container: `docker compose exec -T <service> pg_dump -Fc --no-owner --no-privileges …` (without `-T`, terminal allocation corrupts the dump). Postgres volumes are never copied, so dumps survive Postgres major moves and moves between OSes.
+3. With memory off but `hindsight-pgdata` kept, start `hindsight-db` alone for its dump and stop it afterwards ([#1](https://github.com/kamui/rakazo-stack/issues/1)). Dump each database inside its container: `docker compose exec -T <service> pg_dump -Fc --no-owner --no-privileges …` (without `-T`, terminal allocation corrupts the dump). Postgres volumes are never copied, so dumps survive Postgres major moves and moves between OSes.
 4. Archive `appdata` (and `tailscale-state`) in a throwaway Linux container with GNU tar. Dumping first means every row has its file.
 5. Start everything again (unless `update` asked to keep Rakazo stopped).
 6. **Self-check:** decrypt the file, run `pg_restore --list` on each dump, list the archives and check every pipe step's exit code. On any failure, delete the file and exit with an error.
@@ -843,13 +848,16 @@ Each of these was decided from source, docs or a partial run and must pass durin
 - **Backup and restore:** Backup size and downtime; a Linux-to-macOS round trip; the `rakazo_app` role step against the images compose file ([#30](https://github.com/kamui/rakazo-stack/issues/30)).
 - **Voice:** the relay's conversion latency ([#17](https://github.com/kamui/rakazo-stack/issues/17)).
 - **Hardware:** a real slow 4-thread x86-64 CPU; Linux on bare metal (Linux figures are derived from Docker Desktop's VM) ([#42](https://github.com/kamui/rakazo-stack/issues/42), [#46](https://github.com/kamui/rakazo-stack/issues/46), [#47](https://github.com/kamui/rakazo-stack/issues/47)).
+- **Rakazo calls:** whether voice calls through Lemonade need the Owner's AI-recipient consent (`aiConsent`), which v0.16.0 requires for calls but not for chat or memory; if so, it becomes a checklist item ([#45](https://github.com/kamui/rakazo-stack/issues/45)). The exact path, body and detection query of the OpenAI/Gemini `models.connect` call, never run ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
+- **Memory models:** whether OpenAI's `gpt-6-luna` and Gemini's `gemini-3.5-flash-lite` allow the 64,000 output tokens Hindsight's fact extraction asks for; if not, setup lowers `HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS` for that provider ([#44](https://github.com/kamui/rakazo-stack/issues/44)).
+- **Composio:** whether it accepts a callback to `http://127.0.0.1:5173` or a `ts.net` Instance URL ([#3](https://github.com/kamui/rakazo-stack/issues/3), [#8](https://github.com/kamui/rakazo-stack/issues/8)).
 - **Phones:** Rakazo's phone app with `BETTER_AUTH_URL` on localhost; Android end to end ([#24](https://github.com/kamui/rakazo-stack/issues/24), [#28](https://github.com/kamui/rakazo-stack/issues/28)).
 
 ## 20. Known limitations to document
 
 Collected from the decisions above, for the README and docs:
 
-- Windows and macOS: runs only while the Self-hoster is signed in ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
+- Windows and macOS: runs only while the Self-hoster is signed in, and only after Docker Desktop has started ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
 - Docker Desktop's licence terms ([#4](https://github.com/kamui/rakazo-stack/issues/4)).
 - The `docker` group is root-equivalent, and it can read every secret ([#1](https://github.com/kamui/rakazo-stack/issues/1), [#29](https://github.com/kamui/rakazo-stack/issues/29)).
 - Windows: use `docker.exe compose …` ([#41](https://github.com/kamui/rakazo-stack/issues/41)).
@@ -864,31 +872,16 @@ Collected from the decisions above, for the README and docs:
 - A lost Backup passphrase makes the Backup unusable ([#30](https://github.com/kamui/rakazo-stack/issues/30)).
 - Removing an Instance is manual ([#17](https://github.com/kamui/rakazo-stack/issues/17)).
 
-## 21. Open questions
+## 21. Left to the implementation
 
-Things the tickets leave unsettled or that conflict in a way supersession doesn't resolve. Each needs a decision before or during implementation.
+No ticket fixes these names. The implementation picks them, and the docs then state them:
 
-1. **Rakazo floor.** [#32](https://github.com/kamui/rakazo-stack/issues/32) gives "Rakazo ≥ v0.4.0" as an example floor, but the Hindsight memory provider first appeared in Rakazo v0.12.0, and `memory.connectProvider` with `hindsight` was proven only on v0.16.0 ([#44](https://github.com/kamui/rakazo-stack/issues/44), [#45](https://github.com/kamui/rakazo-stack/issues/45)). The floor must be at least v0.12.0; whether it should be v0.16.0 is open. Hindsight's own floor is also unset (Rakazo's docs say Hindsight 1.0+ works; the stack was tested on 1.3.0).
-2. **Voice-call consent.** On Rakazo v0.16.0 the Owner's AI-recipient consent (`aiConsent`) isn't needed for chat or memory, but it does gate voice calls ([#45](https://github.com/kamui/rakazo-stack/issues/45)). Whether calls through Lemonade need the Owner to allow a recipient first, and whether that becomes a checklist item, is untested. ([#37](https://github.com/kamui/rakazo-stack/issues/37) had made consent a checklist item on v0.4.0, before Hindsight.)
-3. **Memory turned off.** When a re-run turns memory off, `hindsight` stops but the default Space's connection in Rakazo still points at `http://hindsight:8888` ([#9](https://github.com/kamui/rakazo-stack/issues/9)). Whether setup should leave it (recall then fails before each reply until someone disconnects it in Rakazo), add a checklist item, or disconnect it is undecided.
-4. **Backups while memory is off.** [#30](https://github.com/kamui/rakazo-stack/issues/30) dumps the memory database "when memory is on". With memory off but `hindsight-pgdata` kept, is Hindsight's database left out of the Backup (and its data lost on restore), or does `backup` start `hindsight-db` just to dump it?
-5. **README's relay row.** The README says the Lemonade relay "goes away once Kokoros#144 is fixed". Since [#17](https://github.com/kamui/rakazo-stack/issues/17) the relay stays, because it converts audio for Whisper; only its `lang_code` fix is temporary. The README needs that row corrected.
-6. **Whisper backend on Linux and Windows.** Lemonade's backend `auto` picked Vulkan on a software renderer in [#24](https://github.com/kamui/rakazo-stack/issues/24), and the hardware runs in [#42](https://github.com/kamui/rakazo-stack/issues/42) and [#46](https://github.com/kamui/rakazo-stack/issues/46) set `whispercpp.backend=cpu`. No ticket decides whether setup sets `whispercpp.backend=cpu`.
-7. **Whisper's newlines.** Whisper's text has newlines at segment breaks, even mid-sentence ([#24](https://github.com/kamui/rakazo-stack/issues/24)). Whether the relay should join them is undecided.
-8. **64,000 output tokens.** Hindsight's fact extraction asks for 64,000 output tokens. Whether `gpt-6-luna` (OpenAI) and `gemini-3.5-flash-lite` (Gemini) allow that is unverified ([#44](https://github.com/kamui/rakazo-stack/issues/44)); if not, `HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS` would need lowering for those providers.
-9. **`models.connect`.** [#36](https://github.com/kamui/rakazo-stack/issues/36) names it `POST /rpc/models.connect` with `makeDefault`, while the proven RPCs use paths like `/rpc/voice/connect`. The exact path, body and detection SQL for the Owner's OpenAI/Gemini connection were never run.
-10. **`HINDSIGHT_API_MCP_ENABLED=false`.** [#44](https://github.com/kamui/rakazo-stack/issues/44) calls it "a reasonable hardening step" (Rakazo doesn't use Hindsight's MCP endpoint) but doesn't decide it.
-11. **Images missing for other Components.** The skip-a-release rule covers Rakazo only ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#45](https://github.com/kamui/rakazo-stack/issues/45)). What setup and update do when the newest Lemonade or Hindsight release has no image is undecided.
-12. **Composio callbacks.** Whether Composio accepts a callback to `http://127.0.0.1:5173` or a `ts.net` Instance URL is unverified ([#3](https://github.com/kamui/rakazo-stack/issues/3), [#8](https://github.com/kamui/rakazo-stack/issues/8)).
-13. **Docker Desktop at sign-in.** Research fed to [#9](https://github.com/kamui/rakazo-stack/issues/9) suggested warning when Docker Desktop doesn't start at sign-in; no ticket decided it.
-14. **Bring-your-own Instance URL and the web port.** With a bring-your-own URL, `web` stays on `127.0.0.1:5173`, so the Self-hoster's proxy must run on the same machine. Whether setup offers to bind it wider is undecided ([#8](https://github.com/kamui/rakazo-stack/issues/8)).
-15. **Names not fixed by any ticket.** The implementation picks these and the docs then state them:
-    - the no-questions option (the README says "not decided yet");
-    - the environment variables for keys, the Owner password and the Backup passphrase in no-questions use;
-    - a shorter address for the one-liner, if any (the README says "not decided yet"; the GitHub release URLs above work);
-    - macOS lemond's port and the LaunchAgent label;
-    - the variable name for Hindsight's database password in `secrets.env`;
-    - the names of the locally built relay and sidecar images;
-    - the lock file, the update-check timestamp file, and the Backup file's extension;
-    - `settings.json`'s exact schema;
-    - whether the Tailscale auth key is kept in `secrets.env` after the first join.
+- the no-questions option (the README says "not decided yet");
+- the environment variables for keys, the Owner password and the Backup passphrase in no-questions use;
+- a shorter address for the one-liner, if any (the README says "not decided yet"; the GitHub release URLs above work);
+- macOS lemond's port and the LaunchAgent label;
+- the variable name for Hindsight's database password in `secrets.env`;
+- the names of the locally built relay and sidecar images;
+- the lock file, the update-check timestamp file, and the Backup file's extension;
+- `settings.json`'s exact schema;
+- whether the Tailscale auth key is kept in `secrets.env` after the first join.

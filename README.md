@@ -20,7 +20,7 @@ Words like **Self-hoster** (you, the person running it) and **Instance** (your c
 |---|---|---|
 | [Rakazo](https://github.com/elie222/rakazo) | The app itself, including the separate "bot computers" its AI agents work in | Always |
 | [Lemonade](https://github.com/lemonade-sdk/lemonade) | Speech and transcription on your own computer, so your voice doesn't go to an outside service | Always. On a Mac it runs outside Docker, so transcription can use the Mac's graphics chip |
-| Lemonade relay | Fixes a small mismatch between Rakazo and Lemonade. It goes away once [Kokoros#144](https://github.com/lucasjinreal/Kokoros/issues/144) is fixed in Lemonade | Always |
+| Lemonade relay | Converts recordings from your browser or phone into a format Lemonade can transcribe, and fixes a small mismatch between Rakazo and Lemonade's speech | Always |
 | [Hindsight](https://github.com/vectorize-io/hindsight) | Long-term memory | Only if you give setup a model provider key |
 | [Tailscale](https://tailscale.com) | Lets your phone and other devices reach it securely, at an address like `https://rakazo.<your-tailnet>.ts.net` | Only if you choose it |
 | Bot-computer firewall | Stops bot computers from reaching your computer, your home network and your Tailscale devices | Always |
@@ -126,10 +126,10 @@ Only transcription, and only on Apple-silicon Macs. Everything else runs on the 
 Bot computers run code that AI agents write, so on every system v1 keeps them away from your own computer, your home network and your Tailscale devices. On a Mac this also protects the voice engines, which run outside Docker and can't be password-protected. You can't turn this off. They can still reach the internet.
 
 **Does it keep running when I log out?**
-Not on Windows or Mac, because Docker Desktop stops when you log out. A version that keeps running is not planned for v1.
+Not on Windows or Mac, because Docker Desktop stops when you log out. A version that keeps running is not planned for v1. After you restart your computer, the Instance starts again only once Docker Desktop is running, so turn on **Start Docker Desktop when you sign in to your computer** in Docker Desktop's settings.
 
 **Can I put it on my own domain name?**
-Setup won't do that for you. There's an unsupported option to use your own address if you set up the domain and security certificates yourself.
+Setup won't do that for you. There's an unsupported option to use your own address if you set up the domain and security certificates yourself. The web server that forwards your domain to Rakazo has to run on the same computer.
 
 **Why does setup ask for my Rakazo password?**
 Only when something still needs setting up, such as your admin account, voice or memory. It never saves the password.
