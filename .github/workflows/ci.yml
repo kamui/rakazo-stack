@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  ZIG_VERSION: 0.16.0
+  CARGO_ZIGBUILD_VERSION: v0.24.1
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install cargo-zigbuild
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dir="$RUNNER_TEMP/cargo-zigbuild"
+          mkdir -p "$dir"
+          cd "$dir"
+          asset=cargo-zigbuild-x86_64-unknown-linux-gnu.tar.xz
+          gh release download "$CARGO_ZIGBUILD_VERSION" -R rust-cross/cargo-zigbuild -p "$asset" -p "$asset.sha256"
+          sha256sum -c "$asset.sha256" 2>/dev/null | grep -q ': OK$'
+          tar -xJf "$asset"
+          dirname "$(find "$dir" -type f -name cargo-zigbuild)" >> "$GITHUB_PATH"
+      # spec §18: the Linux executable must run on glibc 2.17.
+      - run: cargo zigbuild --release --locked --target x86_64-unknown-linux-gnu.2.17
+      - name: Check the newest glibc symbol is at most 2.17
+        run: |
+          bin=target/x86_64-unknown-linux-gnu/release/rakazo-stack
+          newest=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
+          echo "newest glibc symbol: $newest"
+          [ "$(printf '%s\n2.17\n' "$newest" | sort -V | tail -1)" = "2.17" ]
+      - run: target/x86_64-unknown-linux-gnu/release/rakazo-stack --version
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: rakazo-stack-x86_64-unknown-linux-gnu
+          path: target/x86_64-unknown-linux-gnu/release/rakazo-stack
+          if-no-files-found: error
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: cargo build --release --locked --target aarch64-apple-darwin
+      # spec §18: Apple silicon kills an executable with an invalid signature.
+      - run: codesign --verify --strict target/aarch64-apple-darwin/release/rakazo-stack
+      - run: target/aarch64-apple-darwin/release/rakazo-stack --version
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: rakazo-stack-aarch64-apple-darwin
+          path: target/aarch64-apple-darwin/release/rakazo-stack
+          if-no-files-found: error
+
+  relay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: present
+        run: |
+          if [ -f relay/package.json ]; then echo "yes=true" >> "$GITHUB_OUTPUT"; else echo "No relay yet (#63)."; fi
+      - if: steps.present.outputs.yes == 'true'
+        uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.4.4
+      - if: steps.present.outputs.yes == 'true'
+        working-directory: relay
+        run: bun test
