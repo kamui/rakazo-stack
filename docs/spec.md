@@ -125,9 +125,9 @@ Every `setup`, `update` and `restore` run starts with preflight. A **stop** ends
 | Windows: Docker Desktop not in Linux containers mode | stop | [#41](https://github.com/kamui/rakazo-stack/issues/41) |
 | Windows Home edition | warn | [#9, #20] |
 | `docker info` reports firewall backend `nftables` | warn; checklist says bot computers won't start until `firewall-backend` is removed from `daemon.json` and Docker is restarted | [#40](https://github.com/kamui/rakazo-stack/issues/40) |
-| Fewer than 4 CPU threads, less than 16 GB host RAM, or less than 35 GB free where Docker stores its data | warn | [#42, #46] |
-| Windows: Docker Desktop's VM memory (`docker info` `MemTotal`) is low | warn | [#42](https://github.com/kamui/rakazo-stack/issues/42) |
-| Rakazo's web port is already taken | stop | [#29](https://github.com/kamui/rakazo-stack/issues/29) |
+| Fewer than 4 CPU threads, less than 16 GB host RAM (under 15 GiB reported, since a 16 GB machine reports a little less), or less than 35 GB free where Docker stores its data. Docker Engine: its `DockerRootDir`. Docker Desktop keeps its data in a disk image, so the host disk holding it stands in: `/mnt/c` on Windows, the home volume on macOS. Windows host RAM comes from Windows, not WSL | warn | [#42, #46] |
+| Windows: Docker Desktop's VM memory (`docker info` `MemTotal`) is below 7.5 GiB (a 16 GB host gives it about 7.8 GiB; a busy Instance needs 7.1–7.6 GiB) | warn | [#42](https://github.com/kamui/rakazo-stack/issues/42), [#46](https://github.com/kamui/rakazo-stack/issues/46) |
+| Rakazo's web port is already taken: a container other than the Instance's own `web` publishes it, or something listens on `127.0.0.1:5173` (on WSL, also a Windows listener in `netstat.exe`) | stop | [#29](https://github.com/kamui/rakazo-stack/issues/29) |
 | macOS: lemond's stack port is already taken | stop, naming what uses it | [#17](https://github.com/kamui/rakazo-stack/issues/17) |
 | Recorded Component versions are below the program's floor | stop: "run `rakazo-stack update`" (`setup` only) | [#32](https://github.com/kamui/rakazo-stack/issues/32) |
 | GitHub unreachable | stop on a first `setup`, on `update`; re-runs of `setup` don't need GitHub | [#32](https://github.com/kamui/rakazo-stack/issues/32) |
@@ -288,6 +288,7 @@ Fixed at `~/rakazo-stack` on every OS, with no option to move it. On Windows tha
   computer-egress/                 build context for the sidecar, with Rakazo's restrict-computer-egress.sh
   lemonade/                        macOS only: versions/<v>/, config, models (HF_HOME)
   logs/                            setup run logs (no secrets); lemond logs on macOS
+  .lock                            the lock setup, update, backup and restore take (an OS file lock, released if the program dies)
 ```
 
 - Setup re-applies the modes on every run ([#29](https://github.com/kamui/rakazo-stack/issues/29)).
@@ -883,6 +884,6 @@ No ticket fixes these names. The implementation picks them, and the docs then st
 - macOS lemond's port and the LaunchAgent label;
 - the variable name for Hindsight's database password in `secrets.env`;
 - the names of the locally built relay and sidecar images;
-- the lock file, the update-check timestamp file, and the Backup file's extension;
+- the update-check timestamp file and the Backup file's extension;
 - `settings.json`'s exact schema;
 - whether the Tailscale auth key is kept in `secrets.env` after the first join.
