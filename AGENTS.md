@@ -19,7 +19,7 @@ Code, tests, fixtures, logs, commit messages, issues and PRs hold only generic v
 
 ## Docker on the dev machine
 
-The dev machine runs other people's containers, so an agent works only on what it created:
+The dev machine also runs the owner's own containers, so an agent works only on what it created:
 
 - Give every test Instance its own Compose project name and its own Instance folder, and tear it down when the test ends, volumes and networks included.
 - Scope every Docker command to that project (`-p <name>`, or a `com.docker.compose.project=<name>` filter). Unscoped `prune`, `down`, `rm` and `stop` belong to the owner.
@@ -30,7 +30,7 @@ The dev machine runs other people's containers, so an agent works only on what i
 
 - The toolchain is pinned in `rust-toolchain.toml`.
 - Before opening a PR: `cargo fmt --check`, `cargo clippy -- -D warnings` and `cargo test` all pass.
-- Pure logic (parsing, version resolution, decisions, file generation) gets unit tests that need no Docker. Tests that start containers are integration tests and run on Linux CI.
+- Pure logic (parsing, version resolution, decisions, file generation) gets unit tests that need no Docker. Tests that start containers are integration tests. They run on Linux CI, and on the dev machine when scoped as above.
 
 ## The relay
 
