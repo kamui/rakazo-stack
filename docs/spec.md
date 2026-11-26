@@ -828,9 +828,10 @@ Nobody tracks upstream releases by hand. A weekly GitHub Actions job on Linux ru
 
 - a fresh install against the latest versions;
 - an `update` from the versions of its last passing run;
-- a memory check that creates a **second** Hindsight bank, so a missing `shm_size` shows up.
+- a memory check that creates a **second** Hindsight bank on a populated database, so a missing `shm_size` shows up. It needs no Model provider key: it seeds memories without the LLM and skips Hindsight's LLM check, as [#48](https://github.com/kamui/rakazo-stack/issues/48)'s `repro.sh` did;
+- when the repo secret `OPENROUTER_API_KEY` is set, a short end-to-end memory check through Rakazo on the default model (`~z-ai/glm-flash-latest`): a few turns are learned, then recalled. The key is a separate OpenRouter key with a spending limit of about $1 a month, never printed in the log. Without the secret, this part is skipped and the run says so ([#77](https://github.com/kamui/rakazo-stack/issues/77)).
 
-It opens an issue when any part fails. macOS isn't covered (GitHub's Mac runners can't run Docker). There is no canary for the ZDR only probe, since it would need a real OpenRouter key in CI ([#39](https://github.com/kamui/rakazo-stack/issues/39)).
+It opens an issue when any part fails. macOS isn't covered (GitHub's Mac runners can't run Docker). There is no canary for the ZDR only probe, because its result depends on the privacy settings of the account that owns the key ([#39](https://github.com/kamui/rakazo-stack/issues/39)).
 
 ### Release gate
 
@@ -851,7 +852,7 @@ Each of these was decided from source, docs or a partial run and must pass durin
 - **Rakazo calls:** whether voice calls through Lemonade need the Owner's AI-recipient consent (`aiConsent`), which v0.16.0 requires for calls but not for chat or memory; if so, it becomes a checklist item ([#45](https://github.com/kamui/rakazo-stack/issues/45)). The exact path, body and detection query of the OpenAI/Gemini `models.connect` call, never run ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
 - **Memory models:** whether OpenAI's `gpt-6-luna` and Gemini's `gemini-3.5-flash-lite` allow the 64,000 output tokens Hindsight's fact extraction asks for; if not, setup lowers `HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS` for that provider ([#44](https://github.com/kamui/rakazo-stack/issues/44)).
 - **Composio:** whether it accepts a callback to `http://127.0.0.1:5173` or a `ts.net` Instance URL ([#3](https://github.com/kamui/rakazo-stack/issues/3), [#8](https://github.com/kamui/rakazo-stack/issues/8)).
-- **Phones:** Rakazo's phone app with `BETTER_AUTH_URL` on localhost; Android end to end ([#24](https://github.com/kamui/rakazo-stack/issues/24), [#28](https://github.com/kamui/rakazo-stack/issues/28)).
+- **Phones:** Rakazo's phone app with `BETTER_AUTH_URL` on localhost ([#24](https://github.com/kamui/rakazo-stack/issues/24)). Android end to end is optional: v1 documents Android as untested, and the check runs only if an Android phone is at hand ([#28](https://github.com/kamui/rakazo-stack/issues/28), [#79](https://github.com/kamui/rakazo-stack/issues/79)).
 
 ## 20. Known limitations to document
 
