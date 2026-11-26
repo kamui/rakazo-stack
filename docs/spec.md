@@ -795,8 +795,8 @@ On macOS, the voice engine runs outside Docker as the LaunchAgent, so `docker co
 
 ### The program
 
-- One TypeScript program compiled with Bun (pinned, ≥ 1.4.1) into a single executable per platform: `bun-linux-x64` (glibc ≥ 2.17, SSE4.2; also serves WSL) and `bun-darwin-arm64` (macOS 13.0+). Both are cross-compiled on one `ubuntu-latest` runner ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#22](https://github.com/kamui/rakazo-stack/issues/22)).
-- Bun writes an ad-hoc, linker-signed signature into the macOS binary, and `curl` downloads aren't quarantined, so no Apple Developer ID or notarization is needed in v1. No browser download of the macOS asset is offered (a browser-quarantined copy fails Gatekeeper) ([#16](https://github.com/kamui/rakazo-stack/issues/16), [#22](https://github.com/kamui/rakazo-stack/issues/22)).
+- One Rust program, built with a stable toolchain pinned in `rust-toolchain.toml`, into a single native executable per platform: `x86_64-unknown-linux-gnu` (glibc ≥ 2.17; also serves WSL) and `aarch64-apple-darwin` (macOS 13.0+). Linux builds on `ubuntu-latest`. macOS builds natively on `macos-latest`, because building a Mac executable on Linux needs Apple's SDK ([ADR 0003](adr/0003-rust-for-the-program.md), [#22](https://github.com/kamui/rakazo-stack/issues/22)).
+- Apple's linker writes an ad-hoc signature into every arm64 executable, and `curl` downloads aren't quarantined, so no Apple Developer ID or notarization is needed in v1. No browser download of the macOS asset is offered (a browser-quarantined copy fails Gatekeeper) ([#16](https://github.com/kamui/rakazo-stack/issues/16), [#22](https://github.com/kamui/rakazo-stack/issues/22)).
 - Bundled in the program: the layer file `compose.stack.yaml`, the relay and sidecar build folders, the relay and sidecar base image references, and the default models. Fetched per Rakazo tag at run time: Rakazo's compose file and `restrict-computer-egress.sh` ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#35](https://github.com/kamui/rakazo-stack/issues/35)).
 - `rakazo-stack --version` prints the program version (used by the release smoke test) ([#22](https://github.com/kamui/rakazo-stack/issues/22)).
 
@@ -805,7 +805,7 @@ On macOS, the voice engine runs outside Docker as the LaunchAgent, so `docker co
 v1 installs only through a `curl … | sh` one-liner that runs `install.sh` from the GitHub release ([#35](https://github.com/kamui/rakazo-stack/issues/35)):
 
 - `https://github.com/kamui/rakazo-stack/releases/latest/download/install.sh` installs the newest program; `https://github.com/kamui/rakazo-stack/releases/download/vX.Y.Z/install.sh` installs an exact version, which is also how to go back a version ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
-- Detects with `uname -s` / `uname -m`. Supports exactly `Linux x86_64` and `Darwin arm64`, handles Rosetta, and refuses everything else. Detects musl/Alpine and stops: "Alpine/musl Linux isn't supported; use a glibc distro such as Ubuntu or Debian" ([#22](https://github.com/kamui/rakazo-stack/issues/22), [#35](https://github.com/kamui/rakazo-stack/issues/35)).
+- Detects with `uname -s` / `uname -m`. Supports exactly `Linux x86_64` and `Darwin arm64`, handles Rosetta, and refuses everything else. Detects musl/Alpine and stops, because v1 ships only the glibc executable: "Alpine/musl Linux isn't supported; use a glibc distro such as Ubuntu or Debian" ([#22](https://github.com/kamui/rakazo-stack/issues/22), [#35](https://github.com/kamui/rakazo-stack/issues/35)).
 - Downloads the matching program to a temp file, checks it against SHA-256 digests baked into `install.sh`, then renames it into place at `~/.local/bin/rakazo-stack`. No `sudo` ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
 - If `gh` is installed and signed in, runs `gh attestation verify`; a failure stops the install and installs nothing. Without `gh`, prints one line ("build origin not checked; to check it yourself: …") and continues ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
 - If `~/.local/bin` isn't on `PATH`, prints the exact line to add. Never edits shell profiles ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
@@ -816,7 +816,7 @@ v1 installs only through a `curl … | sh` one-liner that runs `install.sh` from
 ### Releases
 
 - Immutable GitHub releases holding the two binaries and `install.sh` (with their digests baked in), plus build attestations ([#22](https://github.com/kamui/rakazo-stack/issues/22), [#35](https://github.com/kamui/rakazo-stack/issues/35)).
-- Each release is gated on a `macos-latest` (arm64) smoke test: `codesign --verify --strict`, then `rakazo-stack --version`. Bun's Mach-O signing has regressed before (1.3.12, 1.4.0) ([#22](https://github.com/kamui/rakazo-stack/issues/22)).
+- Each release is gated on a `macos-latest` (arm64) smoke test: `codesign --verify --strict`, then `rakazo-stack --version`. Apple silicon kills an executable whose signature is invalid, so a broken build must not reach a release ([#22](https://github.com/kamui/rakazo-stack/issues/22)).
 - No Homebrew, `.pkg`, `.exe`, zip or `git clone` path in v1 ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
 - No self-update command beyond `rakazo-stack update`, which updates the program first ([§14](#14-rakazo-stack-update)). A periodic self-offer like `omz update` is for after v1 ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#35](https://github.com/kamui/rakazo-stack/issues/35)).
 
