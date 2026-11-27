@@ -55,6 +55,27 @@ impl InstanceFolder {
         fs::rename(temp, target)
     }
 
+    /// Writes a file of a build folder, such as `relay/src/relay.ts`. Docker's `COPY` keeps
+    /// modes, and the image's user isn't the Self-hoster, so these are world-readable;
+    /// the folder's own 700 still keeps other accounts out.
+    pub fn write_build_file(&self, path: &str, contents: &[u8]) -> io::Result<()> {
+        let target = self.path.join(path);
+        let mut dir = self.path.clone();
+        for part in Path::new(path)
+            .parent()
+            .into_iter()
+            .flat_map(Path::components)
+        {
+            dir.push(part);
+            match fs::create_dir(&dir) {
+                Err(err) if err.kind() != io::ErrorKind::AlreadyExists => return Err(err),
+                _ => fs::set_permissions(&dir, fs::Permissions::from_mode(0o755))?,
+            }
+        }
+        fs::write(&target, contents)?;
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644))
+    }
+
     /// The folder at 700 and every file in it at 600, on every run (spec §6).
     pub fn reapply_modes(&self) -> io::Result<()> {
         fs::set_permissions(&self.path, fs::Permissions::from_mode(0o700))?;
@@ -121,5 +142,30 @@ mod tests {
             .mode();
         assert_eq!(mode & 0o777, 0o600);
         assert_eq!(folder.read("missing").unwrap(), None);
+    }
+
+    #[test]
+    fn writes_build_folders_readable_by_the_images_user() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let folder = InstanceFolder::for_home(home.path());
+        let _lock = folder.lock().unwrap();
+        folder
+            .write_build_file("relay/src/relay.ts", b"one")
+            .unwrap();
+        folder
+            .write_build_file("relay/src/relay.ts", b"two")
+            .unwrap();
+        let mode = |path: &str| {
+            std::fs::metadata(folder.file(path))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(mode("relay"), 0o755);
+        assert_eq!(mode("relay/src"), 0o755);
+        assert_eq!(mode("relay/src/relay.ts"), 0o644);
+        assert_eq!(folder.read("relay/src/relay.ts").unwrap().unwrap(), b"two");
     }
 }

@@ -1,21 +1,23 @@
 //! `rakazo-stack setup` (spec §7), so far: the Owner, Model provider and access questions,
-//! the key check, Rakazo, the stack's Tailscale device, the Owner filled in through
-//! Rakazo's own code path, and the Checklist.
+//! the key check, Rakazo, the stack's Tailscale device, voice through Lemonade, the Owner
+//! and their voice filled in through Rakazo's own code paths, and the Checklist.
 
 use std::time::Duration;
 
 use crate::access::{self, AUTH_KEY_NAME, Access};
 use crate::answers::{self, FrontEnd, NoQuestions, Terminal, Wizard};
 use crate::checklist::Checklist;
-use crate::database_settings::{self, DatabaseSetting};
+use crate::database_settings;
 use crate::docker::{ContainerSummary, Docker};
 use crate::envfile::{self, EnvInputs, STACK_COMPOSE_FILE, TailscaleEnv};
 use crate::github::{self, RAKAZO_REPO};
 use crate::http;
 use crate::instance::InstanceFolder;
+use crate::lemonade::{self, LEMONADE_IMAGE, LEMONADE_REPO, LemonadeRelease, LocalLemonade};
 use crate::model_provider::{self, ChatModel, Choice, Provider};
 use crate::overrides;
 use crate::platform::Platform;
+use crate::preflight;
 use crate::rakazo::LocalRakazo;
 use crate::registry::{self, Ghcr};
 use crate::resolve::{self, RAKAZO_FLOOR, RakazoRelease, ResolveError};
@@ -23,10 +25,12 @@ use crate::runlog::RunLog;
 use crate::secrets::{self, Secrets};
 use crate::settings::Settings;
 use crate::tailscale::{self, Joined};
+use crate::voice;
 
 const STACK_LAYER: &str = include_str!("../stack/compose.stack.yaml");
 const RAKAZO_COMPOSE_PATH: &str = "infra/compose/docker-compose.images.yml";
 const WAIT_TIMEOUT_SECONDS: &str = "900";
+const VOICE_SERVICES: [&str; 2] = ["lemonade", "lemonade-relay"];
 
 #[derive(Debug)]
 pub struct SetupError(pub String);
@@ -44,6 +48,8 @@ struct Stack<'a> {
     web_port: u16,
     access: Access,
     chat: Option<ChatModel<'a>>,
+    /// `None` where Lemonade runs natively.
+    lemonade: Option<LemonadeRelease>,
 }
 
 impl Stack<'_> {
@@ -61,6 +67,7 @@ impl Stack<'_> {
         envfile::render(&EnvInputs {
             project: &self.project,
             rakazo: &self.release,
+            lemonade: self.lemonade.as_ref(),
             secrets,
             web_port: self.web_port,
             chat: self.chat,
@@ -143,13 +150,21 @@ impl Setup<'_> {
         let mut settings = recorded.unwrap_or_else(|| Settings::new(&release));
         settings.program_version = env!("CARGO_PKG_VERSION").to_string();
         if settings.owner_email.as_deref() != Some(answers.owner_email.as_str()) {
-            settings
-                .filled_by_setup
-                .retain(|filled| *filled != DatabaseSetting::Owner);
+            // Everything setup fills belongs to the Owner, so a new address starts afresh.
+            settings.filled_by_setup.clear();
             settings.owner_email = Some(answers.owner_email.clone());
         }
         settings.model_provider = Some(answers.model_provider);
         settings.rakazo_model.clone_from(&rakazo_model);
+        let lemonade = match (self.platform, settings.lemonade_release()) {
+            (Platform::MacOs, _) => None,
+            (_, Some(recorded)) => Some(recorded),
+            (_, None) => {
+                let release = resolve_lemonade(&agent, &log)?;
+                settings.record_lemonade(&release);
+                Some(release)
+            }
+        };
 
         access.record(&mut settings);
         secrets.fill_missing(secrets::random_hex);
@@ -183,6 +198,7 @@ impl Setup<'_> {
             web_port: overrides::web_port(),
             access,
             chat,
+            lemonade,
         };
         self.folder
             .write("secrets.env", secrets.to_text().as_bytes())?;
@@ -190,6 +206,9 @@ impl Setup<'_> {
             .write("settings.json", settings.to_json().as_bytes())?;
         self.folder
             .write(STACK_COMPOSE_FILE, STACK_LAYER.as_bytes())?;
+        for (path, contents) in lemonade::RELAY_BUILD_FOLDER {
+            self.folder.write_build_file(path, contents.as_bytes())?;
+        }
         self.folder
             .write(".env", stack.env(&settings, &secrets).as_bytes())?;
         self.folder.reapply_modes()?;
@@ -215,15 +234,12 @@ impl Setup<'_> {
             self.recreate_containers_made_in_wsl(&stack.project, &log)?;
         }
         let tailnet = tailscale_chosen && settings.components.tailscale.is_some();
-        // Tailscale starts on its own afterwards, so that its failure can't stop Rakazo's.
-        // An empty list means every service.
-        let rakazo_services = if tailnet {
-            self.services_besides(tailscale::SERVICE)?
-        } else {
-            Vec::new()
-        };
+        // Voice and Tailscale start on their own, so that their failure can't stop Rakazo's.
+        let rakazo_services =
+            self.services_besides(&[VOICE_SERVICES.as_slice(), &[tailscale::SERVICE]].concat())?;
         log.say(&format!("Pulling Rakazo {} images…", stack.release.tag));
         self.compose_for(&["pull", "--quiet"], &rakazo_services)?;
+        let voice_started = self.start_voice(&log, &mut checklist);
         log.say("Starting Rakazo…");
         self.start(&stack, &rakazo_services)?;
         let origin = stack.local_origin();
@@ -237,6 +253,22 @@ impl Setup<'_> {
                 url.origin()
             ));
         }
+
+        // macOS's native lemond is its own slice; until then it has no voice models step.
+        let voice_ready = voice_started
+            && stack.lemonade.is_some()
+            && voice::prepare_models(
+                &LocalLemonade {
+                    docker: self.docker,
+                    folder: self.folder.path(),
+                },
+                || {
+                    let home = self.folder.path().parent()?;
+                    preflight::docker_free_disk(self.platform, self.docker, home)
+                },
+                &mut |line| log.say(line),
+                &mut checklist,
+            );
         if tailnet {
             self.join_tailnet(
                 &stack,
@@ -262,6 +294,7 @@ impl Setup<'_> {
             front.as_mut(),
             &answers.owner_email,
             answers.owner_password,
+            voice_ready,
             &mut settings.filled_by_setup,
             &mut checklist,
         );
@@ -275,6 +308,35 @@ impl Setup<'_> {
             .write("settings.json", settings.to_json().as_bytes())?;
         log.say(checklist.render().trim_end());
         Ok(())
+    }
+
+    /// Builds the relay and starts it with Lemonade. A failure is a Checklist item, not a
+    /// failed run, so Rakazo starts either way (spec §9).
+    fn start_voice(&self, log: &RunLog, checklist: &mut Checklist) -> bool {
+        log.say("Building the Lemonade relay and starting Lemonade…");
+        let mut up = vec![
+            "up",
+            "-d",
+            "--build",
+            "--wait",
+            "--wait-timeout",
+            WAIT_TIMEOUT_SECONDS,
+        ];
+        up.extend(
+            VOICE_SERVICES
+                .iter()
+                .filter(|s| self.platform != Platform::MacOs || **s != "lemonade"),
+        );
+        match self.compose(&up) {
+            Ok(()) => true,
+            Err(err) => {
+                checklist.add(voice::not_set_up(&format!(
+                    "Lemonade or its relay didn't start ({})",
+                    err.0
+                )));
+                false
+            }
+        }
     }
 
     fn front_end(&self) -> Result<Box<dyn FrontEnd>, SetupError> {
@@ -329,7 +391,7 @@ impl Setup<'_> {
         wait_for_web(&http::agent(), &stack.local_origin())
     }
 
-    fn services_besides(&self, excluded: &str) -> Result<Vec<String>, SetupError> {
+    fn services_besides(&self, excluded: &[&str]) -> Result<Vec<String>, SetupError> {
         let out = self
             .docker
             .compose(self.folder.path(), ["config", "--services"])
@@ -343,7 +405,7 @@ impl Setup<'_> {
         }
         Ok(String::from_utf8_lossy(&out.stdout)
             .lines()
-            .filter(|service| *service != excluded)
+            .filter(|service| !excluded.contains(service))
             .map(str::to_string)
             .collect())
     }
@@ -524,6 +586,21 @@ fn resolve_rakazo(agent: &ureq::Agent, log: &RunLog) -> Result<RakazoRelease, Se
     }
 }
 
+fn resolve_lemonade(agent: &ureq::Agent, log: &RunLog) -> Result<LemonadeRelease, SetupError> {
+    let tags = github::fetch_stable_tags(agent, LEMONADE_REPO)
+        .map_err(|err| SetupError(format!("Couldn't check Lemonade's releases: {err}")))?;
+    let ghcr = Ghcr::new(agent);
+    let resolution = lemonade::choose_lemonade(&tags, |tag| {
+        ghcr.digest(LEMONADE_IMAGE, tag)
+            .map_err(|err| err.to_string())
+    })
+    .map_err(|err| SetupError(format!("Couldn't pick a Lemonade release: {err}")))?;
+    for tag in &resolution.skipped {
+        log.say(&lemonade::describe_skipped(tag));
+    }
+    Ok(resolution.release)
+}
+
 fn wait_for_web(agent: &ureq::Agent, origin: &str) -> Result<(), SetupError> {
     for _ in 0..30 {
         if let Ok(response) = agent.get(origin).call()
@@ -569,6 +646,7 @@ mod tests {
                 auth_key: Some(AuthKey::parse(KEY).unwrap()),
             },
             chat: None,
+            lemonade: None,
         }
     }
 

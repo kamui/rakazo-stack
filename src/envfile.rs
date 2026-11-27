@@ -2,15 +2,18 @@
 //! (spec §5, "Rakazo settings setup writes to `.env`").
 
 use crate::access::{AUTH_KEY_NAME, Addresses};
+use crate::lemonade::LemonadeRelease;
 use crate::model_provider::ChatModel;
 use crate::resolve::RakazoRelease;
-use crate::secrets::Secrets;
+use crate::secrets::{LEMONADE_API_KEY, Secrets};
 use crate::settings::RecordedImage;
 use crate::tailscale;
 
 pub struct EnvInputs<'a> {
     pub project: &'a str,
     pub rakazo: &'a RakazoRelease,
+    /// The `lemonade` container's release; `None` where Lemonade runs natively.
+    pub lemonade: Option<&'a LemonadeRelease>,
     pub secrets: &'a Secrets,
     pub web_port: u16,
     /// The Instance-wide chat model; without one, each person connects their own.
@@ -46,7 +49,14 @@ pub fn render(inputs: &EnvInputs) -> String {
         "COMPOSE_PATH_SEPARATOR=:".to_string(),
         format!(
             "COMPOSE_PROFILES={}",
-            inputs.tailscale.as_ref().map_or("", |_| tailscale::SERVICE)
+            [
+                inputs.lemonade.map(|_| "lemonade"),
+                inputs.tailscale.as_ref().map(|_| tailscale::SERVICE),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(",")
         ),
         format!("RAKAZO_IMAGE_TAG={tag}@{}", inputs.rakazo.app_digest),
         format!(
@@ -57,8 +67,18 @@ pub fn render(inputs: &EnvInputs) -> String {
     for (key, value) in inputs.secrets.rakazo() {
         lines.push(format!("{key}={value}"));
     }
+    if let Some(lemonade) = inputs.lemonade {
+        lines.push(format!("LEMONADE_IMAGE={}", lemonade.image()));
+    }
+    if let Some(key) = inputs.secrets.get(LEMONADE_API_KEY.0) {
+        lines.push(format!("{}={key}", LEMONADE_API_KEY.0));
+    }
     lines.extend([
         "SIGNUPS_ENABLED=false".to_string(),
+        "PHONE_CALLS_ENABLED=true".to_string(),
+        // Lets Rakazo reach the relay by its service name (spec §9).
+        "MCP_ALLOW_PRIVATE_ENDPOINT=true".to_string(),
+        "RAKAZO_OPENAI_COMPAT_PRIVATE_HOSTS=lemonade-relay".to_string(),
         "SANDBOX_COMPUTER_EGRESS=restricted".to_string(),
         format!("RAKAZO_WEB_PORT={}", inputs.web_port),
         format!("BETTER_AUTH_URL={}", inputs.addresses.better_auth_url),
@@ -114,9 +134,14 @@ mod tests {
             version: "v1.104.7".into(),
             digest: "sha256:ttt".into(),
         };
+        let lemonade = LemonadeRelease {
+            tag: "v2026.48.3".into(),
+            digest: "sha256:lll".into(),
+        };
         render(&EnvInputs {
             project: "rakazo-stack",
             rakazo: &release(),
+            lemonade: Some(&lemonade),
             secrets: &secrets,
             web_port: 5173,
             chat: None,
@@ -138,7 +163,13 @@ mod tests {
     #[test]
     fn renders_the_localhost_slice() {
         let text = rendered(&Access::Localhost, None, None);
-        assert!(!text.contains("PI_DEFAULT") && !text.contains("_API_KEY"));
+        assert!(!text.contains("PI_DEFAULT"));
+        assert!(
+            text.lines()
+                .filter(|l| l.contains("_API_KEY"))
+                .all(|l| l.starts_with("LEMONADE_API_KEY=")),
+            "only Lemonade's key without a Model provider"
+        );
         assert!(!text.contains("TS_") && !text.contains("TAILSCALE"));
         assert!(!text.contains("tskey"));
         assert_lines(
@@ -146,7 +177,11 @@ mod tests {
             &[
                 "COMPOSE_PROJECT_NAME=rakazo-stack",
                 "COMPOSE_FILE=rakazo.v0.16.0.images.yml:compose.stack.yaml",
-                "COMPOSE_PROFILES=",
+                "COMPOSE_PROFILES=lemonade",
+                "LEMONADE_IMAGE=ghcr.io/lemonade-sdk/lemonade-server:v2026.48.3@sha256:lll",
+                "PHONE_CALLS_ENABLED=true",
+                "MCP_ALLOW_PRIVATE_ENDPOINT=true",
+                "RAKAZO_OPENAI_COMPAT_PRIVATE_HOSTS=lemonade-relay",
                 "RAKAZO_IMAGE_TAG=v0.16.0@sha256:aaa",
                 "RAKAZO_COMPUTER_IMAGE_TAG=v0.16.0@sha256:ccc",
                 "SIGNUPS_ENABLED=false",
@@ -164,6 +199,12 @@ mod tests {
             4
         );
         assert!(!text.contains("updater"));
+        assert_eq!(
+            text.lines()
+                .filter(|l| l.starts_with("LEMONADE_API_KEY=") && l.len() > 60)
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -176,7 +217,7 @@ mod tests {
         assert_lines(
             &text,
             &[
-                "COMPOSE_PROFILES=tailscale",
+                "COMPOSE_PROFILES=lemonade,tailscale",
                 "TAILSCALE_IMAGE_TAG=v1.104.7@sha256:ttt",
                 "TS_HOSTNAME=rakazo-1",
                 "TS_AUTHKEY=tskey-auth-kPLACEHOLDER",
@@ -198,7 +239,7 @@ mod tests {
         assert_lines(
             &text,
             &[
-                "COMPOSE_PROFILES=tailscale",
+                "COMPOSE_PROFILES=lemonade,tailscale",
                 "BETTER_AUTH_URL=http://127.0.0.1:5173",
                 "WEB_ORIGIN=https://rakazo-1.example.ts.net",
                 "API_URL=https://rakazo-1.example.ts.net",
@@ -215,7 +256,7 @@ mod tests {
         assert_lines(
             &text,
             &[
-                "COMPOSE_PROFILES=",
+                "COMPOSE_PROFILES=lemonade",
                 "BETTER_AUTH_URL=https://rakazo.example.com",
                 "WEB_ORIGIN=https://rakazo.example.com",
                 "API_URL=https://rakazo.example.com",
@@ -237,6 +278,7 @@ mod tests {
             let text = render(&EnvInputs {
                 project: "rakazo-stack",
                 rakazo: &rakazo,
+                lemonade: None,
                 secrets: &secrets,
                 web_port: 5173,
                 chat: ChatModel::new(provider, &key, None).unwrap(),
@@ -246,6 +288,7 @@ mod tests {
             let model: Vec<&str> = text
                 .lines()
                 .filter(|l| l.starts_with("PI_") || l.contains("_API_KEY="))
+                .filter(|l| !l.starts_with("LEMONADE_API_KEY="))
                 .collect();
             let expected: &[&str] = match provider {
                 Provider::OpenRouter => &[
@@ -261,6 +304,8 @@ mod tests {
                 Provider::OpenAi | Provider::Gemini => &[],
             };
             assert!(model == expected, "{provider:?}");
+            assert!(text.lines().any(|l| l == "COMPOSE_PROFILES="));
+            assert!(!text.contains("LEMONADE_IMAGE"));
             for never in [
                 "OPENAI_API_KEY",
                 "GEMINI_API_KEY",

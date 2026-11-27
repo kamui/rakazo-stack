@@ -1,6 +1,7 @@
-//! `setup` against real Docker: starts Rakazo on localhost, creates the Owner, switches to
-//! a bring-your-own Instance URL, and tears the test Instance down afterwards. No test
-//! starts a `tailscale` container: it would try to join a real tailnet.
+//! `setup` against real Docker: starts Rakazo on localhost with voice, creates the Owner
+//! and their voice, switches to a bring-your-own Instance URL, and tears the test Instance
+//! down afterwards, its built relay image included. No test starts a `tailscale`
+//! container: it would try to join a real tailnet.
 
 mod common;
 
@@ -104,6 +105,60 @@ impl TestInstance {
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
+    /// Runs a Node script in `api`, where Rakazo's own voice calls start.
+    fn node_in_api(&self, script: &str) -> serde_json::Value {
+        let out = docker()
+            .args(["compose", "exec", "-T", "api", "node", "-e", script])
+            .current_dir(self.folder())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        serde_json::from_slice(&out.stdout).unwrap_or_else(|_| panic!("{}", text(&out)))
+    }
+
+    /// Every address of `lemonade` and the relay, from a container on a bridge of its own,
+    /// which is how Rakazo's supervisor attaches a bot computer.
+    fn reachable_from_a_bot_bridge(&self) -> Vec<String> {
+        let mut targets = vec![
+            "lemonade:13305".to_string(),
+            "lemonade-relay:13306".to_string(),
+        ];
+        for (service, port) in [("lemonade", 13305), ("lemonade-relay", 13306)] {
+            let out = docker()
+                .args([
+                    "inspect",
+                    "--format",
+                    "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}",
+                    &format!("{}-{service}-1", self.project),
+                ])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{}", text(&out));
+            let ips = String::from_utf8_lossy(&out.stdout).into_owned();
+            assert_eq!(ips.split_whitespace().count(), 2, "on stack and egress");
+            targets.extend(ips.split_whitespace().map(|ip| format!("{ip}:{port}")));
+        }
+        let network = format!("{}-bot-probe", self.project);
+        let label = format!("com.docker.compose.project={}", self.project);
+        let created = docker()
+            .args(["network", "create", "--label", &label, &network])
+            .output()
+            .unwrap();
+        assert!(created.status.success(), "{}", text(&created));
+        let script = format!(
+            "const reached = []; for (const t of {targets:?}) {{ try {{ await fetch('http://' + t + '/live', {{ signal: AbortSignal.timeout(3000) }}); reached.push(t); }} catch {{}} }} console.log(JSON.stringify(reached));"
+        );
+        let probe = docker()
+            .args(["run", "--rm", "--network", &network, "--label", &label])
+            .arg(format!("{}-lemonade-relay", self.project))
+            .args(["bun", "-e", &script])
+            .output()
+            .unwrap();
+        let _ = docker().args(["network", "rm", &network]).output();
+        assert!(probe.status.success(), "{}", text(&probe));
+        serde_json::from_slice(&probe.stdout).unwrap()
+    }
+
     fn containers(&self, format: &str) -> Vec<String> {
         let filter = format!("label=com.docker.compose.project={}", self.project);
         let out = docker()
@@ -126,6 +181,8 @@ impl Drop for TestInstance {
             &self.project,
             "down",
             "-v",
+            "--rmi",
+            "local",
             "--remove-orphans",
         ]);
         if self.folder().exists() {
@@ -204,6 +261,54 @@ fn checklist(out: &Output) -> Vec<String> {
         .collect()
 }
 
+const VOICE_CONSENT: &str = "The first time you use voice, Rakazo asks \"Share voice data with Self-hosted (http://lemonade-relay:13306)?\". Choose Allow: that server is this Instance's own Lemonade, so the audio stays on this machine.";
+
+/// One speech and one transcription of it through the relay, as Rakazo makes them, and the
+/// same request straight to Lemonade without its key.
+const VOICE_ROUND_TRIP: &str = r#"(async () => {
+  const relay = "http://lemonade-relay:13306/api/v1";
+  const speech = await fetch(relay + "/audio/speech", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "kokoro-v1", voice: "af_heart", input: "The quick brown fox jumps over the lazy dog.", lang_code: "a" }),
+  });
+  const audio = await speech.blob();
+  const form = new FormData();
+  form.set("model", "Whisper-Small");
+  form.set("file", audio, "speech.mp3");
+  const transcription = await fetch(relay + "/audio/transcriptions", { method: "POST", body: form });
+  const text = transcription.ok ? (await transcription.json()).text : await transcription.text();
+  const keyless = await fetch("http://lemonade:13305/api/v1/models");
+  console.log(JSON.stringify({ speech: speech.status, bytes: audio.size, transcription: transcription.status, text, keyless: keyless.status }));
+})();"#;
+
+fn rpc_as_owner(origin: &str, path: &str, body: &serde_json::Value) -> (u16, String) {
+    let (status, reply) = post_json(
+        &format!("{origin}/api/auth/sign-in/email"),
+        &serde_json::json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }),
+    );
+    assert_eq!(status, 200, "{reply}");
+    let token: serde_json::Value = serde_json::from_str(&reply).unwrap();
+    let bearer = format!("Bearer {}", token["token"].as_str().unwrap());
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let call = |path: &str, body: &serde_json::Value| {
+        let mut response = agent
+            .post(format!("{origin}{path}"))
+            .header("authorization", &bearer)
+            .content_type("application/json")
+            .send(body.to_string())
+            .unwrap();
+        let status = response.status().as_u16();
+        (status, response.body_mut().read_to_string().unwrap())
+    };
+    let reply = call(path, body);
+    assert_eq!(call("/api/auth/sign-out", &serde_json::json!({})).0, 200);
+    reply
+}
+
 fn secret_values(folder: &Path) -> Vec<String> {
     fs::read_to_string(folder.join("secrets.env"))
         .unwrap()
@@ -236,9 +341,10 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
     );
     assert_eq!(
         checklist(&first),
-        [NO_KEY_ITEM, DICTATION_ITEM],
+        [VOICE_CONSENT, NO_KEY_ITEM, DICTATION_ITEM],
         "{first_text}"
     );
+    assert!(first_text.contains("Voice is ready"), "{first_text}");
     assert_eq!(
         instance.sql("SELECT count(*) FROM session"),
         "0",
@@ -277,8 +383,45 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
     }
     assert_eq!(settings["program_version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(settings["owner_email"], OWNER_EMAIL);
-    assert_eq!(settings["filled_by_setup"], serde_json::json!(["owner"]));
     assert_eq!(settings["model_provider"], "openrouter");
+    assert_eq!(
+        settings["filled_by_setup"],
+        serde_json::json!(["owner", "voice"])
+    );
+    let lemonade = &settings["components"]["lemonade"];
+    assert!(
+        lemonade["version"].as_str().unwrap().starts_with('v'),
+        "{settings}"
+    );
+    assert!(
+        lemonade["digest"].as_str().unwrap().starts_with("sha256:"),
+        "{settings}"
+    );
+    assert_eq!(
+        instance.sql(&format!(
+            "SELECT v.provider FROM user_voice_credentials v JOIN \"user\" u ON u.id = v.\"userId\" WHERE u.email = '{OWNER_EMAIL}'"
+        )),
+        "openai-compatible"
+    );
+
+    let voice = instance.node_in_api(VOICE_ROUND_TRIP);
+    assert_eq!(voice["speech"], 200, "{voice}");
+    assert!(voice["bytes"].as_u64().unwrap() > 1000, "{voice}");
+    assert_eq!(voice["transcription"], 200, "{voice}");
+    let heard = voice["text"].as_str().unwrap().to_lowercase();
+    assert!(
+        heard.contains("quick brown fox") && heard.contains("lazy dog"),
+        "{voice}"
+    );
+    assert_eq!(
+        voice["keyless"], 401,
+        "Lemonade refuses a request without its key"
+    );
+    assert_eq!(
+        instance.reachable_from_a_bot_bridge(),
+        Vec::<String>::new(),
+        "a bot computer's bridge reaches neither Lemonade nor the relay"
+    );
 
     let upstream = agent
         .get(format!(
@@ -349,7 +492,7 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
     assert_eq!(
         checklist(&second),
         [NO_KEY_ITEM, DICTATION_ITEM],
-        "with the Owner present, nothing asks for the password: {second_text}"
+        "with the Owner and voice present, nothing asks for the password: {second_text}"
     );
     assert_eq!(
         fs::read(folder.join("secrets.env")).unwrap(),
@@ -366,6 +509,35 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
         .filter(|dir| is_wsl() && dir.starts_with('/'))
         .collect();
     assert!(made_in_wsl.is_empty(), "{made_in_wsl:?}");
+
+    let (status, reply) = rpc_as_owner(
+        &origin,
+        "/rpc/voice/disconnect",
+        &serde_json::json!({ "json": { "provider": "openai-compatible" } }),
+    );
+    assert_eq!(status, 200, "{reply}");
+    let voice_rows = "SELECT count(*) FROM user_voice_credentials";
+    assert_eq!(instance.sql(voice_rows), "0");
+    let removed = instance.setup(
+        &["--no-questions"],
+        &[("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD)],
+    );
+    let removed_text = text(&removed);
+    assert!(removed.status.success(), "{removed_text}");
+    assert_eq!(
+        checklist(&removed),
+        [NO_KEY_ITEM, DICTATION_ITEM],
+        "{removed_text}"
+    );
+    assert_eq!(
+        instance.sql(voice_rows),
+        "0",
+        "voice removed in Rakazo stays removed without questions"
+    );
+    assert_eq!(
+        fs::read(folder.join("settings.json")).unwrap(),
+        settings_before
+    );
 
     let url = "https://rakazo.example.com";
     let switched = instance.setup(
@@ -450,7 +622,13 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
     }
 
     for secret in secret_values(&folder) {
-        for output in [&first_text, &second_text, &switched_text, &third_text] {
+        for output in [
+            &first_text,
+            &second_text,
+            &removed_text,
+            &switched_text,
+            &third_text,
+        ] {
             assert!(!output.contains(&secret), "setup printed a secret");
         }
     }

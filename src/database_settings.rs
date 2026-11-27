@@ -1,16 +1,19 @@
 //! Database-only settings in Rakazo (spec §7): detect what exists, decide what to fill,
-//! fill it through Rakazo's own code paths, and record what was filled. The Owner is the
-//! first setting; voice, the model connection and memory plug in here later.
+//! fill it through Rakazo's own code paths, and record what was filled. The model
+//! connection and memory plug in here later.
 
 use serde::{Deserialize, Serialize};
 
 use crate::answers::{FrontEnd, OWNER_PASSWORD_VAR, Password};
 use crate::checklist::Checklist;
+use crate::lemonade::{RELAY_ORIGIN, RELAY_URL, SPEECH_MODEL, TRANSCRIPTION_MODEL};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DatabaseSetting {
     Owner,
+    /// The Owner's voice credential, pointing at the relay.
+    Voice,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,18 +48,24 @@ impl std::fmt::Debug for Session {
 pub trait Rakazo {
     /// Read-only: a verified user with this email and a password (`credential`) account.
     fn owner_exists(&self, email: &str) -> Result<bool, String>;
+    /// Read-only: any voice credential for the user with this email.
+    fn voice_exists(&self, email: &str) -> Result<bool, String>;
     fn bootstrap_owner(&self, email: &str, password: &Password) -> Result<(), String>;
     fn sign_in(&self, email: &str, password: &Password) -> Result<Session, String>;
+    /// `POST /rpc/voice/connect` with the relay, `kokoro-v1` and `Whisper-Small`.
+    fn connect_voice(&self, session: &Session) -> Result<(), String>;
     fn sign_out(&self, session: Session) -> Result<(), String>;
 }
 
 /// Steps 2–12 of the sequence. Every failure becomes a Checklist item; none stops setup.
+/// `voice_ready` says the voice models are there, so voice is a setting to fill.
 /// `filled` is what `settings.json` records as filled by setup, and gains what this run fills.
 pub fn fill_in(
     rakazo: &dyn Rakazo,
     front: &mut dyn FrontEnd,
     email: &str,
     password: Option<Password>,
+    voice_ready: bool,
     filled: &mut Vec<DatabaseSetting>,
     checklist: &mut Checklist,
 ) {
@@ -69,55 +78,132 @@ pub fn fill_in(
             return;
         }
     };
-    let fill_owner = match decide(owner_present, filled.contains(&DatabaseSetting::Owner)) {
-        Decision::Fill => true,
-        Decision::RemovedInRakazo => front.add_back(&format!(
-            "The Owner account {email} was removed in Rakazo. Add it back?"
-        )),
-        Decision::Leave => false,
+    let fill_owner = wanted(
+        front,
+        decide(owner_present, filled.contains(&DatabaseSetting::Owner)),
+        &format!("The Owner account {email} was removed in Rakazo. Add it back?"),
+    );
+    if !owner_present && !fill_owner {
+        return;
+    }
+    // A new Owner account has no voice yet, whatever an earlier one had.
+    let voice = if !voice_ready {
+        Decision::Leave
+    } else if fill_owner {
+        Decision::Fill
+    } else {
+        match rakazo.voice_exists(email) {
+            Ok(present) => decide(present, filled.contains(&DatabaseSetting::Voice)),
+            Err(err) => {
+                checklist.add(voice_not_connected(&format!(
+                    "setup couldn't check Rakazo's database for it ({err})"
+                )));
+                Decision::Leave
+            }
+        }
     };
-    if !fill_owner {
+    let fill_voice = wanted(
+        front,
+        voice,
+        "Your voice settings were removed in Rakazo. Add them back?",
+    );
+    if !fill_owner && !fill_voice {
         return;
     }
 
+    let not_filled = |reason: &str, checklist: &mut Checklist| {
+        if fill_owner {
+            checklist.add(owner_not_created(reason));
+        }
+        if fill_voice {
+            checklist.add(voice_not_connected(reason));
+        }
+    };
     let password = match password.map_or_else(|| front.password_for_fill_in(), |p| Ok(Some(p))) {
         Ok(Some(password)) => password,
         Ok(None) => {
-            checklist.add(owner_not_created(&format!(
-                "no Owner password was given (set {OWNER_PASSWORD_VAR})"
-            )));
+            not_filled(
+                &format!("no Owner password was given (set {OWNER_PASSWORD_VAR})"),
+                checklist,
+            );
             return;
         }
         Err(err) => {
-            checklist.add(owner_not_created(&err.to_string()));
+            not_filled(&err.to_string(), checklist);
             return;
         }
     };
-    if let Err(err) = rakazo.bootstrap_owner(email, &password) {
-        checklist.add(owner_not_created(&err));
-        return;
-    }
-    if !filled.contains(&DatabaseSetting::Owner) {
-        filled.push(DatabaseSetting::Owner);
+    if fill_owner {
+        if let Err(err) = rakazo.bootstrap_owner(email, &password) {
+            not_filled(&err, checklist);
+            return;
+        }
+        record(filled, DatabaseSetting::Owner);
     }
 
-    match rakazo.sign_in(email, &password) {
-        Ok(session) => {
-            if let Err(err) = rakazo.sign_out(session) {
+    let session = match rakazo.sign_in(email, &password) {
+        Ok(session) => session,
+        Err(err) => {
+            if fill_owner {
                 checklist.add(format!(
-                    "Setup couldn't sign out of Rakazo: {err}. Its session ends on its own; the Owner can also sign out other sessions in Rakazo's settings."
+                    "Setup created the Owner account {email} but couldn't sign in with it: {err}. Sign in to Rakazo to check the email and password."
                 ));
             }
+            if fill_voice {
+                checklist.add(voice_not_connected(&format!(
+                    "setup couldn't sign in as the Owner ({err})"
+                )));
+            }
+            return;
         }
-        Err(err) => checklist.add(format!(
-            "Setup created the Owner account {email} but couldn't sign in with it: {err}. Sign in to Rakazo to check the email and password."
-        )),
+    };
+    if fill_voice {
+        match rakazo.connect_voice(&session) {
+            Ok(()) => {
+                record(filled, DatabaseSetting::Voice);
+                checklist.add(voice_consent());
+            }
+            Err(err) => checklist.add(voice_not_connected(&err)),
+        }
+    }
+    if let Err(err) = rakazo.sign_out(session) {
+        checklist.add(format!(
+            "Setup couldn't sign out of Rakazo: {err}. Its session ends on its own; the Owner can also sign out other sessions in Rakazo's settings."
+        ));
+    }
+}
+
+fn wanted(front: &mut dyn FrontEnd, decision: Decision, question: &str) -> bool {
+    match decision {
+        Decision::Fill => true,
+        Decision::RemovedInRakazo => front.add_back(question),
+        Decision::Leave => false,
+    }
+}
+
+fn record(filled: &mut Vec<DatabaseSetting>, setting: DatabaseSetting) {
+    if !filled.contains(&setting) {
+        filled.push(setting);
     }
 }
 
 fn owner_not_created(reason: &str) -> String {
     format!(
         "The Owner account wasn't created: {reason}. Run `rakazo-stack setup` again; if it keeps failing, create it as Rakazo's docs describe under \"Installations without email\"."
+    )
+}
+
+/// Rakazo's web app asks each person once before it first sends audio to a voice server
+/// (spec §9). It is the person's own answer, so setup only says what the question means.
+fn voice_consent() -> String {
+    format!(
+        "The first time you use voice, Rakazo asks \"Share voice data with Self-hosted ({RELAY_ORIGIN})?\". Choose Allow: that server is this Instance's own Lemonade, so the audio stays on this machine."
+    )
+}
+
+fn voice_not_connected(reason: &str) -> String {
+    format!(
+        "Voice wasn't connected for the Owner: {reason}. Run `rakazo-stack setup` again, or in Rakazo open Settings → Voice, pick Self-hosted, and enter the Server URL {RELAY_URL}, the Speech model {SPEECH_MODEL} and the Transcription model {TRANSCRIPTION_MODEL}."
     )
 }
 
@@ -139,8 +225,10 @@ mod tests {
     #[derive(Default)]
     struct FakeRakazo {
         owner: RefCell<bool>,
+        voice: RefCell<bool>,
         bootstrap_error: Option<String>,
         sign_in_error: Option<String>,
+        connect_error: Option<String>,
         calls: RefCell<Vec<&'static str>>,
     }
 
@@ -148,6 +236,21 @@ mod tests {
         fn owner_exists(&self, _email: &str) -> Result<bool, String> {
             self.calls.borrow_mut().push("detect");
             Ok(*self.owner.borrow())
+        }
+        fn voice_exists(&self, _email: &str) -> Result<bool, String> {
+            self.calls.borrow_mut().push("detect voice");
+            Ok(*self.voice.borrow())
+        }
+        fn connect_voice(&self, session: &Session) -> Result<(), String> {
+            assert_eq!(session.token, "placeholder-token");
+            self.calls.borrow_mut().push("connect voice");
+            match &self.connect_error {
+                Some(err) => Err(err.clone()),
+                None => {
+                    *self.voice.borrow_mut() = true;
+                    Ok(())
+                }
+            }
         }
         fn bootstrap_owner(&self, _email: &str, _password: &Password) -> Result<(), String> {
             self.calls.borrow_mut().push("bootstrap-owner");
@@ -249,6 +352,7 @@ mod tests {
             &mut Silent,
             EMAIL,
             Some(password()),
+            false,
             &mut filled,
             &mut checklist,
         );
@@ -273,6 +377,7 @@ mod tests {
             &mut Silent,
             EMAIL,
             None,
+            false,
             &mut filled,
             &mut checklist,
         );
@@ -288,13 +393,29 @@ mod tests {
         let mut no = Wizard {
             prompt: Answers(vec![""]),
         };
-        fill_in(&rakazo, &mut no, EMAIL, None, &mut filled, &mut checklist);
+        fill_in(
+            &rakazo,
+            &mut no,
+            EMAIL,
+            None,
+            false,
+            &mut filled,
+            &mut checklist,
+        );
         assert_eq!(*rakazo.calls.borrow(), ["detect"]);
 
         let mut yes = Wizard {
             prompt: Answers(vec!["y", "correct-horse-battery", "correct-horse-battery"]),
         };
-        fill_in(&rakazo, &mut yes, EMAIL, None, &mut filled, &mut checklist);
+        fill_in(
+            &rakazo,
+            &mut yes,
+            EMAIL,
+            None,
+            false,
+            &mut filled,
+            &mut checklist,
+        );
         assert_eq!(
             *rakazo.calls.borrow(),
             ["detect", "detect", "bootstrap-owner", "sign-in", "sign-out"]
@@ -314,6 +435,7 @@ mod tests {
             &mut front,
             EMAIL,
             None,
+            false,
             &mut filled,
             &mut checklist,
         );
@@ -341,6 +463,7 @@ mod tests {
             &mut Silent,
             EMAIL,
             Some(password()),
+            false,
             &mut filled,
             &mut checklist,
         );
@@ -363,6 +486,7 @@ mod tests {
             &mut Silent,
             EMAIL,
             Some(password()),
+            false,
             &mut filled,
             &mut checklist,
         );
@@ -374,5 +498,161 @@ mod tests {
                 .unwrap()
                 .contains("Invalid email or password")
         );
+    }
+
+    fn run(
+        rakazo: &FakeRakazo,
+        front: &mut dyn FrontEnd,
+        password: Option<Password>,
+        filled: &mut Vec<DatabaseSetting>,
+    ) -> Vec<String> {
+        let mut checklist = Checklist::default();
+        fill_in(rakazo, front, EMAIL, password, true, filled, &mut checklist);
+        checklist.items().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn a_first_run_connects_voice_in_the_same_session() {
+        let rakazo = FakeRakazo::default();
+        let mut filled = Vec::new();
+        let items = run(&rakazo, &mut Silent, Some(password()), &mut filled);
+        assert_eq!(
+            *rakazo.calls.borrow(),
+            [
+                "detect",
+                "bootstrap-owner",
+                "sign-in",
+                "connect voice",
+                "sign-out"
+            ]
+        );
+        assert_eq!(filled, [DatabaseSetting::Owner, DatabaseSetting::Voice]);
+        assert_eq!(items.len(), 2, "{items:?}");
+        assert!(
+            items[0].contains("Share voice data with Self-hosted (http://lemonade-relay:13306)?")
+        );
+    }
+
+    #[test]
+    fn a_rerun_with_voice_present_leaves_it_alone() {
+        let rakazo = FakeRakazo {
+            owner: RefCell::new(true),
+            voice: RefCell::new(true),
+            ..Default::default()
+        };
+        let mut filled = vec![DatabaseSetting::Owner, DatabaseSetting::Voice];
+        run(&rakazo, &mut Silent, None, &mut filled);
+        assert_eq!(*rakazo.calls.borrow(), ["detect", "detect voice"]);
+    }
+
+    #[test]
+    fn voice_never_set_is_filled_for_an_existing_owner() {
+        let rakazo = FakeRakazo {
+            owner: RefCell::new(true),
+            ..Default::default()
+        };
+        let mut filled = vec![DatabaseSetting::Owner];
+        run(&rakazo, &mut Silent, Some(password()), &mut filled);
+        assert_eq!(
+            *rakazo.calls.borrow(),
+            [
+                "detect",
+                "detect voice",
+                "sign-in",
+                "connect voice",
+                "sign-out"
+            ]
+        );
+        assert_eq!(filled, [DatabaseSetting::Owner, DatabaseSetting::Voice]);
+    }
+
+    #[test]
+    fn removed_voice_asks_the_wizard_and_stays_removed_without_questions() {
+        let removed = || FakeRakazo {
+            owner: RefCell::new(true),
+            ..Default::default()
+        };
+        let both = || vec![DatabaseSetting::Owner, DatabaseSetting::Voice];
+
+        let rakazo = removed();
+        let mut front = crate::answers::NoQuestions {
+            env: |_: &str| Some("correct-horse-battery".to_string()),
+        };
+        let items = run(&rakazo, &mut front, Some(password()), &mut both());
+        assert_eq!(*rakazo.calls.borrow(), ["detect", "detect voice"]);
+        assert_eq!(items.len(), 1, "{items:?}");
+
+        let rakazo = removed();
+        let mut no = Wizard {
+            prompt: Answers(vec!["n"]),
+        };
+        run(&rakazo, &mut no, None, &mut both());
+        assert_eq!(*rakazo.calls.borrow(), ["detect", "detect voice"]);
+
+        let rakazo = removed();
+        let mut yes = Wizard {
+            prompt: Answers(vec!["y", "correct-horse-battery", "correct-horse-battery"]),
+        };
+        run(&rakazo, &mut yes, None, &mut both());
+        assert_eq!(
+            *rakazo.calls.borrow(),
+            [
+                "detect",
+                "detect voice",
+                "sign-in",
+                "connect voice",
+                "sign-out"
+            ]
+        );
+    }
+
+    #[test]
+    fn voice_not_ready_is_neither_detected_nor_filled() {
+        let rakazo = FakeRakazo {
+            owner: RefCell::new(true),
+            ..Default::default()
+        };
+        let mut filled = vec![DatabaseSetting::Owner];
+        let mut checklist = Checklist::default();
+        fill_in(
+            &rakazo,
+            &mut Silent,
+            EMAIL,
+            None,
+            false,
+            &mut filled,
+            &mut checklist,
+        );
+        assert_eq!(*rakazo.calls.borrow(), ["detect"]);
+    }
+
+    #[test]
+    fn a_failed_voice_connect_becomes_an_item_with_the_ui_steps_and_still_signs_out() {
+        let rakazo = FakeRakazo {
+            owner: RefCell::new(true),
+            connect_error: Some("Couldn't reach the speech server (HTTP 400)".into()),
+            ..Default::default()
+        };
+        let mut filled = vec![DatabaseSetting::Owner];
+        let items = run(&rakazo, &mut Silent, Some(password()), &mut filled);
+        assert_eq!(rakazo.calls.borrow().last().unwrap(), &"sign-out");
+        assert_eq!(filled, [DatabaseSetting::Owner]);
+        assert!(items[0].contains("Couldn't reach the speech server (HTTP 400)"));
+        assert!(items[0].contains("http://lemonade-relay:13306/api/v1"));
+        assert!(items[0].contains("Whisper-Small"));
+    }
+
+    #[test]
+    fn voice_without_a_password_says_to_run_again_with_it() {
+        let rakazo = FakeRakazo {
+            owner: RefCell::new(true),
+            ..Default::default()
+        };
+        let mut front = crate::answers::NoQuestions {
+            env: |_: &str| None,
+        };
+        let items = run(&rakazo, &mut front, None, &mut vec![DatabaseSetting::Owner]);
+        assert!(items[0].starts_with("Voice wasn't connected"), "{items:?}");
+        assert!(items[0].contains(OWNER_PASSWORD_VAR));
     }
 }

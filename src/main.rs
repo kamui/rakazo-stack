@@ -8,6 +8,7 @@ mod envfile;
 mod github;
 mod http;
 mod instance;
+mod lemonade;
 mod model_provider;
 mod overrides;
 mod platform;
@@ -21,6 +22,7 @@ mod settings;
 mod setup;
 mod tailscale;
 mod version;
+mod voice;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
