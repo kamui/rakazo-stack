@@ -15,7 +15,7 @@ use crate::docker::Docker;
 use crate::envfile::{self, Images};
 use crate::github::{self, HINDSIGHT_REPO, RAKAZO_REPO};
 use crate::holds::{self, Component, Holds};
-use crate::http::{self, HttpError};
+use crate::http;
 use crate::instance::InstanceFolder;
 use crate::lemonade::{self, LEMONADE_IMAGE, LEMONADE_REPO};
 use crate::lemond::{self, Lemond};
@@ -26,13 +26,13 @@ use crate::preflight;
 use crate::registry::{self, Ghcr};
 use crate::resolve::{self, HINDSIGHT_DB_IMAGE, HINDSIGHT_DB_TAG, HINDSIGHT_FLOOR, ResolveError};
 use crate::secrets::{LEMONADE_API_KEY, Secrets};
+use crate::self_update;
 use crate::settings::{
     Components, HindsightImages, RakazoImages, RecordedHindsight, RecordedImage, RecordedRakazo,
     Settings,
 };
 use crate::setup::{self, RAKAZO_COMPOSE_PATH, Setup};
 
-pub const PROGRAM_REPO: &str = "kamui/rakazo-stack";
 /// The new versions' image lines, which Compose reads over `.env` for the fetch.
 const UPDATE_ENV: &str = ".update.env";
 /// When `setup` or `backup` last checked for updates, in Unix seconds (spec §7, §21).
@@ -502,16 +502,6 @@ impl Lookup<'_> {
     }
 }
 
-/// The newest rakazo-stack release, when it is newer than this program. `update`'s step 2
-/// (#76) starts from it.
-pub fn newer_program(agent: &ureq::Agent) -> Result<Option<String>, HttpError> {
-    let tags = github::fetch_stable_tags(agent, PROGRAM_REPO)?;
-    Ok(tags
-        .into_iter()
-        .next()
-        .filter(|tag| holds::below(env!("CARGO_PKG_VERSION"), tag)))
-}
-
 /// The major version in a Postgres image's tag: `postgres:16@sha256:…` is 16 and
 /// `pgvector/pgvector:pg18` is 18.
 fn postgres_major(image: &str) -> Option<u32> {
@@ -546,7 +536,7 @@ fn repository(image: &str) -> &str {
 }
 
 /// `"Update? [Y/n]"`: Enter is yes.
-fn confirmed(answer: Option<&str>) -> bool {
+pub fn confirmed(answer: Option<&str>) -> bool {
     answer.is_some_and(|a| matches!(a.trim(), "" | "y" | "Y" | "yes" | "Yes"))
 }
 
@@ -1103,7 +1093,7 @@ pub fn nudge(folder: &InstanceFolder, platform: Platform) {
 
 fn updates_available(folder: &InstanceFolder, platform: Platform) -> bool {
     let agent = http::agent();
-    if newer_program(&agent).is_ok_and(|newer| newer.is_some()) {
+    if self_update::newer_program(&agent).is_ok_and(|newer| newer.is_some()) {
         return true;
     }
     let Some(settings) = folder

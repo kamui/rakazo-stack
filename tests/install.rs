@@ -38,6 +38,7 @@ fn fake_program(name: &str) -> String {
 
 struct Release {
     files: tempfile::TempDir,
+    tag: &'static str,
     base: String,
     requests: Arc<AtomicUsize>,
 }
@@ -45,14 +46,18 @@ struct Release {
 impl Release {
     /// Two fake executables and the `install.sh` baked for them.
     fn new() -> Self {
+        Self::of(TAG, fake_program)
+    }
+
+    fn of(tag: &'static str, program: fn(&str) -> String) -> Self {
         let files = tempfile::tempdir().unwrap();
-        let dir = files.path().join(TAG);
+        let dir = files.path().join(tag);
         fs::create_dir(&dir).unwrap();
         for name in [LINUX, MACOS] {
-            fs::write(dir.join(name), fake_program(name)).unwrap();
+            fs::write(dir.join(name), program(name)).unwrap();
         }
         let bake = Command::new(repo_file("scripts/bake-install.sh"))
-            .arg(TAG)
+            .arg(tag)
             .arg(&dir)
             .output()
             .unwrap();
@@ -65,13 +70,14 @@ impl Release {
         std::thread::spawn(move || serve(&listener, &root, &count));
         Self {
             files,
+            tag,
             base,
             requests,
         }
     }
 
     fn file(&self, name: &str) -> PathBuf {
-        self.files.path().join(TAG).join(name)
+        self.files.path().join(self.tag).join(name)
     }
 
     fn script(&self) -> PathBuf {
@@ -602,4 +608,286 @@ fn alpine_is_refused() {
         "{}",
         text(&out)
     );
+}
+
+/// The newer program `update` hands over to: records how it was started, and whether the
+/// Instance's lock was still held when it was.
+fn handed_over_program(name: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+# {name}
+{{
+    echo "args=$*"
+    echo "pid=$$"
+    echo "fd=$(readlink "/proc/$$/fd/$RAKAZO_STACK_HANDOVER_LOCK_FD")"
+    if flock -n "$HOME/rakazo-stack/.lock" true; then echo lock=free; else echo lock=held; fi
+}} >"$HOME/program-ran"
+"#
+    )
+}
+
+const NEWER: &str = "v9.9.9";
+
+/// A newer release of the program, listed with a newer pre-release and a newer draft,
+/// which a program from a release never moves to.
+fn newer_release() -> Release {
+    let release = Release::of(NEWER, handed_over_program);
+    fs::write(
+        release.files.path().join("releases.json"),
+        r#"[{"tag_name":"v100.0.0","draft":true,"prerelease":false},
+            {"tag_name":"v99.0.0-rc.1","draft":false,"prerelease":true},
+            {"tag_name":"v9.9.9","draft":false,"prerelease":false},
+            {"tag_name":"v0.0.1","draft":false,"prerelease":false}]"#,
+    )
+    .unwrap();
+    release
+}
+
+fn own_tag() -> String {
+    format!("v{}", env!("CARGO_PKG_VERSION"))
+}
+
+impl Machine {
+    /// An Instance folder for `update` to find, the older program installed, and a
+    /// Docker that preflight finds but can't reach, so no test here touches the real one.
+    fn with_instance() -> Self {
+        let machine = Self::new();
+        machine.link("flock");
+        let docker = r#"echo "$*" >>"$HOME/docker-called"; exit 1"#;
+        machine.stub("docker", docker);
+        machine.stub("docker.exe", docker);
+        fs::create_dir_all(machine.instance()).unwrap();
+        fs::write(machine.instance().join("settings.json"), "{}\n").unwrap();
+        fs::create_dir_all(machine.program().parent().unwrap()).unwrap();
+        fs::write(machine.program(), "older").unwrap();
+        machine
+    }
+
+    fn instance(&self) -> PathBuf {
+        self.home.path().join("rakazo-stack")
+    }
+
+    fn rakazo_stack(&self, release: &Release, args: &[&str]) -> Command {
+        let mut command = self.command(env!("CARGO_BIN_EXE_rakazo-stack"), release);
+        command.args(args).stdin(Stdio::null());
+        command
+    }
+
+    fn ran(&self, file: &str) -> Option<String> {
+        fs::read_to_string(self.home.path().join(file)).ok()
+    }
+
+    /// The Update stopped where it started: the older program, the Instance folder as it
+    /// was, and nothing handed over or left in the temp folder.
+    fn assert_unchanged(&self, out: &Output, message: &str) {
+        assert!(!out.status.success(), "{}", text(out));
+        assert!(text(out).contains(message), "{}", text(out));
+        assert_eq!(fs::read_to_string(self.program()).unwrap(), "older");
+        assert_eq!(entries(&self.instance()), [".lock", "settings.json"]);
+        assert_eq!(
+            fs::read_to_string(self.instance().join("settings.json")).unwrap(),
+            "{}\n"
+        );
+        assert_eq!(self.ran("program-ran"), None);
+        assert_eq!(self.ran("docker-called"), None, "no preflight");
+        assert_eq!(entries(self.temp.path()), Vec::<String>::new());
+    }
+}
+
+#[test]
+fn update_installs_a_newer_program_and_hands_over_with_the_lock_held() {
+    let (release, machine) = (newer_release(), Machine::with_instance());
+
+    let child = machine
+        .rakazo_stack(&release, &["update", "--yes", "--no-backup"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let out = child.wait_with_output().unwrap();
+
+    assert!(out.status.success(), "{}", text(&out));
+    let output = text(&out);
+    assert!(
+        output.contains(&format!(
+            "rakazo-stack {NEWER} is available (you have {}). Installing it.",
+            own_tag()
+        )),
+        "{output}"
+    );
+    assert!(
+        output.contains(&format!("Installed rakazo-stack {NEWER} at ")),
+        "{output}"
+    );
+    assert!(!output.contains("Next: run"), "{output}");
+    assert!(
+        output.contains(&format!("Handing over to rakazo-stack {NEWER}.")),
+        "{output}"
+    );
+    assert_eq!(
+        fs::read(machine.program()).unwrap(),
+        fs::read(release.file(LINUX)).unwrap()
+    );
+    assert_eq!(
+        machine.ran("program-ran").unwrap(),
+        format!(
+            "args=update --yes --no-backup\npid={pid}\nfd={}\nlock=held\n",
+            machine.instance().join(".lock").display()
+        ),
+        "the same process, holding the same lock"
+    );
+    assert_eq!(
+        machine.ran("docker-called"),
+        None,
+        "preflight is the new program's"
+    );
+    assert_eq!(entries(machine.temp.path()), Vec::<String>::new());
+}
+
+#[test]
+fn a_failed_checksum_or_build_origin_check_keeps_the_older_program_and_stops() {
+    let tampered = || {
+        let release = newer_release();
+        fs::write(release.file(LINUX), "tampered").unwrap();
+        (release, Machine::with_instance())
+    };
+    let unverified = || {
+        let machine = Machine::with_instance();
+        machine.stub(
+            "gh",
+            &signed_in_gh(1).replace("[ ! -e \"$HOME/.local\" ] || exit 99\n", ""),
+        );
+        (newer_release(), machine)
+    };
+    for ((release, machine), cause) in [
+        (tampered(), "doesn't match this install.sh"),
+        (unverified(), "gh couldn't verify"),
+    ] {
+        let out = machine
+            .rakazo_stack(&release, &["update", "--yes"])
+            .output()
+            .unwrap();
+
+        machine.assert_unchanged(&out, cause);
+        machine.assert_unchanged(
+            &out,
+            &format!(
+                "Stop: rakazo-stack {NEWER} wasn't installed: install.sh stopped. rakazo-stack {} is still installed, and nothing in the Instance was changed.",
+                own_tag()
+            ),
+        );
+    }
+}
+
+#[test]
+fn without_a_terminal_or_yes_update_installs_nothing() {
+    let (release, machine) = (newer_release(), Machine::with_instance());
+
+    let out = machine
+        .rakazo_stack(&release, &["update"])
+        .output()
+        .unwrap();
+
+    machine.assert_unchanged(
+        &out,
+        "there is no terminal. Run `rakazo-stack update --yes`",
+    );
+    assert_eq!(release.requests.load(Ordering::SeqCst), 1, "only the list");
+}
+
+#[test]
+fn declining_the_newer_program_carries_on_with_this_one() {
+    let (release, machine) = (newer_release(), Machine::with_instance());
+
+    let mut child = machine
+        .command("/usr/bin/script", &release)
+        .env("SHELL", "/bin/sh")
+        .args([
+            "-qec",
+            &format!("'{}' update", env!("CARGO_BIN_EXE_rakazo-stack")),
+            "/dev/null",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    input.write_all(b"n\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+    drop(input);
+
+    let output = text(&out);
+    // The terminal echoes the typed answer as soon as it arrives, before the question.
+    assert!(
+        output.contains(&format!(
+            "rakazo-stack {NEWER} is available (you have {0}). Install it? [Y/n] Carrying on with rakazo-stack {0}.",
+            own_tag()
+        )),
+        "{output}"
+    );
+    assert_eq!(fs::read_to_string(machine.program()).unwrap(), "older");
+    assert_eq!(machine.ran("program-ran"), None);
+    assert!(
+        machine.ran("docker-called").is_some(),
+        "on to preflight: {output}"
+    );
+    assert_eq!(release.requests.load(Ordering::SeqCst), 1, "only the list");
+}
+
+/// The newer program's side: it takes the lock over from the descriptor it was left, and
+/// doesn't look for a newer program again.
+#[test]
+fn the_program_handed_over_to_keeps_the_lock_and_skips_its_own_step_2() {
+    use std::os::fd::{AsRawFd, BorrowedFd};
+    use std::os::unix::process::CommandExt;
+
+    let (release, machine) = (newer_release(), Machine::with_instance());
+    let lock = fs::File::create(machine.instance().join(".lock")).unwrap();
+    lock.try_lock().unwrap();
+    let fd = lock.as_raw_fd();
+    let run = |handover: Option<String>| {
+        let mut command = machine.rakazo_stack(&release, &["update", "--yes"]);
+        if let Some(fd) = handover {
+            command.env("RAKAZO_STACK_HANDOVER_LOCK_FD", fd);
+        }
+        // SAFETY: fcntl is async-signal-safe, and the descriptor stays open until the
+        // child has started.
+        unsafe {
+            command.pre_exec(move || {
+                rustix::io::fcntl_setfd(BorrowedFd::borrow_raw(fd), rustix::io::FdFlags::empty())
+                    .map_err(Into::into)
+            });
+        }
+        command.output().unwrap()
+    };
+
+    let out = run(None);
+    assert!(
+        text(&out).contains("another rakazo-stack command is running"),
+        "{}",
+        text(&out)
+    );
+    let out = run(Some("2".into()));
+    assert!(
+        text(&out).contains("didn't hand over the Instance's lock"),
+        "{}",
+        text(&out)
+    );
+    assert_eq!(machine.ran("docker-called"), None);
+
+    let out = run(Some(fd.to_string()));
+    assert!(
+        !text(&out).contains("another rakazo-stack"),
+        "{}",
+        text(&out)
+    );
+    assert!(
+        machine.ran("docker-called").is_some(),
+        "on to preflight: {}",
+        text(&out)
+    );
+    assert_eq!(release.requests.load(Ordering::SeqCst), 0, "no step 2");
+    assert_eq!(fs::read_to_string(machine.program()).unwrap(), "older");
 }

@@ -27,6 +27,7 @@ mod resolve;
 mod restore;
 mod runlog;
 mod secrets;
+mod self_update;
 mod settings;
 mod setup;
 mod tailscale;
@@ -119,10 +120,23 @@ fn main() -> ExitCode {
     let folder = InstanceFolder::for_home(&home);
     let folder_existed = folder.path().exists();
     let first_setup = !folder.has_settings();
-    let _lock = match folder.lock() {
+    let handed_over = matches!(command, Command::Update { .. })
+        .then(|| std::env::var(self_update::HANDOVER_VAR).ok())
+        .flatten();
+    let lock = match handed_over.as_deref() {
+        Some(fd) => folder.adopt_lock(fd),
+        None => folder.lock(),
+    };
+    let lock = match lock {
         Ok(lock) => lock,
         Err(LockError::Held) => {
             eprintln!("Stop: another rakazo-stack command is running.");
+            return ExitCode::FAILURE;
+        }
+        Err(LockError::HandOver) => {
+            eprintln!(
+                "Stop: the older rakazo-stack didn't hand over the Instance's lock. Run `rakazo-stack update` again."
+            );
             return ExitCode::FAILURE;
         }
         Err(LockError::Io(err)) => {
@@ -133,6 +147,15 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    if let Command::Update { yes, .. } = &command
+        && handed_over.is_none()
+        && !first_setup
+        && let Err(err) = self_update::program_first(&lock, &home, *yes)
+    {
+        eprintln!("Stop: {err}");
+        return ExitCode::FAILURE;
+    }
 
     let platform = Platform::detect();
     let mut nftables = false;

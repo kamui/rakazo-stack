@@ -39,6 +39,8 @@ jobs:
           dirname "$(find "$dir" -type f -name cargo-zigbuild)" >> "$GITHUB_PATH"
       # spec §18: the Linux executable must run on glibc 2.17.
       - run: cargo zigbuild --release --locked --target x86_64-unknown-linux-gnu.2.17
+        env:
+          RAKAZO_STACK_RELEASE_TAG: ${{ inputs.tag }}
       - name: Check the newest glibc symbol is at most 2.17
         run: |
           bin=target/x86_64-unknown-linux-gnu/release/rakazo-stack
@@ -57,6 +59,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - run: cargo build --release --locked --target aarch64-apple-darwin
+        env:
+          RAKAZO_STACK_RELEASE_TAG: ${{ inputs.tag }}
       # spec §18: Apple silicon kills an executable with an invalid signature.
       - run: codesign --verify --strict target/aarch64-apple-darwin/release/rakazo-stack
       - run: target/aarch64-apple-darwin/release/rakazo-stack --version

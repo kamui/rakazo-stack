@@ -1,6 +1,7 @@
 use std::fs::{self, File, TryLockError};
 use std::io::{self, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, RawFd};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 /// The Instance folder, fixed at `~/rakazo-stack` (spec §6).
@@ -95,21 +96,63 @@ impl InstanceFolder {
         fs::set_permissions(&self.path, fs::Permissions::from_mode(0o700))
             .map_err(LockError::Io)?;
         let file = File::create(self.path.join(".lock")).map_err(LockError::Io)?;
-        match file.try_lock() {
-            Ok(()) => Ok(InstanceLock { _file: file }),
-            Err(TryLockError::WouldBlock) => Err(LockError::Held),
-            Err(TryLockError::Error(err)) => Err(LockError::Io(err)),
+        take(file)
+    }
+
+    /// Takes over the lock an older program held, from the descriptor it left open
+    /// across `exec` (spec §14 step 2). `fd` is the number it passed.
+    pub fn adopt_lock(&self, fd: &str) -> Result<InstanceLock, LockError> {
+        let fd: RawFd = fd
+            .parse()
+            .ok()
+            .filter(|fd| *fd > 2)
+            .ok_or(LockError::HandOver)?;
+        // SAFETY: only asks whether the number is an open descriptor; a closed one fails.
+        rustix::io::fcntl_getfd(unsafe { BorrowedFd::borrow_raw(fd) })
+            .map_err(|_| LockError::HandOver)?;
+        // SAFETY: it is open, and the older program left it to this one, so nothing else
+        // in this process owns it.
+        let file = unsafe { File::from_raw_fd(fd) };
+        let lock_file = fs::metadata(self.path.join(".lock")).map_err(LockError::Io)?;
+        let open = file.metadata().map_err(LockError::Io)?;
+        if (open.dev(), open.ino()) != (lock_file.dev(), lock_file.ino()) {
+            let _ = file.into_raw_fd();
+            return Err(LockError::HandOver);
         }
+        rustix::io::fcntl_setfd(&file, rustix::io::FdFlags::CLOEXEC)
+            .map_err(|err| LockError::Io(err.into()))?;
+        take(file)
+    }
+}
+
+/// `flock` belongs to the open file, so the descriptor an older program held it through
+/// already has it, and taking it again succeeds.
+fn take(file: File) -> Result<InstanceLock, LockError> {
+    match file.try_lock() {
+        Ok(()) => Ok(InstanceLock { file }),
+        Err(TryLockError::WouldBlock) => Err(LockError::Held),
+        Err(TryLockError::Error(err)) => Err(LockError::Io(err)),
     }
 }
 
 pub struct InstanceLock {
-    _file: File,
+    file: File,
+}
+
+impl InstanceLock {
+    /// Leaves the lock's descriptor open across `exec`, so the program started next holds
+    /// the lock with no gap, and returns its number.
+    pub fn keep_across_exec(&self) -> io::Result<RawFd> {
+        rustix::io::fcntl_setfd(&self.file, rustix::io::FdFlags::empty())?;
+        Ok(self.file.as_raw_fd())
+    }
 }
 
 #[derive(Debug)]
 pub enum LockError {
     Held,
+    /// The descriptor passed for a hand-over isn't the Instance's lock.
+    HandOver,
     Io(io::Error),
 }
 
@@ -125,6 +168,42 @@ mod tests {
         assert!(matches!(folder.lock(), Err(LockError::Held)));
         drop(first);
         assert!(folder.lock().is_ok());
+    }
+
+    #[test]
+    fn a_handed_over_descriptor_keeps_the_lock() {
+        use std::os::fd::{AsRawFd, IntoRawFd};
+        let home = tempfile::tempdir().unwrap();
+        let folder = InstanceFolder::for_home(home.path());
+        let first = folder.lock().unwrap();
+        let fd = first.keep_across_exec().unwrap();
+        let flags = rustix::io::fcntl_getfd(&first.file).unwrap();
+        assert!(!flags.contains(rustix::io::FdFlags::CLOEXEC));
+        // What exec leaves the next program: a descriptor of the same open file.
+        let inherited = rustix::io::dup(&first.file).unwrap().into_raw_fd();
+        assert_ne!(inherited, fd);
+
+        let adopted = folder.adopt_lock(&inherited.to_string()).unwrap();
+        drop(first);
+        assert!(matches!(folder.lock(), Err(LockError::Held)));
+        let flags = rustix::io::fcntl_getfd(&adopted.file).unwrap();
+        assert!(flags.contains(rustix::io::FdFlags::CLOEXEC));
+        drop(adopted);
+        assert!(folder.lock().is_ok());
+
+        let other = std::fs::File::open(home.path()).unwrap();
+        for fd in [
+            other.as_raw_fd().to_string(),
+            "1".into(),
+            "999999".into(),
+            "x".into(),
+        ] {
+            assert!(
+                matches!(folder.adopt_lock(&fd), Err(LockError::HandOver)),
+                "{fd}"
+            );
+        }
+        assert!(other.metadata().is_ok(), "a refused descriptor stays open");
     }
 
     #[test]
