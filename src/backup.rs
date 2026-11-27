@@ -16,6 +16,7 @@ use crate::answers::Prompt;
 use crate::backup_file::{self, EXTENSION, Part, Passphrase, Spool};
 use crate::docker::Docker;
 use crate::instance::InstanceFolder;
+use crate::interrupt::Interrupt;
 use crate::memory;
 use crate::platform::Platform;
 use crate::resolve::HINDSIGHT_DB_TAG;
@@ -154,11 +155,17 @@ impl Backup<'_> {
         let mut spool = Spool::new_in(&output)?;
 
         let stopped = self.running(&project)?;
+        let interrupt = Interrupt::catch()?;
         println!("Stopping Rakazo for the Backup…");
         let stopped_at = Instant::now();
         let taken = self
             .stop(&stopped)
             .and_then(|()| self.take_parts(&project, &settings, &mut spool));
+        let taken = if interrupt.caught() {
+            Err(interrupted())
+        } else {
+            taken
+        };
         // A failed Backup starts Rakazo again even for `update`, which then stops.
         let restarted = if self.keep_rakazo_stopped && taken.is_ok() {
             Ok(())
@@ -170,8 +177,16 @@ impl Backup<'_> {
             );
             restarted
         };
-        let images = taken?;
-        restarted?;
+        let images = match (taken, restarted) {
+            (Ok(images), Ok(())) => images,
+            (Err(err), Ok(())) | (Ok(_), Err(err)) => return Err(err),
+            (Err(err), Err(start)) => {
+                return Err(BackupError(format!(
+                    "{}\nStarting Rakazo again failed too: {}",
+                    err.0, start.0
+                )));
+            }
+        };
 
         let manifest = Manifest {
             format: FORMAT,
@@ -193,11 +208,19 @@ impl Backup<'_> {
                 println!("Checking the Backup…");
                 self.check(&partial, passphrase, &small, &spool, &project, &images)
             })
-            .and_then(|()| fs::rename(&partial, &path).map_err(|err| err.to_string()));
+            .and_then(|()| {
+                if interrupt.caught() {
+                    return Err(interrupted().0);
+                }
+                fs::rename(&partial, &path).map_err(|err| err.to_string())
+            });
         if let Err(err) = checked {
             let _ = fs::remove_file(&partial);
             if self.keep_rakazo_stopped {
                 let _ = self.start(&stopped);
+            }
+            if interrupt.caught() {
+                return Err(interrupted());
             }
             return Err(BackupError(format!("the Backup failed its check: {err}")));
         }
@@ -550,6 +573,10 @@ impl Backup<'_> {
         let out = self.docker.output(args)?;
         checked("docker", args, out)
     }
+}
+
+fn interrupted() -> BackupError {
+    BackupError("interrupted, so no Backup was written.".into())
 }
 
 pub fn checked(
