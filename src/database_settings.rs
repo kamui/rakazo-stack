@@ -358,6 +358,7 @@ pub fn fill_in(
             }
             Err(err) => err.to_string(),
         };
+        let err = err.trim_end_matches('.');
         if fill_owner {
             checklist.add(format!(
                 "Setup created the Owner account {email} but couldn't sign in with it: {err}. Sign in to Rakazo to check the email and password."
@@ -1149,6 +1150,28 @@ mod tests {
         );
         assert!(
             items[0].contains("Invalid email or password (HTTP 401)"),
+            "{items:?}"
+        );
+    }
+
+    #[test]
+    fn a_short_password_asked_again_reads_as_one_sentence() {
+        let rakazo = FakeRakazo {
+            owner: RefCell::new(true),
+            rejections: RefCell::new(1),
+            ..Default::default()
+        };
+        let mut wizard = Wizard {
+            prompt: Answers(vec!["correct-horse-battery", "short"]),
+        };
+        let items = run(
+            &rakazo,
+            &mut wizard,
+            None,
+            &mut vec![DatabaseSetting::Owner],
+        );
+        assert!(
+            items[0].contains("(the Owner password needs at least 16 characters). Run"),
             "{items:?}"
         );
     }
