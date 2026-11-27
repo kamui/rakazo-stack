@@ -335,7 +335,15 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
 
     let secrets_before = fs::read(folder.join("secrets.env")).unwrap();
     let settings_before = fs::read(folder.join("settings.json")).unwrap();
-    let second = instance.setup(&["--no-questions"], &[]);
+    // Shell variables named like `.env`'s must not reach Compose: this password would
+    // lock Rakazo out of its own database.
+    let second = instance.setup(
+        &["--no-questions"],
+        &[
+            ("POSTGRES_PASSWORD", "placeholder-from-the-shell"),
+            ("COMPOSE_PROFILES", "placeholder-profile"),
+        ],
+    );
     let second_text = text(&second);
     assert!(second.status.success(), "{second_text}");
     assert_eq!(

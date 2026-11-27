@@ -40,10 +40,9 @@ pub struct LocalRakazo<'a> {
 
 impl LocalRakazo<'_> {
     fn exec(&self, service: &str, args: &[&str], stdin: &[u8]) -> Result<Output, String> {
-        let mut command = self.docker.command(["compose", "exec", "-T", service]);
+        let mut command = self.docker.compose(self.folder, ["exec", "-T", service]);
         command
             .args(args)
-            .current_dir(self.folder)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

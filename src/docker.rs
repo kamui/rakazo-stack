@@ -4,6 +4,7 @@ use std::process::{Command, Output};
 
 use serde::Deserialize;
 
+use crate::compose_env;
 use crate::platform::Platform;
 use crate::version::Version;
 
@@ -66,6 +67,22 @@ impl Docker {
             command.args(["--context", context]);
         }
         command.args(args);
+        command
+    }
+
+    /// `docker compose` run from the Instance folder, without the shell variables that
+    /// would take the place of `.env`'s values.
+    pub fn compose<I, S>(&self, folder: &Path, args: I) -> Command
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut command = self.command(["compose"]);
+        command.args(args).current_dir(folder);
+        let environment = std::env::vars_os().filter_map(|(name, _)| name.into_string().ok());
+        for name in compose_env::shadowing(folder, environment) {
+            command.env_remove(name);
+        }
         command
     }
 

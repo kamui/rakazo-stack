@@ -13,7 +13,7 @@ use crate::envfile::{self, EnvInputs, STACK_COMPOSE_FILE, TailscaleEnv};
 use crate::github::{self, RAKAZO_REPO};
 use crate::http;
 use crate::instance::InstanceFolder;
-use crate::model_provider::{self, ChatModel, Provider};
+use crate::model_provider::{self, ChatModel, Choice, Provider};
 use crate::overrides;
 use crate::platform::Platform;
 use crate::rakazo::LocalRakazo;
@@ -102,7 +102,8 @@ impl Setup<'_> {
             secrets.get(AUTH_KEY_NAME),
         )?;
         let model = answers.model_provider.0.zip(answers.model_key.as_ref());
-        let rakazo_model = recorded.as_ref().and_then(|s| s.rakazo_model.clone());
+        let (rakazo_model, dropped_override) =
+            keep_override(recorded.as_ref(), answers.model_provider);
         let chat = match model {
             Some((provider, key)) => {
                 ChatModel::new(provider, key, rakazo_model.as_deref()).map_err(SetupError)?
@@ -118,6 +119,9 @@ impl Setup<'_> {
             None => None,
         };
         let log = RunLog::create(self.folder.path())?;
+        if let Some(note) = dropped_override {
+            log.say(&note);
+        }
         if let Some(warning) = key_warning {
             log.say(&warning);
         }
@@ -145,6 +149,7 @@ impl Setup<'_> {
             settings.owner_email = Some(answers.owner_email.clone());
         }
         settings.model_provider = Some(answers.model_provider);
+        settings.rakazo_model.clone_from(&rakazo_model);
 
         access.record(&mut settings);
         secrets.fill_missing(secrets::random_hex);
@@ -301,9 +306,7 @@ impl Setup<'_> {
     }
 
     fn compose(&self, args: &[&str]) -> Result<(), SetupError> {
-        let mut command = self.docker.command(["compose"]);
-        command.args(args).current_dir(self.folder.path());
-        let status = command.status()?;
+        let status = self.docker.compose(self.folder.path(), args).status()?;
         if status.success() {
             Ok(())
         } else {
@@ -327,8 +330,10 @@ impl Setup<'_> {
     }
 
     fn services_besides(&self, excluded: &str) -> Result<Vec<String>, SetupError> {
-        let mut command = self.docker.command(["compose", "config", "--services"]);
-        let out = command.current_dir(self.folder.path()).output()?;
+        let out = self
+            .docker
+            .compose(self.folder.path(), ["config", "--services"])
+            .output()?;
         if !out.status.success() {
             return Err(SetupError(format!(
                 "`docker compose config --services` failed ({}): {}",
@@ -405,17 +410,19 @@ impl Setup<'_> {
     }
 
     fn tailscale_status(&self) -> Option<String> {
-        let mut command = self.docker.command([
-            "compose",
-            "exec",
-            "-T",
-            tailscale::SERVICE,
-            "tailscale",
-            "status",
-            "--json",
-            "--peers=false",
-        ]);
-        let out = command.current_dir(self.folder.path()).output().ok()?;
+        let mut command = self.docker.compose(
+            self.folder.path(),
+            [
+                "exec",
+                "-T",
+                tailscale::SERVICE,
+                "tailscale",
+                "status",
+                "--json",
+                "--peers=false",
+            ],
+        );
+        let out = command.output().ok()?;
         out.status
             .success()
             .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
@@ -468,6 +475,26 @@ fn services_made_in_wsl(ps_output: &str) -> Vec<String> {
     services.sort();
     services.dedup();
     services
+}
+
+/// A Rakazo model override names a model at one provider, so a new provider drops it
+/// (spec §8), with a note saying so.
+fn keep_override(recorded: Option<&Settings>, chosen: Choice) -> (Option<String>, Option<String>) {
+    let Some(model) = recorded.and_then(|s| s.rakazo_model.clone()) else {
+        return (None, None);
+    };
+    match recorded.and_then(|s| s.model_provider) {
+        Some(previous) if previous != chosen => {
+            let was = previous.0.map_or("none", Provider::name);
+            (
+                None,
+                Some(format!(
+                    "Removed the Rakazo model override `{model}`, which was set for {was}. Add one for the new provider to `settings.json` if you want it."
+                )),
+            )
+        }
+        _ => (Some(model), None),
+    }
 }
 
 fn resolve_rakazo(agent: &ureq::Agent, log: &RunLog) -> Result<RakazoRelease, SetupError> {
@@ -682,6 +709,26 @@ mod tests {
             serve["Web"]["${TS_CERT_DOMAIN}:443"].is_object(),
             "{content}"
         );
+    }
+
+    #[test]
+    fn a_new_provider_drops_the_rakazo_model_override() {
+        let mut settings = Settings::new(&RakazoRelease {
+            tag: "v0.16.0".into(),
+            app_digest: "sha256:aaa".into(),
+            computer_digest: "sha256:ccc".into(),
+        });
+        settings.model_provider = Some(Choice(Some(Provider::OpenRouter)));
+        settings.rakazo_model = Some("z-ai/glm-5.3-flash".into());
+
+        let same = keep_override(Some(&settings), Choice(Some(Provider::OpenRouter)));
+        assert_eq!(same, (Some("z-ai/glm-5.3-flash".into()), None));
+
+        let (kept, note) = keep_override(Some(&settings), Choice(Some(Provider::Anthropic)));
+        assert_eq!(kept, None);
+        assert!(note.unwrap().contains("set for OpenRouter"));
+
+        assert_eq!(keep_override(None, Choice(None)), (None, None));
     }
 
     #[test]
