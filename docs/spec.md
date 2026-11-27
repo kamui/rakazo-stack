@@ -316,6 +316,7 @@ The schema so far; later slices add the fields above as they land:
   "schema": 1,
   "program_version": "0.1.0",
   "owner_email": "owner@example.com",
+  "model_provider": "openrouter",
   "filled_by_setup": ["owner"],
   "components": {
     "rakazo": {
@@ -325,6 +326,9 @@ The schema so far; later slices add the fields above as they land:
   }
 }
 ```
+
+- `model_provider` is the answer to the Model provider question: `openrouter`, `openai`, `gemini`, `anthropic` or `none`. It is recorded even when the key was left blank.
+- `rakazo_model` is the Rakazo model override ([§8](#8-model-provider)). It is absent unless the Self-hoster adds it, and setup keeps it.
 
 ### `secrets.env`
 
@@ -348,12 +352,15 @@ Generated once, on the run that first needs them, and never regenerated ([#9](ht
 
 The Model provider key, `COMPOSIO_API_KEY` and the Tailscale auth key ([#3](https://github.com/kamui/rakazo-stack/issues/3), [#8](https://github.com/kamui/rakazo-stack/issues/8), [#36](https://github.com/kamui/rakazo-stack/issues/36)). A re-run shows a pasted key as "set, press Enter to keep, or paste a new one" and never prints it ([#9](https://github.com/kamui/rakazo-stack/issues/9)). In no-questions mode each pasted key comes from `RAKAZO_STACK_` followed by its name in `secrets.env`, for example `RAKAZO_STACK_COMPOSIO_API_KEY` ([#61](https://github.com/kamui/rakazo-stack/issues/61)).
 
+- The Model provider key is `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`, after its provider. `secrets.env` holds only the chosen provider's: choosing another provider or `none` removes the old line ([#65](https://github.com/kamui/rakazo-stack/issues/65)).
+- Surrounding spaces are dropped from a pasted key. A key with a space, quote, backslash, backtick, `$`, `#` or non-ASCII character is invalid input, because it would change the meaning of its `.env` line ([#65](https://github.com/kamui/rakazo-stack/issues/65)).
+
 ## 7. `rakazo-stack setup`
 
 One re-runnable command. It is an interactive wizard on a first run and safe to re-run at any time to change things. A no-questions mode, `rakazo-stack setup --no-questions`, is for scripted runs and for `restore`'s hand-over ([#9](https://github.com/kamui/rakazo-stack/issues/9)). The wizard and the no-questions mode are two front ends to one set of answers ([#61](https://github.com/kamui/rakazo-stack/issues/61)):
 
 - **No-questions mode** takes each answer from its environment variable, then from `settings.json`, then the wizard's default. An answer with no default stops the run when neither gives it. So a first scripted run, with no `settings.json` yet, gives its choices as environment variables, and a scripted re-run can change a choice the same way.
-- **Environment variables** are `RAKAZO_STACK_` followed by the answer's name: `RAKAZO_STACK_OWNER_EMAIL` and `RAKAZO_STACK_OWNER_PASSWORD`, and each pasted key under its `secrets.env` name ([§6](#pasted-keys)). Later questions add theirs under the same scheme. The program removes every `RAKAZO_STACK_*` variable from the environment of the Docker commands it runs.
+- **Environment variables** are `RAKAZO_STACK_` followed by the answer's name: `RAKAZO_STACK_OWNER_EMAIL`, `RAKAZO_STACK_OWNER_PASSWORD`, `RAKAZO_STACK_MODEL_PROVIDER`, and each pasted key under its `secrets.env` name ([§6](#pasted-keys)). Of the Model provider keys, only the chosen provider's variable is read. Later questions add theirs under the same scheme. The program removes every `RAKAZO_STACK_*` variable from the environment of the Docker commands it runs.
 - **The wizard** needs a terminal. Without one, and without `--no-questions`, setup stops before changing anything.
 
 ### Questions
@@ -361,8 +368,8 @@ One re-runnable command. It is an interactive wizard on a first run and safe to 
 | Question | First run | Re-run | Ticket |
 |---|---|---|---|
 | Owner email and password | Asked; the password twice, without echo. Password 16–128 characters, Rakazo's own bounds | Email pre-filled. Password asked only when a database-only setting will be filled in; never saved | [#9, #19, #21, #61] |
-| Model provider | OpenRouter (default), OpenAI, Gemini, Anthropic, or none | Pre-filled | [#36](https://github.com/kamui/rakazo-stack/issues/36) |
-| Model provider key | Blank allowed. Checked with the provider before saving; a rejected key is never saved | "set, press Enter to keep" | [#9, #36] |
+| Model provider | `openrouter` (default), `openai`, `gemini`, `anthropic` or `none`, typed | Pre-filled | [#36, #65] |
+| Model provider key | Not asked for `none`. Without echo; blank allowed. Checked with the provider before saving ([§8](#key-check)); a rejected key is never saved | "set, press Enter to keep" | [#9, #36, #65] |
 | Composio project API key | Blank allowed. Checked with Composio before saving; a rejected key is never saved | "set, press Enter to keep" | [#3, #9] |
 | Access | localhost only (default), or Tailscale | Pre-filled; switching warns first ([§11](#switching-the-instance-url)) | [#8](https://github.com/kamui/rakazo-stack/issues/8) |
 | Tailscale auth key and device name | A key that isn't ephemeral; device name default `rakazo` | Device name pre-filled with the name Tailscale actually assigned | [#8, #24] |
@@ -488,22 +495,40 @@ One key runs chat and memory. Setup asks which provider, then the key, and check
 
 Sources: ([#33](https://github.com/kamui/rakazo-stack/issues/33), [#36](https://github.com/kamui/rakazo-stack/issues/36), [#44](https://github.com/kamui/rakazo-stack/issues/44), [#45](https://github.com/kamui/rakazo-stack/issues/45)).
 
+- A blank key means the same as `none` for the Instance, whichever provider was chosen.
 - The key goes into `HINDSIGHT_API_LLM_API_KEY` for every provider, including OpenAI and Gemini, which Rakazo itself connects per user ([#44](https://github.com/kamui/rakazo-stack/issues/44)).
 - With OpenAI or Gemini, memory runs on the Owner's key for everyone, so other people's conversations are learned through the Owner's account. The README FAQ says so ([#50](https://github.com/kamui/rakazo-stack/issues/50)).
 - `OPENAI_API_KEY` and `GEMINI_API_KEY` are not written to Rakazo's env: Rakazo doesn't use them for runs ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
-- **Overrides.** `settings.json` may hold one Rakazo model and one memory model (`HINDSIGHT_API_LLM_MODEL`). No per-operation Hindsight models (`HINDSIGHT_API_RETAIN_LLM_*`, `…_CONSOLIDATION_LLM_*`, `…_REFLECT_LLM_*`) ([#36](https://github.com/kamui/rakazo-stack/issues/36), [#51](https://github.com/kamui/rakazo-stack/issues/51)).
+- **Overrides.** `settings.json` may hold one Rakazo model (`rakazo_model`, written as `PI_DEFAULT_MODEL`) and one memory model (`HINDSIGHT_API_LLM_MODEL`). A `rakazo_model` that is empty or holds anything but ASCII letters, digits and `~ - _ . / : @` is invalid input. The override stays when the provider changes, so the Self-hoster changes or removes it then ([#65](https://github.com/kamui/rakazo-stack/issues/65)). No per-operation Hindsight models (`HINDSIGHT_API_RETAIN_LLM_*`, `…_CONSOLIDATION_LLM_*`, `…_REFLECT_LLM_*`) ([#36](https://github.com/kamui/rakazo-stack/issues/36), [#51](https://github.com/kamui/rakazo-stack/issues/51)).
 - **Defaults belong to the program version.** `rakazo-stack update` moves to a newer program's defaults; overrides always win ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
 - **Switching provider** never touches stored memories: Hindsight's embeddings run locally and don't depend on the provider ([#44](https://github.com/kamui/rakazo-stack/issues/44)).
 - **`~z-ai/glm-flash-latest` is an OpenRouter alias.** It moves when Z.ai ships a new Flash model, not on an Update. A Self-hoster who wants a fixed model sets the override (for example `z-ai/glm-5.3-flash`) ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
 - **Cost.** Measured on OpenRouter defaults with Rakazo v0.16.0 and Hindsight 1.3.0: chat about $1.3 a month and memory about $2.4–3.7 a month for one user at 30 turns a day, so about $3.7–5 for the Instance. A Space on the Shared memory scope roughly doubles the memory part ([#45](https://github.com/kamui/rakazo-stack/issues/45)).
 
+### Key check
+
+Every run with a key checks it at step 3, with a request that costs nothing ([#65](https://github.com/kamui/rakazo-stack/issues/65)):
+
+| Provider | Request | Rejected |
+|---|---|---|
+| OpenRouter | `GET https://openrouter.ai/api/v1/key`, `Authorization: Bearer` (its model list needs no key) | `401`, `403` |
+| OpenAI | `GET https://api.openai.com/v1/models`, `Authorization: Bearer` | `401`, `403`, unless the reply says `Missing scopes`: a restricted key that can't list models is still accepted |
+| Gemini | `GET https://generativelanguage.googleapis.com/v1beta/models`, `x-goog-api-key` | `400` with `API_KEY_INVALID`, `401`, `403` |
+| Anthropic | `GET https://api.anthropic.com/v1/models`, `x-api-key`, `anthropic-version: 2023-06-01` | `401`, `403` |
+
+- `200` accepts the key. Billing isn't checked.
+- A rejected key stops the run before anything changes, whether it is new or saved.
+- Any other reply, or none, is no verdict. A new key (one that differs from the saved one) stops the run before anything changes. A saved key was accepted before, so setup warns, keeps it and carries on.
+- Setup never prints a provider's reply: OpenAI's refusal quotes part of the key.
+- Redirects aren't followed.
+
 ### ZDR only probe
 
-On OpenRouter, after every successful key check, including no-questions runs ([#39](https://github.com/kamui/rakazo-stack/issues/39)):
+On OpenRouter, after every key check that lets setup carry on, including no-questions runs ([#39](https://github.com/kamui/rakazo-stack/issues/39), [#65](https://github.com/kamui/rakazo-stack/issues/65)):
 
 - Request: one embeddings call for `openai/text-embedding-3-small` with `provider: {only: ["openai"], allow_fallbacks: false}` and the input `zdr check`. OpenAI's endpoint isn't ZDR.
 - `404` with `zdr-violation-by-guardrail`: ZDR only is on. No checklist item.
-- `200`: it's off (the call costs about $0.00000002). The wizard explains that Rakazo's chat can then go to providers that keep data, links `openrouter.ai/workspaces/default/guardrails`, and offers **Check again** (repeats the probe) or **Continue without it** (default; adds the checklist item). No-questions mode warns and adds the item.
+- `200`: it's off (the call costs about $0.00000002). The wizard explains that Rakazo's chat can then go to providers that keep data, links `openrouter.ai/workspaces/default/guardrails`, and offers **Check again** (`c`; repeats the probe) or **Continue without it** (Enter, the default; adds the checklist item). No-questions mode warns and adds the item.
 - Anything else: couldn't check. No warning, no question; add the checklist item.
 - The key is saved whatever the probe returns. Setup never blocks on it. No probe for other providers.
 

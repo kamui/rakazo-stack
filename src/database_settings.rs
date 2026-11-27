@@ -125,6 +125,8 @@ fn owner_not_created(reason: &str) -> String {
 mod tests {
     use super::*;
     use crate::answers::{InputError, Prompt, Wizard};
+    use crate::model_provider::{Choice, Provider};
+    use crate::secrets::PastedKey;
     use std::cell::RefCell;
 
     const EMAIL: &str = "owner@example.com";
@@ -184,6 +186,15 @@ mod tests {
         }
         fn password_for_fill_in(&mut self) -> Result<Option<Password>, InputError> {
             panic!("asked for the password")
+        }
+        fn model_provider(&mut self, _: Option<Choice>) -> Result<Choice, InputError> {
+            panic!("asked for the Model provider")
+        }
+        fn model_key(&mut self, _: Provider, _: bool) -> Result<Option<PastedKey>, InputError> {
+            panic!("asked for a key")
+        }
+        fn check_zdr_again(&mut self) -> bool {
+            panic!("asked about ZDR only")
         }
         fn add_back(&mut self, _: &str) -> bool {
             panic!("asked to add back")

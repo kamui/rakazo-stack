@@ -17,9 +17,44 @@ const RAKAZO_SECRETS: [(&str, usize); 6] = [
 const HEADER: &str =
     "# rakazo-stack secrets. Back this file up with the Instance; never share it.\n";
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct Secrets {
     entries: Vec<(String, String)>,
+}
+
+impl std::fmt::Debug for Secrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names: Vec<&str> = self.entries.iter().map(|(k, _)| k.as_str()).collect();
+        write!(f, "Secrets({names:?}, values hidden)")
+    }
+}
+
+/// A key the Self-hoster pasted. It is never printed or logged, so it has no `Display`
+/// and its `Debug` hides it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PastedKey(String);
+
+impl PastedKey {
+    /// Surrounding whitespace is dropped. `None` for a blank key, and for characters no
+    /// key has, which would change the meaning of its `.env` line.
+    pub fn new(text: &str) -> Option<Self> {
+        let key = text.trim();
+        let usable = !key.is_empty()
+            && key
+                .chars()
+                .all(|c| c.is_ascii_graphic() && !"\"'`\\$#".contains(c));
+        usable.then(|| Self(key.to_string()))
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for PastedKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PastedKey(hidden)")
+    }
 }
 
 impl Secrets {
@@ -39,6 +74,18 @@ impl Secrets {
             .iter()
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.as_str())
+    }
+
+    /// Sets a pasted key in place, or removes it.
+    pub fn set_pasted(&mut self, name: &str, key: Option<&PastedKey>) {
+        let at = self.entries.iter().position(|(k, _)| k == name);
+        match (at, key) {
+            (Some(at), Some(key)) => self.entries[at].1 = key.expose().to_string(),
+            (None, Some(key)) => self
+                .entries
+                .push((name.to_string(), key.expose().to_string())),
+            (_, None) => self.entries.retain(|(k, _)| k != name),
+        }
     }
 
     /// Adds every missing Rakazo secret; existing values are kept as they are.
@@ -94,6 +141,22 @@ mod tests {
         let mut unchanged = again.clone();
         unchanged.fill_missing(|_| panic!("nothing is missing"));
         assert_eq!(unchanged, again);
+    }
+
+    #[test]
+    fn pasted_keys_are_trimmed_checked_and_never_shown() {
+        let key = PastedKey::new("  placeholder.key-1_2:3/4+5=  ").unwrap();
+        assert_eq!(key.expose(), "placeholder.key-1_2:3/4+5=");
+        assert_eq!(format!("{key:?}"), "PastedKey(hidden)");
+        for bad in [
+            "", "  ", "a b", "a\nB=c", "$HOME", "a#b", "\"a\"", "a'b", "a\\b", "é",
+        ] {
+            assert!(PastedKey::new(bad).is_none(), "{bad:?}");
+        }
+        let mut secrets = Secrets::default();
+        secrets.set_pasted("OPENROUTER_API_KEY", Some(&key));
+        assert!(!format!("{secrets:?}").contains(key.expose()));
+        assert_eq!(Secrets::parse(&secrets.to_text()), secrets);
     }
 
     #[test]

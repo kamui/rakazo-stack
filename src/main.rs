@@ -6,6 +6,7 @@ mod envfile;
 mod github;
 mod http;
 mod instance;
+mod model_provider;
 mod overrides;
 mod platform;
 mod preflight;
