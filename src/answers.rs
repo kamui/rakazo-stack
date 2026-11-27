@@ -257,17 +257,63 @@ impl Prompt for Terminal {
         Self::read_line(question)
     }
 
+    /// Reads byte by byte with signals off, so Ctrl-C can't kill the program while the
+    /// terminal's echo is off.
     fn secret(&mut self, question: &str) -> Option<String> {
-        use rustix::termios::{LocalModes, OptionalActions, tcgetattr, tcsetattr};
+        use rustix::termios::{
+            LocalModes, OptionalActions, SpecialCodeIndex, tcgetattr, tcsetattr,
+        };
         let stdin = std::io::stdin();
         let saved = tcgetattr(&stdin).ok()?;
         let mut quiet = saved.clone();
-        quiet.local_modes.remove(LocalModes::ECHO);
+        quiet
+            .local_modes
+            .remove(LocalModes::ECHO | LocalModes::ICANON | LocalModes::ISIG);
+        quiet.special_codes[SpecialCodeIndex::VMIN] = 1;
+        quiet.special_codes[SpecialCodeIndex::VTIME] = 0;
         tcsetattr(&stdin, OptionalActions::Now, &quiet).ok()?;
-        let answer = Self::read_line(question);
+        print!("{question}");
+        let _ = std::io::stdout().flush();
+        let typed = read_secret(stdin.lock());
         let _ = tcsetattr(&stdin, OptionalActions::Now, &saved);
         println!();
-        answer
+        match typed {
+            Typed::Line(line) => Some(line),
+            Typed::End => None,
+            Typed::Interrupted => std::process::exit(130),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Typed {
+    Line(String),
+    End,
+    Interrupted,
+}
+
+const CTRL_C: u8 = 0x03;
+const CTRL_D: u8 = 0x04;
+const BACKSPACE: u8 = 0x08;
+const DELETE: u8 = 0x7f;
+
+/// Line editing for a terminal in non-canonical mode, which no longer does it itself.
+fn read_secret(input: impl BufRead) -> Typed {
+    let mut line = Vec::new();
+    for byte in input.bytes() {
+        match byte {
+            Err(_) => return Typed::End,
+            Ok(CTRL_C) => return Typed::Interrupted,
+            Ok(CTRL_D) if line.is_empty() => return Typed::End,
+            Ok(b'\r' | b'\n') => return Typed::Line(String::from_utf8_lossy(&line).into_owned()),
+            Ok(BACKSPACE | DELETE) => while line.pop().is_some_and(|b| b & 0xc0 == 0x80) {},
+            Ok(byte) => line.push(byte),
+        }
+    }
+    if line.is_empty() {
+        Typed::End
+    } else {
+        Typed::Line(String::from_utf8_lossy(&line).into_owned())
     }
 }
 
@@ -277,6 +323,23 @@ mod tests {
     use std::collections::VecDeque;
 
     const GOOD: &str = "correct-horse-battery";
+
+    #[test]
+    fn reads_a_secret_with_line_editing_and_stops_on_ctrl_c() {
+        assert_eq!(read_secret(&b"secret\r"[..]), Typed::Line("secret".into()));
+        assert_eq!(
+            read_secret(&b"sex\x7fcret\n"[..]),
+            Typed::Line("secret".into())
+        );
+        assert_eq!(
+            read_secret("caf\u{e9}\x7fe\r".as_bytes()),
+            Typed::Line("cafe".into())
+        );
+        assert_eq!(read_secret(&b"\x7f\x7fok\r"[..]), Typed::Line("ok".into()));
+        assert_eq!(read_secret(&b"half\x03typed\r"[..]), Typed::Interrupted);
+        assert_eq!(read_secret(&b"\x04"[..]), Typed::End);
+        assert_eq!(read_secret(&b""[..]), Typed::End);
+    }
 
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let pairs: Vec<(String, String)> = pairs
