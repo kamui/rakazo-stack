@@ -168,7 +168,7 @@ From `~/rakazo-stack`:
 These work because setup writes the Compose settings to `~/rakazo-stack/.env`. Compose takes a variable from your shell over the same name in `.env`, so if your shell exports one of its names, such as `COMPOSE_FILE` or `COMPOSE_PROJECT_NAME`, your commands get the shell's value; setup's own commands never do.
 
 - **Windows:** always type `docker.exe`. Plain `docker` in WSL makes containers that can fail to start after a restart of your computer; the next `rakazo-stack setup` or `rakazo-stack update` fixes them.
-- **Mac:** voice runs outside Docker, as a background item of your account, so `docker compose down` doesn't stop it. The first time setup installs it, macOS 13 and later shows a "Background Items Added" notice. If you turn it off in **System Settings → General → Login Items**, voice stops working, and setup's Checklist says so.
+- **Mac:** voice runs outside Docker, as a background item of your account, so `docker compose down` doesn't stop it. The first time setup installs it, macOS 13 and later shows a "Background Items Added" notice. It's listed as `lemond` in **System Settings → General → Login Items & Extensions**, under **Background App Activity** (**Allow in the Background** on older macOS), not under Open at Login. If you turn it off there, voice stops working, and setup's Checklist says so.
 - **Windows and Mac:** the Instance runs only while you're signed in and Docker Desktop is running. Turn on **Start Docker Desktop when you sign in to your computer** in Docker Desktop's settings, or the Instance stays down after a restart until you open Docker Desktop.
 
 The bot-computer firewall can show the rules it keeps:
