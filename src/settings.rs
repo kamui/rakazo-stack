@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::access::{AccessMode, DEFAULT_DEVICE_NAME};
 use crate::database_settings::DatabaseSetting;
+use crate::lemonade::LemonadeRelease;
 use crate::model_provider::Choice;
 use crate::resolve::RakazoRelease;
 
@@ -44,6 +45,9 @@ pub struct Components {
     pub rakazo: RecordedRakazo,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tailscale: Option<RecordedImage>,
+    /// Linux and Windows; on macOS Lemonade runs natively.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lemonade: Option<RecordedImage>,
 }
 
 /// A Component that runs one image.
@@ -87,6 +91,7 @@ impl Settings {
                     },
                 },
                 tailscale: None,
+                lemonade: None,
             },
         }
     }
@@ -105,6 +110,23 @@ impl Settings {
         self.tailscale_device_name
             .as_deref()
             .unwrap_or(DEFAULT_DEVICE_NAME)
+    }
+
+    pub fn lemonade_release(&self) -> Option<LemonadeRelease> {
+        self.components
+            .lemonade
+            .as_ref()
+            .map(|lemonade| LemonadeRelease {
+                tag: lemonade.version.clone(),
+                digest: lemonade.digest.clone(),
+            })
+    }
+
+    pub fn record_lemonade(&mut self, release: &LemonadeRelease) {
+        self.components.lemonade = Some(RecordedImage {
+            version: release.tag.clone(),
+            digest: release.digest.clone(),
+        });
     }
 
     pub fn rakazo_release(&self) -> RakazoRelease {
@@ -165,10 +187,10 @@ mod tests {
         settings.owner_email = Some("owner@example.com".into());
         settings.model_provider = Some(Choice(None));
         settings.rakazo_model = Some("z-ai/glm-5.3-flash".into());
-        settings.filled_by_setup = vec![DatabaseSetting::Owner];
+        settings.filled_by_setup = vec![DatabaseSetting::Owner, DatabaseSetting::Voice];
         let text = settings.to_json();
         assert!(
-            text.contains("\"filled_by_setup\": [\n    \"owner\"\n  ]"),
+            text.contains("\"filled_by_setup\": [\n    \"owner\",\n    \"voice\"\n  ]"),
             "{text}"
         );
         assert!(text.contains("\"model_provider\": \"none\""), "{text}");
@@ -177,5 +199,31 @@ mod tests {
             "{text}"
         );
         assert_eq!(Settings::parse(&text).unwrap(), settings);
+    }
+
+    #[test]
+    fn records_lemonade_and_reads_files_without_it() {
+        let mut settings = Settings::new(&RakazoRelease {
+            tag: "v0.16.0".into(),
+            app_digest: "sha256:aaa".into(),
+            computer_digest: "sha256:ccc".into(),
+        });
+        let older = settings.to_json();
+        assert!(!older.contains("lemonade"));
+        assert_eq!(Settings::parse(&older).unwrap().lemonade_release(), None);
+        let release = LemonadeRelease {
+            tag: "v2026.48.3".into(),
+            digest: "sha256:lll".into(),
+        };
+        settings.record_lemonade(&release);
+        let text = settings.to_json();
+        assert!(
+            text.contains("\"lemonade\": {\n      \"version\": \"v2026.48.3\",\n      \"digest\": \"sha256:lll\""),
+            "{text}"
+        );
+        assert_eq!(
+            Settings::parse(&text).unwrap().lemonade_release(),
+            Some(release)
+        );
     }
 }

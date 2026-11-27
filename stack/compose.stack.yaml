@@ -4,6 +4,44 @@ services:
   api:
     # The web app proxies /api and /rpc, so the API port stays unpublished (spec §5).
     ports: !reset []
+    networks:
+      - stack
+  worker:
+    networks:
+      - stack
+
+  lemonade:
+    image: ${LEMONADE_IMAGE:-not-recorded}
+    profiles: [lemonade]
+    restart: unless-stopped
+    environment:
+      LEMONADE_API_KEY: ${LEMONADE_API_KEY:?}
+    volumes:
+      - lemonade-models:/opt/lemonade/.cache/huggingface
+      - lemonade-llama:/opt/lemonade/llama
+      - lemonade-data:/opt/lemonade/.cache/lemonade
+      - lemonade-config:/opt/lemonade/.config/lemonade
+    networks:
+      - stack
+      - egress
+    # The image's own check runs every 30 s, which would hold `up --wait` that long.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:13305/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 2m
+      start_interval: 2s
+
+  lemonade-relay:
+    build: ./relay
+    restart: unless-stopped
+    environment:
+      UPSTREAM: ${LEMONADE_UPSTREAM:-http://lemonade:13305}
+      LEMONADE_API_KEY: ${LEMONADE_API_KEY:?}
+    networks:
+      - stack
+      - egress
 
   tailscale:
     profiles: [tailscale]
@@ -24,6 +62,11 @@ services:
       - tailscale-state:/var/lib/tailscale
     networks: [app]
 
+networks:
+  stack:
+    internal: true
+  egress: {}
+
 configs:
   tailscale-serve:
     # `$$` leaves ${TS_CERT_DOMAIN} for Tailscale to fill in.
@@ -35,3 +78,7 @@ configs:
 
 volumes:
   tailscale-state:
+  lemonade-models:
+  lemonade-llama:
+  lemonade-data:
+  lemonade-config:

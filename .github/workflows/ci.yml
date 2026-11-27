@@ -31,7 +31,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
+      - run: df -h /
       - run: cargo test --locked -- --ignored
+      # Pulled images outlive the test Instance; its volumes, voice models included, don't.
+      - if: always()
+        run: df -h / && docker system df
 
   # Both executables with their gates, and an install.sh run against them.
   build:

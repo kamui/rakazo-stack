@@ -14,6 +14,9 @@ const RAKAZO_SECRETS: [(&str, usize); 6] = [
     ("SANDBOX_SUPERVISOR_TOKEN", 32),
 ];
 
+/// Lemonade's key, on every OS; only the relay sends it (spec §6).
+pub const LEMONADE_API_KEY: (&str, usize) = ("LEMONADE_API_KEY", 32);
+
 const HEADER: &str =
     "# rakazo-stack secrets. Back this file up with the Instance; never share it.\n";
 
@@ -88,9 +91,9 @@ impl Secrets {
         }
     }
 
-    /// Adds every missing Rakazo secret; existing values are kept as they are.
+    /// Adds every missing generated secret; existing values are kept as they are.
     pub fn fill_missing(&mut self, mut random_hex: impl FnMut(usize) -> String) {
-        for (key, bytes) in RAKAZO_SECRETS {
+        for (key, bytes) in RAKAZO_SECRETS.into_iter().chain([LEMONADE_API_KEY]) {
             if self.get(key).is_none() {
                 self.entries.push((key.to_string(), random_hex(bytes)));
             }
@@ -132,7 +135,8 @@ mod tests {
             calls += 1;
             "x".repeat(n * 2)
         });
-        assert_eq!(calls, 5);
+        assert_eq!(calls, 6);
+        assert_eq!(secrets.get("LEMONADE_API_KEY").map(str::len), Some(64));
         assert_eq!(secrets.get("ENCRYPTION_KEY"), Some("keepme"));
         assert_eq!(secrets.get("POSTGRES_PASSWORD").map(str::len), Some(32));
         assert_eq!(secrets.get("BETTER_AUTH_SECRET").map(str::len), Some(64));

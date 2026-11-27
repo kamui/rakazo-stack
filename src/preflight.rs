@@ -350,6 +350,13 @@ fn run(docker: &Docker, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Measured as preflight measures it, for setup's second check before the voice models.
+pub fn docker_free_disk(platform: Platform, docker: &Docker, home: &Path) -> Option<u64> {
+    let info =
+        run(docker, &["info", "--format", "{{json .}}"]).and_then(|out| Info::parse(&out))?;
+    free_disk(platform, &info, home)
+}
+
 /// Docker Engine stores data under its root dir. Docker Desktop keeps it in a disk
 /// image on the host, so the host disk holding that image stands in for it.
 fn free_disk(platform: Platform, info: &Info, home: &Path) -> Option<u64> {

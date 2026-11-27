@@ -9,6 +9,7 @@ use std::process::{Output, Stdio};
 use crate::answers::Password;
 use crate::database_settings::{Rakazo, Session};
 use crate::docker::Docker;
+use crate::lemonade::{RELAY_URL, SPEECH_MODEL, TRANSCRIPTION_MODEL};
 
 /// Upstream's defaults for `POSTGRES_USER` and `POSTGRES_DB`, which setup never changes.
 /// The official Postgres image trusts local socket connections, so no password is needed.
@@ -79,8 +80,9 @@ impl LocalRakazo<'_> {
     }
 }
 
-impl Rakazo for LocalRakazo<'_> {
-    fn owner_exists(&self, email: &str) -> Result<bool, String> {
+impl LocalRakazo<'_> {
+    /// One read-only `SELECT EXISTS (…)` as the database owner role.
+    fn exists(&self, query: &str) -> Result<bool, String> {
         let args = [
             "psql",
             "-X",
@@ -96,12 +98,22 @@ impl Rakazo for LocalRakazo<'_> {
             "-f",
             "-",
         ];
-        let output = self.exec("postgres", &args, owner_query(email).as_bytes())?;
+        let output = self.exec("postgres", &args, query.as_bytes())?;
         match String::from_utf8_lossy(&output.stdout).trim() {
             "t" => Ok(true),
             "f" => Ok(false),
             other => Err(format!("unexpected reply from Postgres: {other:?}")),
         }
+    }
+}
+
+impl Rakazo for LocalRakazo<'_> {
+    fn owner_exists(&self, email: &str) -> Result<bool, String> {
+        self.exists(&owner_query(email))
+    }
+
+    fn voice_exists(&self, email: &str) -> Result<bool, String> {
+        self.exists(&voice_query(email))
     }
 
     fn bootstrap_owner(&self, email: &str, password: &Password) -> Result<(), String> {
@@ -122,6 +134,11 @@ impl Rakazo for LocalRakazo<'_> {
             .ok_or_else(|| "Rakazo's sign-in reply had no token".to_string())
     }
 
+    fn connect_voice(&self, session: &Session) -> Result<(), String> {
+        self.post("/rpc/voice/connect", Some(session), &voice_connect_body())
+            .map(drop)
+    }
+
     fn sign_out(&self, session: Session) -> Result<(), String> {
         self.post("/api/auth/sign-out", Some(&session), "{}")
             .map(drop)
@@ -136,6 +153,29 @@ fn owner_query(email: &str) -> String {
          SELECT EXISTS (SELECT 1 FROM \"user\" u JOIN account a ON a.\"userId\" = u.id \
          WHERE u.email = '{literal}' AND u.\"emailVerified\" AND a.\"providerId\" = 'credential');\n"
     )
+}
+
+fn voice_query(email: &str) -> String {
+    let literal = email.replace('\'', "''");
+    format!(
+        "SET default_transaction_read_only = on;\n\
+         SELECT EXISTS (SELECT 1 FROM user_voice_credentials v JOIN \"user\" u ON u.id = v.\"userId\" \
+         WHERE u.email = '{literal}');\n"
+    )
+}
+
+/// oRPC's body shape. Rakazo checks the server (models, then voices) before it saves,
+/// and picks the voice.
+fn voice_connect_body() -> String {
+    serde_json::json!({
+        "json": {
+            "provider": "openai-compatible",
+            "baseUrl": RELAY_URL,
+            "ttsModel": SPEECH_MODEL,
+            "sttModel": TRANSCRIPTION_MODEL,
+        }
+    })
+    .to_string()
 }
 
 fn session_token(reply: &str) -> Option<String> {
@@ -181,6 +221,39 @@ mod tests {
     }
 
     #[test]
+    fn the_voice_query_reads_the_owners_credentials_only() {
+        let query = voice_query("o'wner@example.com");
+        assert!(query.starts_with("SET default_transaction_read_only = on;"));
+        assert!(query.contains("FROM user_voice_credentials v JOIN \"user\" u"));
+        assert!(query.contains("u.email = 'o''wner@example.com'"));
+    }
+
+    #[test]
+    fn the_voice_connect_body_is_the_specs() {
+        let body: serde_json::Value = serde_json::from_str(&voice_connect_body()).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({"json":{"provider":"openai-compatible","baseUrl":"http://lemonade-relay:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Small"}})
+        );
+    }
+
+    /// `POST /rpc/voice/connect` on Rakazo v0.16.0, with the id replaced.
+    const RECORDED_VOICE_CONNECTED: &str = r#"{"json":{"id":"placeholder-credential-id","provider":"openai-compatible","hasKey":true,"isDefault":true,"voiceId":"af_heart","speechModel":"","transcribe":true,"endpoint":"http://lemonade-relay:13306/api/v1","sttEndpoint":"","ttsModel":"kokoro-v1","sttModel":"Whisper-Small"}}"#;
+
+    /// The same call with a `baseUrl` nothing answers on.
+    const RECORDED_VOICE_UNREACHABLE: &str = r#"{"json":{"defined":false,"code":"BAD_REQUEST","status":400,"message":"Couldn't reach the speech server at http://lemonade-relay:9."}}"#;
+
+    #[test]
+    fn reads_the_recorded_voice_connect_replies() {
+        let connected: serde_json::Value = serde_json::from_str(RECORDED_VOICE_CONNECTED).unwrap();
+        assert_eq!(connected["json"]["voiceId"], "af_heart");
+        assert_eq!(
+            failure_message(400, RECORDED_VOICE_UNREACHABLE),
+            "Couldn't reach the speech server at http://lemonade-relay:9. (HTTP 400)"
+        );
+    }
+
+    #[test]
     fn reads_the_signed_token_from_a_sign_in_reply() {
         let reply = r#"{"redirect":false,"token":"placeholder.signature","user":{"email":"owner@example.com"}}"#;
         assert_eq!(
@@ -222,6 +295,12 @@ mod tests {
         fn sign_in(&self, _: &str, _: &Password) -> Result<Session, String> {
             Err(failure_message(401, RECORDED_RPC_UNAUTHORIZED))
         }
+        fn voice_exists(&self, _: &str) -> Result<bool, String> {
+            unreachable!()
+        }
+        fn connect_voice(&self, _: &Session) -> Result<(), String> {
+            unreachable!()
+        }
         fn sign_out(&self, _: Session) -> Result<(), String> {
             unreachable!()
         }
@@ -239,6 +318,7 @@ mod tests {
             &mut front,
             "owner@example.com",
             Some(Password::new("correct-horse-battery".into()).unwrap()),
+            false,
             &mut filled,
             &mut checklist,
         );
