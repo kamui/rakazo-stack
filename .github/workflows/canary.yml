@@ -1,0 +1,145 @@
+name: Canary
+
+# spec §19: finds upstream breakage, and opens an issue when it does.
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      fail:
+        description: Force this part to fail, after it has run
+        type: choice
+        default: none
+        options: [none, fresh-install, update, memory, end-to-end]
+
+permissions: {}
+
+# Each run starts its Update from the versions the one before recorded.
+concurrency:
+  group: canary-${{ github.ref }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  part:
+    name: ${{ matrix.part }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: fresh-install
+            test: a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing
+          - part: update
+            test: canary_update_starts_from_the_last_passing_versions
+          - part: memory
+            test: memory_runs_hindsight_connects_the_default_space_and_turns_off_and_on
+          - part: end-to-end
+            test: canary_a_real_key_learns_and_recalls_through_rakazo
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      # The update part downloads an earlier run's artifact.
+      actions: read
+    env:
+      PART: ${{ matrix.part }}
+      SKIP: ${{ matrix.part == 'end-to-end' && secrets.OPENROUTER_API_KEY == '' }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: mkdir "$RUNNER_TEMP/canary"
+      - name: Say the part is skipped
+        if: env.SKIP == 'true'
+        run: |
+          message="The end-to-end memory check is skipped: the OPENROUTER_API_KEY secret isn't set."
+          echo "::notice::$message"
+          echo "$message" >> "$GITHUB_STEP_SUMMARY"
+      - name: Fetch the last passing run's versions
+        if: matrix.part == 'update'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Only main's own runs count: a branch's or a fork's artifact can carry the same name.
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=canary-last-passing&per_page=100" |
+            jq -r '[.artifacts[]
+              | select(.expired | not)
+              | select(.workflow_run.head_branch == "main" and .workflow_run.head_repository_id == .workflow_run.repository_id)]
+              | max_by(.created_at) | .workflow_run.id // empty')
+          if [ -z "$run" ]; then
+            echo "::notice::No passing run is recorded, so the Update starts from the program's floors."
+            exit 0
+          fi
+          gh run download "$run" --name canary-last-passing --dir "$RUNNER_TEMP/last-passing"
+          cp "$RUNNER_TEMP/last-passing/versions.json" "$RUNNER_TEMP/canary/update.from.json"
+          echo "CANARY_LAST_PASSING=$RUNNER_TEMP/canary/update.from.json" >> "$GITHUB_ENV"
+      # Dependencies' build scripts run here, before any step holds the Model provider key.
+      - name: Build the tests
+        if: env.SKIP != 'true'
+        run: cargo test --locked --test setup --no-run
+      - name: Run the part
+        if: env.SKIP != 'true'
+        env:
+          TEST: ${{ matrix.test }}
+          CANARY_VERSIONS: ${{ runner.temp }}/canary/${{ matrix.part }}.versions.json
+          CANARY_OPENROUTER_API_KEY: ${{ matrix.part == 'end-to-end' && secrets.OPENROUTER_API_KEY || '' }}
+          # Lifts GitHub's anonymous API limit, which runners share.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          cargo test --locked --test setup -- --ignored --exact --nocapture "$TEST"
+          # A filter that matches no test passes, and so does a test that returns early.
+          if [ ! -s "$CANARY_VERSIONS" ]; then
+            echo "::error::$TEST set up no Instance."
+            exit 1
+          fi
+      - name: Force this part to fail
+        if: inputs.fail == matrix.part
+        run: |
+          echo "::error::The manual run's fail input forced this part to fail."
+          exit 1
+      - name: Record the result
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          if [ "$STATUS" = success ] && [ "$SKIP" = true ]; then STATUS=skipped; fi
+          mkdir -p "$RUNNER_TEMP/canary"
+          echo "$STATUS" > "$RUNNER_TEMP/canary/$PART.result"
+      - if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: canary-part-${{ matrix.part }}
+          path: ${{ runner.temp }}/canary
+          overwrite: true
+
+  report:
+    needs: part
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: canary-part-*
+          path: results
+          merge-multiple: true
+      - name: Open or add to an issue for each failed part
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FORCED: ${{ inputs.fail }}
+        run: scripts/canary-report.sh results state
+      # Uploaded on every run, so the record never reaches the end of its retention.
+      - if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: canary-last-passing
+          path: state/versions.json
+          retention-days: 90
+          overwrite: true

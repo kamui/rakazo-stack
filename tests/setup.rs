@@ -238,8 +238,26 @@ impl TestInstance {
     }
 }
 
+impl TestInstance {
+    /// For the weekly canary, which names these in its issues and starts its next Update
+    /// from them: the Components `settings.json` records, written where `CANARY_VERSIONS`
+    /// says.
+    fn report_versions(&self) {
+        let Some(path) = std::env::var_os("CANARY_VERSIONS") else {
+            return;
+        };
+        let Ok(bytes) = fs::read(self.folder().join("settings.json")) else {
+            return;
+        };
+        if let Ok(settings) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+            let _ = fs::write(path, settings["components"].to_string());
+        }
+    }
+}
+
 impl Drop for TestInstance {
     fn drop(&mut self) {
+        self.report_versions();
         self.remove_egress_rules();
         let mut down = docker();
         down.args([
@@ -561,30 +579,112 @@ const VOICE_ROUND_TRIP: &str = r#"(async () => {
   console.log(JSON.stringify({ speech: speech.status, bytes: audio.size, transcription: transcription.status, text, keyless: keyless.status }));
 })();"#;
 
-fn rpc_as_owner(origin: &str, path: &str, body: &serde_json::Value) -> (u16, String) {
-    let (status, reply) = post_json(
-        &format!("{origin}/api/auth/sign-in/email"),
-        &serde_json::json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }),
-    );
-    assert_eq!(status, 200, "{reply}");
-    let token: serde_json::Value = serde_json::from_str(&reply).unwrap();
-    let bearer = format!("Bearer {}", token["token"].as_str().unwrap());
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .build()
-        .into();
-    let call = |path: &str, body: &serde_json::Value| {
-        let mut response = agent
-            .post(format!("{origin}{path}"))
-            .header("authorization", &bearer)
+/// A signed-in Owner calling Rakazo's RPC, as the web app does.
+struct OwnerSession {
+    agent: ureq::Agent,
+    origin: String,
+    bearer: String,
+}
+
+impl OwnerSession {
+    fn sign_in(origin: &str) -> Self {
+        let (status, reply) = post_json(
+            &format!("{origin}/api/auth/sign-in/email"),
+            &serde_json::json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }),
+        );
+        assert_eq!(status, 200, "{reply}");
+        let token: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        Self {
+            agent: ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .build()
+                .into(),
+            origin: origin.to_string(),
+            bearer: format!("Bearer {}", token["token"].as_str().unwrap()),
+        }
+    }
+
+    fn post(&self, path: &str, body: &serde_json::Value) -> (u16, String) {
+        let mut response = self
+            .agent
+            .post(format!("{}{path}", self.origin))
+            .header("authorization", &self.bearer)
             .content_type("application/json")
             .send(body.to_string())
             .unwrap();
         let status = response.status().as_u16();
         (status, response.body_mut().read_to_string().unwrap())
-    };
-    let reply = call(path, body);
-    assert_eq!(call("/api/auth/sign-out", &serde_json::json!({})).0, 200);
+    }
+
+    /// A procedure that must succeed, with its input and output.
+    fn rpc(&self, procedure: &str, input: serde_json::Value) -> serde_json::Value {
+        let (status, reply) = self.post(
+            &format!("/rpc/{procedure}"),
+            &serde_json::json!({ "json": input }),
+        );
+        assert_eq!(status, 200, "{procedure}: {reply}");
+        let mut reply: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        reply["json"].take()
+    }
+
+    /// Sends `message` to a bot, waits for its run to complete and returns what the bot
+    /// answered.
+    fn say(&self, bot: &str, message: &str) -> String {
+        self.wait_until_idle(bot);
+        let sent = self.rpc(
+            "threads/send",
+            serde_json::json!({ "botId": bot, "text": message }),
+        );
+        self.wait_until_idle(bot);
+        let page = self.rpc("threads/messages", serde_json::json!({ "botId": bot }));
+        // "recent" lists only the latest finished run of each chat.
+        let finished = self.rpc("runs/list", serde_json::json!({ "filter": "recent" }));
+        let run = finished["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|run| run["runId"] == sent["runId"]);
+        assert_eq!(
+            run.map(|run| &run["status"]),
+            Some(&serde_json::json!("completed")),
+            "{message:?}: {page}"
+        );
+        page["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["runId"] == sent["runId"] && m["role"] == "bot")
+            .flat_map(|m| m["blocks"].as_array().unwrap())
+            .filter(|block| block["kind"] == "text")
+            .filter_map(|block| block["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn wait_until_idle(&self, bot: &str) {
+        for _ in 0..150 {
+            let active = self.rpc("runs/list", serde_json::json!({ "filter": "active" }));
+            if active["runs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|run| run["botId"] != bot)
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+        panic!("a bot's run didn't finish within 5 minutes");
+    }
+}
+
+fn rpc_as_owner(origin: &str, path: &str, body: &serde_json::Value) -> (u16, String) {
+    let session = OwnerSession::sign_in(origin);
+    let reply = session.post(path, body);
+    assert_eq!(
+        session.post("/api/auth/sign-out", &serde_json::json!({})).0,
+        200
+    );
     reply
 }
 
@@ -1471,13 +1571,6 @@ socket.on("timeout", () => { console.log("unreachable"); process.exit(0); });
         Vec::<String>::new(),
         "a bot computer's bridge reaches neither Hindsight nor its database"
     );
-    let shm = instance.compose(&["exec", "-T", "hindsight-db", "df", "-k", "/dev/shm"]);
-    assert!(
-        String::from_utf8_lossy(&shm.stdout).contains(" 1048576 "),
-        "{}",
-        text(&shm)
-    );
-
     // The shm_size case (#48): new banks once memory_units passes 8 MB, where Postgres
     // builds their indexes in parallel. Seeded without an LLM, then grown by copying rows.
     let tenant_key = instance.secret("HINDSIGHT_API_TENANT_API_KEY");
@@ -1523,6 +1616,12 @@ socket.on("timeout", () => { console.log("unreachable"); process.exit(0); });
         new_banks(&["second-a", "second-b"]),
         r#"{"second-a": [200, 200], "second-b": [200, 200]}"#,
         "a second bank needs shm_size on hindsight-db"
+    );
+    let shm = instance.compose(&["exec", "-T", "hindsight-db", "df", "-k", "/dev/shm"]);
+    assert!(
+        String::from_utf8_lossy(&shm.stdout).contains(" 1048576 "),
+        "{}",
+        text(&shm)
     );
     let units = db_sql("SELECT count(*) FROM memory_units");
 
@@ -2818,5 +2917,181 @@ fn a_hindsight_update_keeps_memories_and_updates_pgvector() {
             .any(|line| line == "hindsight healthy"),
         "{}",
         text(&ps)
+    );
+}
+
+/// The weekly canary's update part (spec §19): an Instance on the versions its last
+/// passing run recorded, or on the program's floors when none is recorded, updates to the
+/// newest releases and keeps working.
+#[test]
+#[ignore = "needs Docker and pulls Rakazo's and Hindsight's images; CI and the dev machine run it with --include-ignored"]
+fn canary_update_starts_from_the_last_passing_versions() {
+    let instance = TestInstance::new();
+    let folder = instance.folder();
+    let origin = instance.origin();
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(
+        folder.join("secrets.env"),
+        format!("OPENROUTER_API_KEY={MODEL_KEY}\n"),
+    )
+    .unwrap();
+    let from: serde_json::Value = match std::env::var_os("CANARY_LAST_PASSING") {
+        Some(path) => serde_json::from_slice(&fs::read(path).unwrap()).unwrap(),
+        None => floor_components(),
+    };
+    println!("Updating from {from}");
+    let seeded = serde_json::json!({
+        "schema": 1,
+        "program_version": "0.1.0",
+        "owner_email": OWNER_EMAIL,
+        "model_provider": "openrouter",
+        "memory": "on",
+        "components": from,
+    });
+    fs::write(folder.join("settings.json"), seeded.to_string()).unwrap();
+    let mut env = vec![("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD)];
+    env.extend(UNREACHABLE);
+    let mut install_env = env.clone();
+    install_env.push((
+        "RAKAZO_STACK_TEST_RAKAZO_FLOOR",
+        from["rakazo"]["version"].as_str().unwrap(),
+    ));
+    let installed = instance.setup(&["--no-questions"], &install_env);
+    assert!(installed.status.success(), "{}", text(&installed));
+    let settings = instance.settings();
+    for (component, record) in from.as_object().unwrap() {
+        assert_eq!(&settings["components"][component], record, "{component}");
+    }
+    let tenant_key = instance.secret("HINDSIGHT_API_TENANT_API_KEY");
+    let seeded_bank = instance.compose_with_stdin(
+        &[
+            "exec",
+            "-T",
+            "hindsight",
+            "python",
+            "-I",
+            "-c",
+            NEW_BANKS,
+            "kept",
+        ],
+        &format!("{tenant_key}\n"),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&seeded_bank.stdout).trim(),
+        r#"{"kept": [200, 200]}"#,
+        "{}",
+        text(&seeded_bank)
+    );
+    let memories = "SELECT count(*) FROM memory_units";
+    let before = instance.hindsight_sql(memories);
+    assert_ne!(before, "0");
+
+    env.push(("RAKAZO_STACK_BACKUP_PASSPHRASE", BACKUP_PASSPHRASE));
+    let updated = instance.update(&["--yes"], &env);
+    let updated_text = text(&updated);
+    println!("{updated_text}");
+    assert!(updated.status.success(), "{updated_text}");
+    println!("Updated to {}", instance.settings()["components"]);
+    assert!(
+        !updated_text.contains("Bot computers are off"),
+        "{updated_text}"
+    );
+    OwnerSession::sign_in(&origin);
+    assert_eq!(instance.hindsight_sql(memories), before, "memories kept");
+    let ps = instance.compose(&["ps", "--format", "{{.Service}} {{.Health}}"]);
+    assert!(
+        String::from_utf8_lossy(&ps.stdout)
+            .lines()
+            .any(|line| line == "hindsight healthy"),
+        "{}",
+        text(&ps)
+    );
+    let voice = instance.node_in_api(VOICE_ROUND_TRIP);
+    assert_eq!(voice["speech"], 200, "{voice}");
+    assert_eq!(voice["transcription"], 200, "{voice}");
+}
+
+/// Where the canary's Update starts before any run has passed: Rakazo's and Hindsight's
+/// floors, with the latest Lemonade, which has no floor.
+fn floor_components() -> serde_json::Value {
+    serde_json::json!({
+        "rakazo": {
+            "version": "v0.16.0",
+            "images": {
+                "app": registry_digest("ghcr.io", "elie222/rakazo/app", "v0.16.0"),
+                "computer": registry_digest("ghcr.io", "elie222/rakazo/computer", "v0.16.0"),
+            },
+        },
+        "hindsight": {
+            "version": "1.3.0",
+            "images": {
+                "hindsight": registry_digest("ghcr.io", "vectorize-io/hindsight-api", "1.3.0"),
+                "hindsight-db": registry_digest("docker.io", "pgvector/pgvector", "pg18"),
+            },
+        },
+    })
+}
+
+/// The only test that uses a real Model provider key.
+const REAL_KEY_VAR: &str = "CANARY_OPENROUTER_API_KEY";
+
+/// The weekly canary's end-to-end part (spec §19): what one bot is told in a few turns on
+/// the default model, another bot in the same Space recalls. Both share the Space's team
+/// bank, and the second never saw the first one's conversation.
+#[test]
+#[ignore = "needs Docker and a real OpenRouter key; only the weekly canary gives it one"]
+fn canary_a_real_key_learns_and_recalls_through_rakazo() {
+    let Some(key) = std::env::var(REAL_KEY_VAR)
+        .ok()
+        .filter(|key| !key.is_empty())
+    else {
+        println!("Skipped: {REAL_KEY_VAR} isn't set.");
+        return;
+    };
+    let instance = TestInstance::new();
+    let installed = instance.setup(
+        &["--no-questions"],
+        &[
+            ("RAKAZO_STACK_OWNER_EMAIL", OWNER_EMAIL),
+            ("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD),
+            ("RAKAZO_STACK_OPENROUTER_API_KEY", &key),
+        ],
+    );
+    let installed_text = text(&installed);
+    assert!(!installed_text.contains(&key), "setup printed the key");
+    assert!(installed.status.success(), "{installed_text}");
+
+    let owner = OwnerSession::sign_in(&instance.origin());
+    let [teller, asker] = ["Teller", "Asker"].map(|name| {
+        let bot = owner.rpc("bots/create", serde_json::json!({ "name": name }));
+        let id = bot["id"].as_str().unwrap().to_string();
+        owner.rpc(
+            "bots/update",
+            serde_json::json!({ "botId": id, "memoryScope": "shared" }),
+        );
+        id
+    });
+    for turn in [
+        "My dog is a beagle called Quillon.",
+        "Quillon goes to the vet for vaccinations every May.",
+        "I walk Quillon by the river before breakfast.",
+    ] {
+        owner.say(&teller, turn);
+    }
+    // Automatic recall reads observations only, which Hindsight consolidates after it
+    // retains a turn (#45).
+    let learned = "SELECT count(*) FROM memory_units WHERE fact_type = 'observation' AND bank_id ~ '^rakazo-[0-9a-f]{64}$' AND text ILIKE '%quillon%'";
+    let observed = (0..120).any(|_| {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        instance.hindsight_sql(learned) != "0"
+    });
+    assert!(
+        observed,
+        "the Space's team bank learned nothing about the dog within 10 minutes"
+    );
+    let reply = owner.say(&asker, "What is my dog's name?");
+    assert!(
+        reply.to_lowercase().contains("quillon"),
+        "the second bot didn't recall the name: {reply}"
     );
 }
