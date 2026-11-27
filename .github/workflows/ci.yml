@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - run: shellcheck install.sh scripts/*.sh
+      - run: shellcheck install.sh scripts/*.sh computer-egress/*.sh computer-egress/test/*.sh
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
@@ -58,3 +58,10 @@ jobs:
       - working-directory: relay
         run: bun test
       - run: relay/test/image.sh
+
+  # The rules land in a Docker-in-Docker engine the script starts, not in the runner's.
+  computer-egress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: computer-egress/test/image.sh

@@ -3,6 +3,7 @@ mod answers;
 mod checklist;
 mod compose_env;
 mod composio;
+mod computer_egress;
 mod database_settings;
 mod docker;
 mod envfile;
@@ -102,6 +103,7 @@ fn main() -> ExitCode {
     };
 
     let platform = Platform::detect();
+    let mut nftables = false;
     if let Some(preflight_command) = command.preflight() {
         let recorded_rakazo = folder
             .read("settings.json")
@@ -116,6 +118,10 @@ fn main() -> ExitCode {
             first_setup,
             recorded_rakazo,
         );
+        nftables = facts
+            .info
+            .as_ref()
+            .is_some_and(|i| i.firewall_is_nftables());
         let findings = preflight::evaluate(&facts);
         for finding in &findings {
             let label = match finding.level {
@@ -137,6 +143,7 @@ fn main() -> ExitCode {
             docker: &docker,
             folder: &folder,
             no_questions,
+            nftables,
         };
         return match setup.run() {
             Ok(()) => ExitCode::SUCCESS,

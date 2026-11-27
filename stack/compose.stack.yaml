@@ -43,6 +43,18 @@ services:
       - stack
       - egress
 
+  supervisor:
+    # The supervisor probes the egress rules when it starts (spec §12).
+    depends_on:
+      computer-egress:
+        condition: service_started
+
+  computer-egress:
+    build: ./computer-egress
+    network_mode: host
+    cap_add: [NET_ADMIN]
+    restart: unless-stopped
+
   tailscale:
     profiles: [tailscale]
     # `.env` holds the recorded version and digest whenever the profile is on.
