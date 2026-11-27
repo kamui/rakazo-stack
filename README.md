@@ -70,7 +70,7 @@ None of these exist yet. This is the plan.
 | `docker compose up -d` | Starts it. Run it from `~/rakazo-stack`. |
 | `docker compose down` | Stops it. Your data is kept. |
 | `docker compose ps` and `docker compose logs` | Shows what's running, and the logs. |
-| `rakazo-stack backup` | Saves your data, settings and keys into one file locked with a passphrase you choose. Rakazo pauses while it runs. |
+| `rakazo-stack backup` | Saves your data, settings and keys into one file locked with a passphrase you choose, in `~/rakazo-stack-backups`, or the folder you give with `--output`. Rakazo pauses while it runs. For cron or scripts, put the passphrase in `RAKAZO_STACK_BACKUP_PASSPHRASE`. If you lose the passphrase, nobody can open the backup. |
 | `rakazo-stack restore <file>` | Brings an Instance back from a backup file, on the same computer or a new one, on any supported system. |
 | `rakazo-stack update` | Updates the `rakazo-stack` program, then Rakazo, Lemonade and Hindsight, to their newest releases. It shows what will change and asks first, takes a backup, and offers to undo the update if it fails. `setup` and `backup` remind you, at most once a day, when there's something new. |
 | `rakazo-stack update --hold rakazo=v0.5.1` | Keeps one part at a version you choose, for when a new release causes trouble. `--unhold rakazo` lets it update again. |
