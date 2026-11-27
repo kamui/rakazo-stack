@@ -1,11 +1,13 @@
 //! `settings.json`: the Self-hoster's choices and recorded state, never a secret (spec §6).
 //! Later slices add fields; older files load with their defaults.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::access::{AccessMode, DEFAULT_DEVICE_NAME};
 use crate::database_settings::{DatabaseSetting, Due};
-use crate::holds::Holds;
+use crate::holds::{Component, Holds};
 use crate::lemonade::LemonadeRelease;
 use crate::memory::Memory;
 use crate::model_provider::Choice;
@@ -55,6 +57,16 @@ pub struct Settings {
     /// What `rakazo-stack update --hold` keeps where it is (spec §4).
     #[serde(default, skip_serializing_if = "Holds::is_empty")]
     pub holds: Holds,
+    /// The last Update, when it failed and was rolled back (spec §14).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_update: Option<FailedUpdate>,
+}
+
+/// An Update that was rolled back: the versions it moved to, and the UTC day it failed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailedUpdate {
+    pub to: BTreeMap<Component, String>,
+    pub on: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +145,7 @@ impl Settings {
                 hindsight: None,
             },
             holds: Holds::new(),
+            failed_update: None,
         }
     }
 

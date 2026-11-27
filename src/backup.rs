@@ -103,6 +103,8 @@ struct Manifest<'a> {
 /// A written Backup, and what it stopped.
 pub struct Taken {
     pub path: PathBuf,
+    /// When it was made, as its name has it: `YYYYMMDDTHHMMSSZ`.
+    pub created: String,
     stopped: Stopped,
 }
 
@@ -226,7 +228,11 @@ impl Backup<'_> {
         }
         let size = fs::metadata(&path).map_or(0, |m| m.len());
         println!("Backup written: {} ({})", path.display(), megabytes(size));
-        Ok(Taken { path, stopped })
+        Ok(Taken {
+            path,
+            created: stamp,
+            stopped,
+        })
     }
 
     /// Starts what a Backup that kept Rakazo stopped left stopped.

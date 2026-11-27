@@ -4,6 +4,7 @@
 const PROJECT_VAR: &str = "RAKAZO_STACK_TEST_PROJECT";
 const WEB_PORT_VAR: &str = "RAKAZO_STACK_TEST_WEB_PORT";
 const RAKAZO_FLOOR_VAR: &str = "RAKAZO_STACK_TEST_RAKAZO_FLOOR";
+const NEXT_RAKAZO_VAR: &str = "RAKAZO_STACK_TEST_NEXT_RAKAZO";
 
 /// The Compose project name (spec §5: `rakazo-stack`).
 pub fn compose_project() -> String {
@@ -26,6 +27,16 @@ pub fn rakazo_floor() -> Option<String> {
     std::env::var(RAKAZO_FLOOR_VAR)
         .ok()
         .filter(|floor| crate::version::Version::parse(floor).is_some())
+}
+
+/// An unpublished Rakazo release, `<tag>=<compose file>`: `update` runs the latest
+/// release's images under `<tag>`, with that compose file in place of upstream's, so a
+/// test can make the next release move Postgres or fail to start (spec §19).
+pub fn next_rakazo() -> Option<(String, std::path::PathBuf)> {
+    let value = std::env::var(NEXT_RAKAZO_VAR).ok()?;
+    let (tag, file) = value.split_once('=')?;
+    crate::version::Version::parse(tag)?;
+    Some((tag.to_string(), file.into()))
 }
 
 fn is_valid_project(name: &str) -> bool {

@@ -44,7 +44,6 @@ pub enum Replace {
     /// `--replace`: the Self-hoster types the Instance's name first.
     Typed,
     /// `update`'s rollback, inside its own lock, without the typed name (spec §14).
-    #[expect(dead_code, reason = "update's rollback (#73) is its caller")]
     Confirmed,
 }
 
@@ -142,9 +141,18 @@ impl Restore<'_> {
         mut terminal: Option<&mut (dyn Prompt + '_)>,
     ) -> Result<(), RestoreError> {
         let passphrase = passphrase(env, terminal.as_deref_mut()).map_err(RestoreError::before)?;
+        self.run_with(&passphrase, env, terminal)
+    }
 
+    /// [`Self::run`] with the passphrase already given, as `update`'s rollback has it.
+    pub fn run_with(
+        &self,
+        passphrase: &Passphrase,
+        env: &dyn Fn(&str) -> Option<String>,
+        mut terminal: Option<&mut (dyn Prompt + '_)>,
+    ) -> Result<(), RestoreError> {
         println!("Reading the Backup…");
-        let mut opened = open(self.file, &passphrase).map_err(RestoreError::before)?;
+        let mut opened = open(self.file, passphrase).map_err(RestoreError::before)?;
         let plan = version_rule(
             &opened.manifest,
             &opened.settings,
@@ -188,13 +196,7 @@ impl Restore<'_> {
 
         let mut step = Step::Folder;
         self.change(
-            &mut step,
-            &opened,
-            &passphrase,
-            &agent,
-            &project,
-            replacing,
-            device,
+            &mut step, &opened, passphrase, &agent, &project, replacing, device,
         )
         .map_err(|err| self.failed(step, &err))?;
         println!(
@@ -514,7 +516,7 @@ pub enum Database {
 }
 
 impl Database {
-    fn service(self) -> &'static str {
+    pub fn service(self) -> &'static str {
         match self {
             Self::Rakazo => "postgres",
             Self::Hindsight => "hindsight-db",
@@ -529,7 +531,15 @@ impl Database {
         }
     }
 
-    fn label(self) -> &'static str {
+    /// Its data volume's name in the compose files.
+    pub fn volume(self) -> &'static str {
+        match self {
+            Self::Rakazo => "pgdata",
+            Self::Hindsight => "hindsight-pgdata",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
         match self {
             Self::Rakazo => "Rakazo's database",
             Self::Hindsight => "Hindsight's database",
@@ -537,7 +547,7 @@ impl Database {
     }
 
     /// `hindsight-db` is in a profile that `.env` may leave off.
-    fn prefix(self) -> &'static [&'static str] {
+    pub fn prefix(self) -> &'static [&'static str] {
         match self {
             Self::Rakazo => &[],
             Self::Hindsight => &["--profile", memory::PROFILE],
