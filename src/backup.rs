@@ -99,6 +99,12 @@ struct Manifest<'a> {
     components: &'a Components,
 }
 
+/// A written Backup, and what it stopped.
+pub struct Taken {
+    pub path: PathBuf,
+    stopped: Stopped,
+}
+
 /// What the Backup stopped, to start again afterwards.
 struct Stopped {
     services: Vec<String>,
@@ -122,8 +128,8 @@ pub struct Backup<'a> {
 }
 
 impl Backup<'_> {
-    /// Writes the Backup and returns its path. On any failure no Backup file is left.
-    pub fn run(&self, passphrase: &Passphrase) -> Result<PathBuf, BackupError> {
+    /// Writes the Backup. On any failure no Backup file is left and Rakazo runs again.
+    pub fn run(&self, passphrase: &Passphrase) -> Result<Taken, BackupError> {
         let no_instance =
             || BackupError("there is no Instance here. Run `rakazo-stack setup`.".into());
         let settings_json = self.folder.read("settings.json")?.ok_or_else(no_instance)?;
@@ -153,7 +159,8 @@ impl Backup<'_> {
         let taken = self
             .stop(&stopped)
             .and_then(|()| self.take_parts(&project, &settings, &mut spool));
-        let restarted = if self.keep_rakazo_stopped {
+        // A failed Backup starts Rakazo again even for `update`, which then stops.
+        let restarted = if self.keep_rakazo_stopped && taken.is_ok() {
             Ok(())
         } else {
             let restarted = self.start(&stopped);
@@ -189,11 +196,19 @@ impl Backup<'_> {
             .and_then(|()| fs::rename(&partial, &path).map_err(|err| err.to_string()));
         if let Err(err) = checked {
             let _ = fs::remove_file(&partial);
+            if self.keep_rakazo_stopped {
+                let _ = self.start(&stopped);
+            }
             return Err(BackupError(format!("the Backup failed its check: {err}")));
         }
         let size = fs::metadata(&path).map_or(0, |m| m.len());
         println!("Backup written: {} ({})", path.display(), megabytes(size));
-        Ok(path)
+        Ok(Taken { path, stopped })
+    }
+
+    /// Starts what a Backup that kept Rakazo stopped left stopped.
+    pub fn start_again(&self, taken: &Taken) -> Result<(), BackupError> {
+        self.start(&taken.stopped)
     }
 
     /// Rakazo's running writers and this Instance's running bot computers.

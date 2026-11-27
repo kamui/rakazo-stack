@@ -3,6 +3,7 @@
 
 const PROJECT_VAR: &str = "RAKAZO_STACK_TEST_PROJECT";
 const WEB_PORT_VAR: &str = "RAKAZO_STACK_TEST_WEB_PORT";
+const RAKAZO_FLOOR_VAR: &str = "RAKAZO_STACK_TEST_RAKAZO_FLOOR";
 
 /// The Compose project name (spec §5: `rakazo-stack`).
 pub fn compose_project() -> String {
@@ -18,6 +19,13 @@ pub fn web_port() -> u16 {
         .ok()
         .and_then(|port| port.parse().ok())
         .unwrap_or(5173)
+}
+
+/// A lower Rakazo floor, so a test can install an older release and update it (spec §19).
+pub fn rakazo_floor() -> Option<String> {
+    std::env::var(RAKAZO_FLOOR_VAR)
+        .ok()
+        .filter(|floor| crate::version::Version::parse(floor).is_some())
 }
 
 fn is_valid_project(name: &str) -> bool {

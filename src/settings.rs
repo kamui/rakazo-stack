@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::access::{AccessMode, DEFAULT_DEVICE_NAME};
 use crate::database_settings::{DatabaseSetting, Due};
+use crate::holds::Holds;
 use crate::lemonade::LemonadeRelease;
 use crate::memory::Memory;
 use crate::model_provider::Choice;
@@ -51,6 +52,9 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bring_your_own_url: Option<String>,
     pub components: Components,
+    /// What `rakazo-stack update --hold` keeps where it is (spec §4).
+    #[serde(default, skip_serializing_if = "Holds::is_empty")]
+    pub holds: Holds,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,6 +132,7 @@ impl Settings {
                 lemonade: None,
                 hindsight: None,
             },
+            holds: Holds::new(),
         }
     }
 
@@ -212,6 +217,25 @@ mod tests {
         assert_eq!(settings.rakazo_release().computer_digest, "sha256:ccc");
         assert!(!text.contains("owner_email"));
         assert!(!text.contains("hindsight") && !text.contains("memory"));
+        assert!(!text.contains("holds"));
+    }
+
+    #[test]
+    fn records_holds() {
+        let mut settings = Settings::new(&RakazoRelease {
+            tag: "v0.16.0".into(),
+            app_digest: "sha256:aaa".into(),
+            computer_digest: "sha256:ccc".into(),
+        });
+        settings
+            .holds
+            .insert(crate::holds::Component::Rakazo, "v0.16.0".into());
+        let text = settings.to_json();
+        assert!(
+            text.contains("\"holds\": {\n    \"rakazo\": \"v0.16.0\"\n  }"),
+            "{text}"
+        );
+        assert_eq!(Settings::parse(&text).unwrap(), settings);
     }
 
     #[test]

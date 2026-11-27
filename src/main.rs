@@ -10,6 +10,7 @@ mod database_settings;
 mod docker;
 mod envfile;
 mod github;
+mod holds;
 mod http;
 mod instance;
 mod lemonade;
@@ -28,6 +29,7 @@ mod secrets;
 mod settings;
 mod setup;
 mod tailscale;
+mod update;
 mod version;
 mod voice;
 
@@ -56,8 +58,21 @@ enum Command {
         #[arg(long)]
         no_questions: bool,
     },
-    /// Move every Component to its newest release.
-    Update,
+    /// Move every Component to its newest release, behind a Backup.
+    Update {
+        /// Ask nothing; the Backup passphrase comes from RAKAZO_STACK_BACKUP_PASSPHRASE.
+        #[arg(long)]
+        yes: bool,
+        /// Skip the Backup taken before the switch.
+        #[arg(long)]
+        no_backup: bool,
+        /// Keep a Component at a version (rakazo, hindsight, lemonade or tailscale).
+        #[arg(long, value_name = "COMPONENT=VERSION")]
+        hold: Vec<String>,
+        /// Release a Component's Hold.
+        #[arg(long, value_name = "COMPONENT")]
+        unhold: Vec<String>,
+    },
     /// Write an encrypted Backup of the Instance.
     Backup {
         /// The folder to write the Backup to, instead of ~/rakazo-stack-backups.
@@ -78,7 +93,7 @@ impl Command {
     fn name(&self) -> &'static str {
         match self {
             Self::Setup { .. } => "setup",
-            Self::Update => "update",
+            Self::Update { .. } => "update",
             Self::Backup { .. } => "backup",
             Self::Restore { .. } => "restore",
         }
@@ -87,7 +102,7 @@ impl Command {
     fn preflight(&self) -> Option<preflight::Command> {
         match self {
             Self::Setup { .. } => Some(preflight::Command::Setup),
-            Self::Update => Some(preflight::Command::Update),
+            Self::Update { .. } => Some(preflight::Command::Update),
             Self::Restore { .. } => Some(preflight::Command::Restore),
             Self::Backup { .. } => None,
         }
@@ -168,6 +183,36 @@ fn main() -> ExitCode {
         return run_restore(platform, &folder, file, replace, nftables, folder_existed);
     }
 
+    if let Command::Update {
+        yes,
+        no_backup,
+        hold,
+        unhold,
+    } = command
+    {
+        let docker = docker::Docker::find(platform).expect("preflight found Docker");
+        let update = update::Update {
+            platform,
+            docker: &docker,
+            folder: &folder,
+            home: &home,
+            nftables,
+            options: update::Options {
+                yes,
+                no_backup,
+                hold,
+                unhold,
+            },
+        };
+        return match update.run() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("Stop: {}", err.0);
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     if let Command::Setup { no_questions } = command {
         let docker = docker::Docker::find(platform).expect("preflight found Docker");
         let setup = setup::Setup {
@@ -176,9 +221,13 @@ fn main() -> ExitCode {
             folder: &folder,
             no_questions,
             nftables,
+            switch: None,
         };
         return match setup.run() {
-            Ok(()) => ExitCode::SUCCESS,
+            Ok(()) => {
+                update::nudge(&folder, platform);
+                ExitCode::SUCCESS
+            }
             Err(err) => {
                 eprintln!("Stop: {}", err.0);
                 ExitCode::FAILURE
@@ -253,7 +302,10 @@ fn run_backup(
         keep_rakazo_stopped: false,
     };
     match backup.run(&passphrase) {
-        Ok(_) => ExitCode::SUCCESS,
+        Ok(_) => {
+            update::nudge(folder, platform);
+            ExitCode::SUCCESS
+        }
         Err(err) => stop(err.0),
     }
 }

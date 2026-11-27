@@ -86,9 +86,14 @@ pub struct TarballResolution {
     pub skipped: Vec<String>,
 }
 
-/// The newest stable release whose macOS tarball is published with a SHA-256.
-pub fn choose_tarball(releases_json: &str) -> Result<TarballResolution, String> {
-    let tags = github::stable_tags(releases_json).map_err(|err| err.to_string())?;
+/// The newest stable release whose macOS tarball is published with a SHA-256, or with
+/// `only`, that one release.
+pub fn choose_tarball(
+    releases_json: &str,
+    only: Option<&str>,
+) -> Result<TarballResolution, String> {
+    let mut tags = github::stable_tags(releases_json).map_err(|err| err.to_string())?;
+    tags.retain(|tag| only.is_none_or(|only| tag == only));
     let releases: Vec<Release> =
         serde_json::from_str(releases_json).map_err(|err| err.to_string())?;
     let mut skipped = Vec::new();
@@ -130,7 +135,7 @@ fn is_sha256(digest: &str) -> bool {
 pub fn resolve(agent: &ureq::Agent, log: &RunLog) -> Result<LemonadeRelease, String> {
     let json = github::fetch_releases(agent, LEMONADE_REPO)
         .map_err(|err| format!("Couldn't check Lemonade's releases: {err}"))?;
-    let resolution = choose_tarball(&String::from_utf8_lossy(&json))
+    let resolution = choose_tarball(&String::from_utf8_lossy(&json), None)
         .map_err(|err| format!("Couldn't pick a Lemonade release: {err}"))?;
     for tag in &resolution.skipped {
         log.say(&describe_skipped(tag));
@@ -208,6 +213,17 @@ pub struct Layout {
 }
 
 impl Layout {
+    pub fn new(instance: &Path, project: &str) -> Self {
+        Self {
+            home: instance
+                .parent()
+                .expect("the Instance folder is in HOME")
+                .into(),
+            instance: instance.into(),
+            label: label(project),
+        }
+    }
+
     /// lemond's working folder: `config.json`, its backends and its models.
     pub fn lemonade_dir(&self) -> PathBuf {
         self.instance.join("lemonade")
@@ -542,7 +558,7 @@ impl Lemond {
     /// Step 6: install, write the plist, load the LaunchAgent and check its health. A
     /// failure becomes a Checklist item, never another voice setup.
     pub fn set_up(&self, agent: &ureq::Agent, log: &RunLog, checklist: &mut Checklist) -> bool {
-        if let Err(reason) = self.install(agent, log) {
+        if let Err(reason) = self.install(agent, &|line| log.say(line)) {
             checklist.add(voice::not_set_up(&reason));
             return false;
         }
@@ -586,13 +602,15 @@ impl Lemond {
         )
     }
 
-    fn install(&self, agent: &ureq::Agent, log: &RunLog) -> Result<(), String> {
+    /// Downloads, checks and unpacks the release beside any other version, so `update`
+    /// can fetch it while the old one runs (spec §14).
+    pub fn install(&self, agent: &ureq::Agent, say: &dyn Fn(&str)) -> Result<(), String> {
         let tag = &self.release.tag;
         let version_dir = self.layout.version_dir(tag);
         if version_dir.join("lemond").is_file() {
             return Ok(());
         }
-        log.say(&format!("Downloading Lemonade {tag} for macOS…"));
+        say(&format!("Downloading Lemonade {tag} for macOS…"));
         let url = download_url(tag);
         let bytes = download(agent, &url)?;
         verify(&bytes, &self.release.digest)?;
@@ -795,7 +813,12 @@ mod tests {
                 ],
             ),
         ]);
-        let got = choose_tarball(&json).unwrap();
+        assert!(choose_tarball(&json, Some("v2026.49.1")).is_err());
+        assert_eq!(
+            choose_tarball(&json, Some("v2026.48.3")).unwrap().skipped,
+            Vec::<String>::new()
+        );
+        let got = choose_tarball(&json, None).unwrap();
         assert_eq!(got.release.tag, "v2026.48.3");
         assert_eq!(got.release.digest, DIGEST);
         assert_eq!(got.skipped, ["v2026.49.1"]);
@@ -823,8 +846,8 @@ mod tests {
                 )],
             ),
         ]);
-        assert!(choose_tarball(&json).is_err());
-        assert!(choose_tarball("not json").is_err());
+        assert!(choose_tarball(&json, None).is_err());
+        assert!(choose_tarball("not json", None).is_err());
     }
 
     #[test]

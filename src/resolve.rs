@@ -1,5 +1,6 @@
 //! Picks the Rakazo and Hindsight releases to install (spec §4).
 
+use crate::overrides;
 use crate::version::Version;
 
 /// The lowest Rakazo release this program drives: where setup's memory connect call
@@ -57,8 +58,13 @@ pub enum ResolveError {
     Lookup(String),
 }
 
+/// [`RAKAZO_FLOOR`], unless a test lowers it.
+pub fn rakazo_floor() -> String {
+    overrides::rakazo_floor().unwrap_or_else(|| RAKAZO_FLOOR.to_string())
+}
+
 pub fn below_floor(tag: &str) -> bool {
-    below(RAKAZO_FLOOR, tag)
+    below(&rakazo_floor(), tag)
 }
 
 pub fn hindsight_below_floor(version: &str) -> bool {
@@ -81,7 +87,8 @@ where
     F: FnMut(&str, &str) -> Result<Option<String>, String>,
 {
     let images = [("app", APP_IMAGE), ("computer", COMPUTER_IMAGE)];
-    let (tag, digests, skipped) = choose("Rakazo", RAKAZO_FLOOR, tags, &images, |tag| tag, digest)?;
+    let floor = rakazo_floor();
+    let (tag, digests, skipped) = choose("Rakazo", &floor, tags, &images, |tag| tag, digest)?;
     let [app_digest, computer_digest] = digests;
     Ok(Resolution {
         release: RakazoRelease {
