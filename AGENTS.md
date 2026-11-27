@@ -25,6 +25,7 @@ The dev machine also runs the owner's own containers, so an agent works only on 
 - Scope every Docker command to that project (`-p <name>`, or a `com.docker.compose.project=<name>` filter). Unscoped `prune`, `down`, `rm` and `stop` belong to the owner.
 - Restarting Docker Desktop, `wsl --shutdown` and reboots are the owner's to run.
 - In WSL, call `docker.exe`, as the program does. Docker installed inside WSL is unsupported.
+- The dev machine's WSL VM has about 16 GB, and each `setup` test runs full Instances. Run one `--ignored` suite at a time, and only with 6 GB or more available (`free -g`); otherwise rely on CI's `integration` job. Two parallel suites ran it out of memory and the kernel killed the agents mid-test, leaving their Instances and firewall rules behind.
 - Agents running Docker tests at the same time use up GitHub's anonymous API limit. Run them with `GH_TOKEN="$(gh auth token)"`, which the program sends only to `api.github.com`.
 
 ## Rust
