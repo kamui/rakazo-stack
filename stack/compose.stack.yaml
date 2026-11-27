@@ -1,0 +1,6 @@
+# rakazo-stack's layer over Rakazo's own compose file, which is used unmodified.
+# Written by `rakazo-stack setup` on every run; edits are overwritten.
+services:
+  api:
+    # The web app proxies /api and /rpc, so the API port stays unpublished (spec §5).
+    ports: !reset []

@@ -24,8 +24,15 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
-      # --include-ignored runs the tests that need Docker.
-      - run: cargo test --locked -- --include-ignored
+      - run: cargo test --locked
+
+  # The ignored tests need Docker: they run `setup` against real Rakazo images and
+  # tear the test Instance down.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: cargo test --locked -- --ignored
 
   build-linux:
     runs-on: ubuntu-latest

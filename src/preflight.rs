@@ -6,14 +6,11 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::docker::{ContainerSummary, Docker, Info, server_api_version};
+use crate::overrides;
 use crate::platform::{self, Platform};
+use crate::resolve;
 use crate::version::Version;
 
-/// Rakazo's web port (upstream's `RAKAZO_WEB_PORT` default).
-const WEB_PORT: u16 = 5173;
-/// Test-only: lets integration tests check a free port on a machine that already runs Rakazo.
-const TEST_WEB_PORT_VAR: &str = "RAKAZO_STACK_TEST_WEB_PORT";
-const COMPOSE_PROJECT: &str = "rakazo-stack";
 const MIN_API: &str = "1.45";
 const MIN_COMPOSE: &str = "2.24.4";
 const MIN_CPU_THREADS: usize = 4;
@@ -87,6 +84,8 @@ pub struct Facts {
     pub command: Command,
     pub home: String,
     pub first_setup: bool,
+    /// The Rakazo version `settings.json` records, if any.
+    pub recorded_rakazo: Option<String>,
     pub wsl_interop: bool,
     pub docker: DockerState,
     pub info: Option<Info>,
@@ -168,6 +167,17 @@ pub fn evaluate(facts: &Facts) -> Vec<Finding> {
         findings.push(Finding::stop(format!(
             "Port {} on 127.0.0.1, where Rakazo's web app listens, is already in use. Stop whatever uses it, then run this again.",
             facts.web_port_number
+        )));
+    }
+    if facts.command == Command::Setup
+        && let Some(tag) = facts
+            .recorded_rakazo
+            .as_deref()
+            .filter(|t| resolve::below_floor(t))
+    {
+        findings.push(Finding::stop(format!(
+            "This Instance runs Rakazo {tag}, below the {} this rakazo-stack needs. Run `rakazo-stack update`.",
+            resolve::RAKAZO_FLOOR
         )));
     }
     if needs_github(facts.command, facts.first_setup) && facts.github_reachable == Some(false) {
@@ -277,7 +287,13 @@ fn is_windows_home(edition: &str) -> bool {
     edition.starts_with("Core")
 }
 
-pub fn gather(platform: Platform, command: Command, home: &Path, first_setup: bool) -> Facts {
+pub fn gather(
+    platform: Platform,
+    command: Command,
+    home: &Path,
+    first_setup: bool,
+    recorded_rakazo: Option<String>,
+) -> Facts {
     let docker = Docker::find(platform);
     let docker_state = docker.as_ref().map_or(DockerState::Missing, probe_docker);
     let reachable = matches!(docker_state, DockerState::Reachable { .. });
@@ -287,15 +303,13 @@ pub fn gather(platform: Platform, command: Command, home: &Path, first_setup: bo
         .and_then(|d| run(d, &["info", "--format", "{{json .}}"]))
         .and_then(|out| Info::parse(&out));
     let wsl = platform == Platform::Wsl;
-    let web_port_number = std::env::var(TEST_WEB_PORT_VAR)
-        .ok()
-        .and_then(|port| port.parse().ok())
-        .unwrap_or(WEB_PORT);
+    let web_port_number = overrides::web_port();
     Facts {
         platform,
         command,
         home: home.display().to_string(),
         first_setup,
+        recorded_rakazo,
         wsl_interop: !wsl || platform::wsl_interop_enabled(),
         free_disk: info.as_ref().and_then(|i| free_disk(platform, i, home)),
         web_port: docker
@@ -414,7 +428,8 @@ fn web_port_state(platform: Platform, docker: &Docker, port: u16) -> PortState {
         .unwrap_or_default();
     let holder = containers.iter().find(|c| c.publishes_port(port));
     if let Some(container) = holder {
-        let ours = container.label("com.docker.compose.project") == Some(COMPOSE_PROJECT)
+        let ours = container.label("com.docker.compose.project")
+            == Some(overrides::compose_project().as_str())
             && container.label("com.docker.compose.service") == Some("web");
         return if ours {
             PortState::HeldByInstance
@@ -455,7 +470,8 @@ fn github_reachable() -> bool {
         .http_status_as_error(false)
         .build()
         .into();
-    agent.get("https://api.github.com/").call().is_ok()
+    // A second try, because one slow DNS answer on WSL has timed the first out.
+    (0..2).any(|_| agent.get("https://api.github.com/").call().is_ok())
 }
 
 #[cfg(test)]
@@ -468,6 +484,7 @@ mod tests {
             command: Command::Setup,
             home: "/home/user".into(),
             first_setup: true,
+            recorded_rakazo: None,
             wsl_interop: true,
             docker: DockerState::Reachable {
                 api: Version::parse("1.56"),
@@ -481,7 +498,7 @@ mod tests {
             cpu_threads: Some(8),
             host_ram: Some(32 * GIB),
             free_disk: Some(100_000_000_000),
-            web_port_number: WEB_PORT,
+            web_port_number: 5173,
             web_port: Some(PortState::Free),
             github_reachable: Some(true),
         }
@@ -665,6 +682,19 @@ mod tests {
         facts.command = Command::Setup;
         assert!(stops(&facts).is_empty());
         facts.command = Command::Restore;
+        assert!(stops(&facts).is_empty());
+    }
+
+    #[test]
+    fn recorded_versions_below_the_floor_stop_setup_only() {
+        let mut facts = good_facts(Platform::Linux);
+        facts.first_setup = false;
+        facts.recorded_rakazo = Some("v0.15.0".into());
+        assert!(stops(&facts)[0].contains("Run `rakazo-stack update`"));
+        facts.command = Command::Update;
+        assert!(stops(&facts).is_empty());
+        facts.command = Command::Setup;
+        facts.recorded_rakazo = Some("v0.16.0".into());
         assert!(stops(&facts).is_empty());
     }
 

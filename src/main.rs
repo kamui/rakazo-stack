@@ -1,7 +1,16 @@
 mod docker;
+mod envfile;
+mod github;
+mod http;
 mod instance;
+mod overrides;
 mod platform;
 mod preflight;
+mod registry;
+mod resolve;
+mod secrets;
+mod settings;
+mod setup;
 mod version;
 
 use std::path::PathBuf;
@@ -76,8 +85,21 @@ fn main() -> ExitCode {
         }
     };
 
+    let platform = Platform::detect();
     if let Some(preflight_command) = command.preflight() {
-        let facts = preflight::gather(Platform::detect(), preflight_command, &home, first_setup);
+        let recorded_rakazo = folder
+            .read("settings.json")
+            .ok()
+            .flatten()
+            .and_then(|bytes| settings::Settings::parse(&String::from_utf8_lossy(&bytes)).ok())
+            .map(|s| s.components.rakazo.version);
+        let facts = preflight::gather(
+            platform,
+            preflight_command,
+            &home,
+            first_setup,
+            recorded_rakazo,
+        );
         let findings = preflight::evaluate(&facts);
         for finding in &findings {
             let label = match finding.level {
@@ -90,6 +112,22 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
         eprintln!("Preflight passed.");
+    }
+
+    if let Command::Setup = command {
+        let docker = docker::Docker::find(platform).expect("preflight found Docker");
+        let setup = setup::Setup {
+            platform,
+            docker: &docker,
+            folder: &folder,
+        };
+        return match setup.run() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("Stop: {}", err.0);
+                ExitCode::FAILURE
+            }
+        };
     }
 
     eprintln!("rakazo-stack {}: not implemented yet", command.name());

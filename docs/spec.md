@@ -183,11 +183,11 @@ rakazo-stack installs the latest stable release of each Component, best effort, 
 
 ### Shape
 
-- **One Compose project** named `rakazo-stack` (`COMPOSE_PROJECT_NAME=rakazo-stack` in `.env`). Without it, upstream's `name: rakazo` would let a hand-built Rakazo on the same machine share the Instance's volumes ([#29](https://github.com/kamui/rakazo-stack/issues/29)).
+- **One Compose project** named `rakazo-stack` (`COMPOSE_PROJECT_NAME=rakazo-stack` in `.env`; only tests change it, [§19](#test-instances)). Without it, upstream's `name: rakazo` would let a hand-built Rakazo on the same machine share the Instance's volumes ([#29](https://github.com/kamui/rakazo-stack/issues/29)).
 - **Two compose files**, both in the Instance folder ([#10](https://github.com/kamui/rakazo-stack/issues/10), [#32](https://github.com/kamui/rakazo-stack/issues/32)):
   - `rakazo.<tag>.images.yml`: Rakazo's `infra/compose/docker-compose.images.yml` from the recorded tag, byte for byte.
   - `compose.stack.yaml`: rakazo-stack's layer, bundled in the program.
-- Setup writes `COMPOSE_FILE=rakazo.<tag>.images.yml:compose.stack.yaml` and `COMPOSE_PROFILES` to `.env`, so plain `docker compose up -d` works from the Instance folder ([#10](https://github.com/kamui/rakazo-stack/issues/10)).
+- Setup writes `COMPOSE_FILE=rakazo.<tag>.images.yml:compose.stack.yaml`, `COMPOSE_PATH_SEPARATOR=:` and `COMPOSE_PROFILES` to `.env`, so plain `docker compose up -d` works from the Instance folder ([#10](https://github.com/kamui/rakazo-stack/issues/10)). The separator is spelled out because Windows' `docker.exe` otherwise splits `COMPOSE_FILE` on `;`.
 - **Upstream's file is never edited.** Everything the stack changes goes through `.env` (which upstream's file already passes through) or the layer file (`!reset`, extra networks, extra services) ([#10](https://github.com/kamui/rakazo-stack/issues/10)).
 
 ### Profiles
@@ -256,7 +256,7 @@ Rakazo's `pgdata`, `appdata` and `webassets` (upstream), plus `lemonade-models`,
 | Variable | Value | Ticket |
 |---|---|---|
 | `COMPOSE_PROJECT_NAME` | `rakazo-stack` | [#29](https://github.com/kamui/rakazo-stack/issues/29) |
-| `COMPOSE_FILE`, `COMPOSE_PROFILES` | see above | [#10](https://github.com/kamui/rakazo-stack/issues/10) |
+| `COMPOSE_FILE`, `COMPOSE_PATH_SEPARATOR`, `COMPOSE_PROFILES` | see above | [#10](https://github.com/kamui/rakazo-stack/issues/10) |
 | `RAKAZO_IMAGE_TAG`, `RAKAZO_COMPUTER_IMAGE_TAG` | recorded tag and digest | [#2, #32] |
 | `POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD`, `BETTER_AUTH_SECRET`, `ENCRYPTION_KEY`, `SCREEN_PROXY_SECRET`, `SANDBOX_SUPERVISOR_TOKEN` | generated ([§6](#generated-secrets)) | [#2](https://github.com/kamui/rakazo-stack/issues/2) |
 | `SIGNUPS_ENABLED` | `false` (the API re-applies it from env on every start, so setup owns it) | [#2, #21] |
@@ -308,6 +308,21 @@ JSON, rewritten by setup on every run ([#29](https://github.com/kamui/rakazo-sta
 - Holds ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 - Which database-only settings setup filled in (the Owner's voice, the Owner's model connection, the default Space's memory), so a re-run can tell "removed in Rakazo" from "never set" ([#23](https://github.com/kamui/rakazo-stack/issues/23), [#36](https://github.com/kamui/rakazo-stack/issues/36)).
 - A failed Update, if the last one was rolled back ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
+
+The schema so far; later slices add the fields above as they land:
+
+```json
+{
+  "schema": 1,
+  "program_version": "0.1.0",
+  "components": {
+    "rakazo": {
+      "version": "v0.16.0",
+      "images": { "app": "sha256:…", "computer": "sha256:…" }
+    }
+  }
+}
+```
 
 ### `secrets.env`
 
@@ -601,7 +616,7 @@ Documented in one README FAQ; the stack changes nothing ([#45](https://github.co
 
 | Mode | Instance URL | Rakazo address settings | Ticket |
 |---|---|---|---|
-| localhost (default) | `http://127.0.0.1:5173` (Rakazo also trusts the `localhost` twin) | all four on `http://127.0.0.1:5173` | [#2, #8] |
+| localhost (default) | `http://127.0.0.1:5173` (Rakazo also trusts the `localhost` twin) | `BETTER_AUTH_URL`, `WEB_ORIGIN`, `API_URL` on `http://127.0.0.1:5173`; `RAKAZO_HOST=127.0.0.1` (a hostname, not a URL) | [#2, #8] |
 | Tailscale | `https://<device>.<tailnet>.ts.net` (port 443) | `WEB_ORIGIN`, `API_URL`, `RAKAZO_HOST` on the `ts.net` address; `BETTER_AUTH_URL=http://127.0.0.1:5173` | [#8, #24] |
 | Bring-your-own Instance URL (advanced, unsupported) | the given HTTPS URL | all from the given URL; nothing else changes | [#8](https://github.com/kamui/rakazo-stack/issues/8) |
 
@@ -834,6 +849,10 @@ Nobody tracks upstream releases by hand. A weekly GitHub Actions job on Linux ru
 
 It opens an issue when any part fails. macOS isn't covered (GitHub's Mac runners can't run Docker). There is no canary for the ZDR only probe, because its result depends on the privacy settings of the account that owns the key ([#39](https://github.com/kamui/rakazo-stack/issues/39)).
 
+### Test Instances
+
+Tests on a machine that also runs a real Instance need their own. The Instance folder already follows `$HOME`, and two environment variables, for tests only and not documented for Self-hosters, change what the spec otherwise fixes: `RAKAZO_STACK_TEST_PROJECT` (the Compose project name) and `RAKAZO_STACK_TEST_WEB_PORT` (the web port). The integration tests run `setup` with a temporary `$HOME`, their own project and a free port, then remove the project with its volumes and networks. CI runs them on `ubuntu-latest`; the dev machine runs them on WSL.
+
 ### Release gate
 
 The `macos-latest` smoke test in [§18](#releases) ([#22](https://github.com/kamui/rakazo-stack/issues/22)).
@@ -885,5 +904,5 @@ No ticket fixes these names. The implementation picks them, and the docs then st
 - the variable name for Hindsight's database password in `secrets.env`;
 - the names of the locally built relay and sidecar images;
 - the update-check timestamp file and the Backup file's extension;
-- `settings.json`'s exact schema;
+- the rest of `settings.json`'s schema (its start is in [§6](#settingsjson));
 - whether the Tailscale auth key is kept in `secrets.env` after the first join.

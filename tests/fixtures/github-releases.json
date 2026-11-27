@@ -1,0 +1,8 @@
+[
+  {"tag_name": "v0.17.0-rc.1", "draft": false, "prerelease": true, "published_at": "2026-11-25T09:00:00Z"},
+  {"tag_name": "v0.16.0", "draft": false, "prerelease": false, "published_at": "2026-11-24T16:05:41Z"},
+  {"tag_name": "android", "draft": false, "prerelease": false, "published_at": "2026-10-10T22:04:11Z"},
+  {"tag_name": "v0.15.0", "draft": false, "prerelease": false, "published_at": "2026-11-23T11:09:31Z"},
+  {"tag_name": "v0.17.0", "draft": true, "prerelease": false, "published_at": null},
+  {"tag_name": "v0.14.0", "draft": false, "prerelease": false, "published_at": "2026-11-22T09:36:11Z"}
+]
