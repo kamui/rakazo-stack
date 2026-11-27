@@ -2678,8 +2678,9 @@ fn update_moves_rakazo_across_releases_behind_a_backup_and_honours_holds() {
         ],
     );
     assert!(!unreachable.status.success(), "{}", text(&unreachable));
+    // Step 2, the check for a newer program, is the first to need GitHub.
     assert!(
-        text(&unreachable).contains("GitHub can't be reached"),
+        text(&unreachable).contains("can't check for a newer rakazo-stack"),
         "{}",
         text(&unreachable)
     );
