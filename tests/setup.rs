@@ -7,7 +7,7 @@ mod common;
 
 use std::cell::OnceCell;
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -1752,6 +1752,12 @@ const BACKUP_PASSPHRASE: &str = "placeholder-backup-passphrase";
 impl TestInstance {
     /// Runs `backup` with stdin closed, as cron does.
     fn backup(&self, passphrase: Option<&str>) -> Output {
+        self.backup_command(passphrase)
+            .output()
+            .expect("run rakazo-stack")
+    }
+
+    fn backup_command(&self, passphrase: Option<&str>) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_rakazo-stack"));
         for (name, _) in std::env::vars_os() {
             if name.as_encoded_bytes().starts_with(b"RAKAZO_STACK_") {
@@ -1765,9 +1771,8 @@ impl TestInstance {
             .arg("backup")
             .env("HOME", self.home.path())
             .env("RAKAZO_STACK_NO_UPDATE_CHECK", "1")
-            .stdin(Stdio::null())
-            .output()
-            .expect("run rakazo-stack")
+            .stdin(Stdio::null());
+        command
     }
 
     fn backups(&self) -> Vec<PathBuf> {
@@ -2036,6 +2041,48 @@ fn backup_writes_one_checked_file_and_the_instance_comes_back() {
     let ps = instance.compose(&["ps", "--status", "running", "--services"]);
     let running_services = String::from_utf8_lossy(&ps.stdout).into_owned();
     for service in ["api", "worker", "supervisor", "postgres"] {
+        assert!(
+            running_services.lines().any(|l| l == service),
+            "{service}: {running_services}"
+        );
+    }
+
+    // Ctrl-C while Rakazo is stopped: no Backup, and Rakazo runs again.
+    let mut child = instance
+        .backup_command(Some(BACKUP_PASSPHRASE))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run rakazo-stack");
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut printed = String::new();
+    loop {
+        let mut line = String::new();
+        assert_ne!(stdout.read_line(&mut line).unwrap(), 0, "{printed}");
+        printed.push_str(&line);
+        if line.starts_with("Stopping Rakazo") {
+            break;
+        }
+    }
+    let signalled = Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(signalled.success());
+    stdout.read_to_string(&mut printed).unwrap();
+    let interrupted = child.wait_with_output().unwrap();
+    let interrupted_text = format!("{printed}{}", String::from_utf8_lossy(&interrupted.stderr));
+    println!("{interrupted_text}");
+    assert!(!interrupted.status.success());
+    assert!(
+        interrupted_text.contains("interrupted, so no Backup was written"),
+        "{interrupted_text}"
+    );
+    assert_eq!(instance.backups(), backups);
+    assert!(running(&computer));
+    let ps = instance.compose(&["ps", "--status", "running", "--services"]);
+    let running_services = String::from_utf8_lossy(&ps.stdout).into_owned();
+    for service in ["api", "worker", "supervisor"] {
         assert!(
             running_services.lines().any(|l| l == service),
             "{service}: {running_services}"

@@ -13,6 +13,7 @@ mod github;
 mod holds;
 mod http;
 mod instance;
+mod interrupt;
 mod lemonade;
 mod lemond;
 mod memory;
