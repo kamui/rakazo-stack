@@ -400,7 +400,7 @@ One re-runnable command. It is an interactive wizard on a first run and safe to 
 
 | Question | First run | Re-run | Ticket |
 |---|---|---|---|
-| Owner email and password | Asked; the password twice, without echo. Password 16–128 characters, Rakazo's own bounds | Email pre-filled. Password asked only when a database-only setting will be filled in; never saved | [#9, #19, #21, #61] |
+| Owner email and password | Asked; the password twice, without echo. Password 16–128 characters, Rakazo's own bounds | Email pre-filled. Password asked only when a database-only setting will be filled in; never saved. Asked once, as "the one you already sign in to Rakazo with", unless setup creates the Owner on this run, which asks twice as on a first run ([#81](https://github.com/kamui/rakazo-stack/issues/81)) | [#9, #19, #21, #61] |
 | Model provider | `openrouter` (default), `openai`, `gemini`, `anthropic` or `none`, typed | Pre-filled | [#36, #65] |
 | Model provider key | Not asked for `none`. Without echo; blank allowed. Checked with the provider before saving ([§8](#key-check)); a rejected key is never saved | "set, press Enter to keep" | [#9, #36, #65] |
 | Composio project API key | Without echo; blank allowed. Checked with Composio before saving ([§13](#13-integrations-composio)); a rejected key is never saved | "set, press Enter to keep" | [#3, #9, #69] |

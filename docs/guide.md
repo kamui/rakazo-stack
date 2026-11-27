@@ -75,7 +75,7 @@ Keys and passwords are typed without being shown. Setup then starts everything, 
 
 ### Running setup again
 
-Run `rakazo-stack setup` again whenever you want to change an answer. It shows your earlier answers as defaults, and a saved key as "set, press Enter to keep, or paste a new one". It never prints a saved key, never changes the passwords it created, and never changes Component versions: only `rakazo-stack update` does that. A Component you switch on later, such as memory or Tailscale, starts at its newest release.
+Run `rakazo-stack setup` again whenever you want to change an answer. It shows your earlier answers as defaults, and a saved key as "set, press Enter to keep, or paste a new one". It never prints a saved key, never changes the passwords it created, and never changes Component versions: only `rakazo-stack update` does that. When something in Rakazo still has to be set up, such as memory you turned on later, it asks once for the Owner password you already sign in with. A Component you switch on later, such as memory or Tailscale, starts at its newest release.
 
 If you removed something in Rakazo that setup had set up, such as your voice settings, setup asks whether to add it back.
 

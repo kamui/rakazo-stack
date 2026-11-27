@@ -164,7 +164,8 @@ pub trait FrontEnd {
     /// The password at step 2. The wizard asks only on a first run, which needs it.
     fn password_now(&mut self, first_run: bool) -> Result<Option<Password>, InputError>;
     /// The password when a database-only setting will be filled in and none was given.
-    fn password_for_fill_in(&mut self) -> Result<Option<Password>, InputError>;
+    /// `new_owner` is whether setup creates the Owner with it, or signs in as the Owner.
+    fn password_for_fill_in(&mut self, new_owner: bool) -> Result<Option<Password>, InputError>;
     fn model_provider(&mut self, recorded: Option<Choice>) -> Result<Choice, InputError>;
     /// A new key for `provider`; `None` keeps the saved one, if there is one.
     fn model_key(
@@ -277,7 +278,7 @@ impl<F: Fn(&str) -> Option<String>> FrontEnd for NoQuestions<F> {
         self.var(OWNER_PASSWORD_VAR).map(Password::new).transpose()
     }
 
-    fn password_for_fill_in(&mut self) -> Result<Option<Password>, InputError> {
+    fn password_for_fill_in(&mut self, _new_owner: bool) -> Result<Option<Password>, InputError> {
         Ok(None)
     }
 
@@ -436,8 +437,15 @@ impl<P: Prompt> FrontEnd for Wizard<P> {
         }
     }
 
-    fn password_for_fill_in(&mut self) -> Result<Option<Password>, InputError> {
-        self.new_password().map(Some)
+    fn password_for_fill_in(&mut self, new_owner: bool) -> Result<Option<Password>, InputError> {
+        if new_owner {
+            return self.new_password().map(Some);
+        }
+        let answer = self
+            .prompt
+            .secret("Owner password (the one you already sign in to Rakazo with): ")
+            .ok_or(InputError::NoAnswer)?;
+        Password::new(answer).map(Some)
     }
 
     fn model_provider(&mut self, recorded: Option<Choice>) -> Result<Choice, InputError> {
@@ -794,7 +802,7 @@ mod tests {
         let answers = collect_owner(&mut front, Some("owner@example.com"), false).unwrap();
         assert_eq!(answers.owner_email, "owner@example.com");
         assert!(answers.owner_password.is_none());
-        assert!(front.password_for_fill_in().unwrap().is_none());
+        assert!(front.password_for_fill_in(false).unwrap().is_none());
         assert!(!front.add_back("Add it back?"));
 
         let mut changed = NoQuestions {
@@ -844,6 +852,32 @@ mod tests {
                 "Model provider (openrouter, openai, gemini, anthropic or none) [openrouter]: ",
                 "OpenRouter API key (blank for none): ",
                 "Composio project API key (blank for none): ",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_wizard_fill_in_asks_once_for_the_password_already_set() {
+        let password = "a-long-owner-password";
+        let mut existing = Wizard {
+            prompt: Scripted::new(&[password]),
+        };
+        let given = existing.password_for_fill_in(false).unwrap().unwrap();
+        assert_eq!(given.expose(), password);
+        assert_eq!(
+            existing.prompt.asked,
+            ["Owner password (the one you already sign in to Rakazo with): "]
+        );
+
+        let mut new_owner = Wizard {
+            prompt: Scripted::new(&[password, password]),
+        };
+        assert!(new_owner.password_for_fill_in(true).unwrap().is_some());
+        assert_eq!(
+            new_owner.prompt.asked,
+            [
+                "Owner password (at least 16 characters): ",
+                "Owner password again: ",
             ]
         );
     }

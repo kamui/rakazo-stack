@@ -292,20 +292,21 @@ pub fn fill_in(
             checklist.add(memory_not_connected(reason));
         }
     };
-    let password = match password.map_or_else(|| front.password_for_fill_in(), |p| Ok(Some(p))) {
-        Ok(Some(password)) => password,
-        Ok(None) => {
-            not_filled(
-                &format!("no Owner password was given (set {OWNER_PASSWORD_VAR})"),
-                checklist,
-            );
-            return;
-        }
-        Err(err) => {
-            not_filled(&err.to_string(), checklist);
-            return;
-        }
-    };
+    let password =
+        match password.map_or_else(|| front.password_for_fill_in(fill_owner), |p| Ok(Some(p))) {
+            Ok(Some(password)) => password,
+            Ok(None) => {
+                not_filled(
+                    &format!("no Owner password was given (set {OWNER_PASSWORD_VAR})"),
+                    checklist,
+                );
+                return;
+            }
+            Err(err) => {
+                not_filled(&err.to_string(), checklist);
+                return;
+            }
+        };
     if fill_owner {
         if let Err(err) = rakazo.bootstrap_owner(email, &password) {
             not_filled(&err, checklist);
@@ -734,7 +735,7 @@ mod tests {
         fn password_now(&mut self, _: bool) -> Result<Option<Password>, InputError> {
             panic!("asked for the password")
         }
-        fn password_for_fill_in(&mut self) -> Result<Option<Password>, InputError> {
+        fn password_for_fill_in(&mut self, _: bool) -> Result<Option<Password>, InputError> {
             panic!("asked for the password")
         }
         fn model_provider(&mut self, _: Option<Choice>) -> Result<Choice, InputError> {
