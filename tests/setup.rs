@@ -75,10 +75,7 @@ impl TestInstance {
 
     /// Runs `setup` with stdin closed, so there is no terminal, as on CI.
     fn setup(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
-        self.egress_before.get_or_init(|| EgressBaseline {
-            rules: !egress_rules_on_engine().is_empty(),
-            other_sidecars: self.other_sidecars_running(),
-        });
+        self.egress_baseline();
         let mut command = Command::new(env!("CARGO_BIN_EXE_rakazo-stack"));
         for (name, _) in std::env::vars_os() {
             if name.as_encoded_bytes().starts_with(b"RAKAZO_STACK_") {
@@ -95,6 +92,13 @@ impl TestInstance {
             .stdin(Stdio::null())
             .output()
             .expect("run rakazo-stack")
+    }
+
+    fn egress_baseline(&self) -> EgressBaseline {
+        *self.egress_before.get_or_init(|| EgressBaseline {
+            rules: !egress_rules_on_engine().is_empty(),
+            other_sidecars: self.other_sidecars_running(),
+        })
     }
 
     fn origin(&self) -> String {
@@ -415,8 +419,9 @@ fn addresses(container: &str, format: &str) -> Vec<String> {
 
 const COMPUTER_EGRESS: &str = "computer-egress";
 
-/// Every `rakazo-c` rule on the engine, on both iptables backends, read from a throwaway
-/// container on the sidecar's own base image.
+/// Every `rakazo-c` rule in the engine's `DOCKER-USER`, on both iptables backends, read
+/// from a throwaway container on the sidecar's own base image. Only that chain: Docker's
+/// own chains name each running computer's `rakazo-c…` bridge too.
 fn egress_rules_on_engine() -> Vec<String> {
     let base = include_str!("../computer-egress/Dockerfile")
         .lines()
@@ -434,7 +439,7 @@ fn egress_rules_on_engine() -> Vec<String> {
         .arg(
             "apk add --quiet --no-cache iptables iptables-legacy >/dev/null && \
              for t in iptables ip6tables iptables-legacy ip6tables-legacy; do \
-               $t -S 2>/dev/null || true; \
+               $t -S DOCKER-USER 2>/dev/null || true; \
              done",
         )
         .output()
@@ -1054,6 +1059,15 @@ fn bot_computers_get_restricted_egress_and_fail_closed_without_the_sidecar() {
         fake_bin.path().display(),
         std::env::var("PATH").unwrap()
     );
+    assert_eq!(
+        instance.egress_baseline(),
+        EgressBaseline {
+            rules: false,
+            other_sidecars: false
+        },
+        "this test removes the engine's rakazo-c rules part-way, so it needs an engine \
+         where no other Instance has them"
+    );
     let out = instance.setup(
         &["--no-questions"],
         &[
@@ -1061,15 +1075,6 @@ fn bot_computers_get_restricted_egress_and_fail_closed_without_the_sidecar() {
             ("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD),
             ("PATH", &path),
         ],
-    );
-    assert_eq!(
-        instance.egress_before.get(),
-        Some(&EgressBaseline {
-            rules: false,
-            other_sidecars: false
-        }),
-        "this test removes the engine's rakazo-c rules part-way, so it needs an engine \
-         where no other Instance has them"
     );
     let out_text = text(&out);
     assert!(out.status.success(), "{out_text}");
