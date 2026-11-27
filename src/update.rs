@@ -526,6 +526,37 @@ fn postgres_major(image: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
+/// The program pulls by digest, so an image that also has a `name:tag` is someone else's
+/// too. Docker's containerd store lists a digest pull among `RepoTags` as `name@sha256:…`.
+pub fn pulled_by_digest(repo_tags: &[String]) -> bool {
+    repo_tags.iter().all(|name| name.contains('@'))
+}
+
+/// Removes an image the program pulled by digest; `Ok(false)` leaves one that isn't
+/// ([`pulled_by_digest`]) or is already gone.
+pub fn remove_pulled_image(docker: &Docker, id: &str) -> Result<bool, String> {
+    let Some(names) = docker
+        .output(["image", "inspect", "--format", "{{json .RepoTags}}", id])
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| serde_json::from_slice::<Vec<String>>(&out.stdout).ok())
+        .filter(|names| pulled_by_digest(names))
+    else {
+        return Ok(false);
+    };
+    let refs = if names.is_empty() {
+        vec![id.to_string()]
+    } else {
+        names
+    };
+    for name in &refs {
+        let args = ["image", "rm", name.as_str()];
+        let out = docker.output(args).map_err(|err| err.to_string())?;
+        backup::checked("docker", &args, out).map_err(|err| err.0)?;
+    }
+    Ok(true)
+}
+
 /// `name:tag@digest` without its tag, which Docker ignores once a digest is given.
 fn by_digest(image: &str) -> String {
     match image.split_once('@') {
@@ -1280,31 +1311,14 @@ impl Update<'_> {
         Ok(())
     }
 
-    /// Removes the images the switch replaced. The program pulls by digest, so an image
-    /// that also has a `name:tag` is someone else's too and stays. Docker's containerd
-    /// store lists a digest pull among `RepoTags` as `name@sha256:…`.
+    /// Removes the images the switch replaced.
     fn remove_images(&self, before: &BTreeSet<String>, after: &BTreeSet<String>) {
         let mut removed = 0;
         for id in before.difference(after) {
-            let Some(names) = self
-                .docker_ok(&["image", "inspect", "--format", "{{json .RepoTags}}", id])
-                .ok()
-                .and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
-                .filter(|names| names.iter().all(|name| name.contains('@')))
-            else {
-                continue;
-            };
-            let refs = if names.is_empty() {
-                vec![id.clone()]
-            } else {
-                names
-            };
-            let gone = refs
-                .iter()
-                .try_for_each(|name| self.docker_ok(&["image", "rm", name]).map(|_| ()));
-            match gone {
-                Ok(()) => removed += 1,
-                Err(err) => println!("Couldn't remove a replaced image: {}", err.0),
+            match remove_pulled_image(self.docker, id) {
+                Ok(true) => removed += 1,
+                Ok(false) => {}
+                Err(err) => println!("Couldn't remove a replaced image: {err}"),
             }
         }
         if removed > 0 {

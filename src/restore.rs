@@ -843,7 +843,7 @@ fn provisional_env(
 }
 
 /// Anything in the Instance folder but the lock, which every command creates.
-fn folder_holds_an_instance(folder: &Path) -> io::Result<bool> {
+pub fn folder_holds_an_instance(folder: &Path) -> io::Result<bool> {
     match fs::read_dir(folder) {
         Ok(entries) => {
             for entry in entries {
@@ -860,7 +860,7 @@ fn folder_holds_an_instance(folder: &Path) -> io::Result<bool> {
 
 /// `<project>_*` volumes that no other Compose project claims, from lines of
 /// `name<TAB>project label`.
-fn instance_volumes(listing: &str, project: &str) -> Vec<String> {
+pub fn instance_volumes(listing: &str, project: &str) -> Vec<String> {
     let prefix = format!("{project}_");
     listing
         .lines()
@@ -926,7 +926,7 @@ fn old_machine_off(
     Ok(answer.as_deref().and_then(yes_or_no).unwrap_or(false))
 }
 
-fn yes_or_no(text: &str) -> Option<bool> {
+pub fn yes_or_no(text: &str) -> Option<bool> {
     match text.trim().to_ascii_lowercase().as_str() {
         "y" | "yes" => Some(true),
         "n" | "no" => Some(false),

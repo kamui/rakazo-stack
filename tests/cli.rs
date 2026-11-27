@@ -82,3 +82,62 @@ fn a_held_lock_stops_a_second_command() {
         );
     }
 }
+
+/// `uninstall` without a terminal, as a script runs it.
+fn uninstall(home: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rakazo-stack"))
+        .arg("uninstall")
+        .args(args)
+        .env("HOME", home)
+        .env_remove("RAKAZO_STACK_TEST_PROJECT")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run rakazo-stack")
+}
+
+#[test]
+fn uninstall_stops_before_anything_changes_without_an_instance_or_its_name() {
+    let home = tempfile::tempdir().unwrap();
+    let out = uninstall(home.path(), &["--confirm", "rakazo-stack"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("there's no Instance in ~/rakazo-stack"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!home.path().join("rakazo-stack").exists());
+
+    let folder = home.path().join("rakazo-stack");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("settings.json"), "{}").unwrap();
+    let out = uninstall(home.path(), &[]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("pass `--confirm rakazo-stack`"),
+        "{}",
+        stderr(&out)
+    );
+    for wrong in ["rakazo", "Rakazo-Stack", ""] {
+        let out = uninstall(home.path(), &["--confirm", wrong, "--delete-images"]);
+        assert!(!out.status.success());
+        assert!(
+            stderr(&out).contains("the name didn't match, so nothing was changed."),
+            "{wrong:?}: {}",
+            stderr(&out)
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(folder.join("settings.json")).unwrap(),
+        "{}"
+    );
+
+    let lock = File::create(folder.join(".lock")).unwrap();
+    lock.try_lock().unwrap();
+    let out = uninstall(home.path(), &["--confirm", "rakazo-stack"]);
+    assert!(
+        stderr(&out).contains("another rakazo-stack command is running"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(folder.join("settings.json").exists());
+}

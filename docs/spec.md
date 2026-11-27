@@ -33,19 +33,20 @@ Terms such as Self-hoster, Instance, Instance URL, Instance folder, Component, B
 19. [Testing and CI](#19-testing-and-ci)
 20. [Known limitations to document](#20-known-limitations-to-document)
 21. [Left to the implementation](#21-left-to-the-implementation)
+22. [`rakazo-stack uninstall`](#22-rakazo-stack-uninstall)
 
 ## 1. Scope
 
 ### What v1 is
 
 - One Self-hoster, one Instance, one machine ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
-- One program, `rakazo-stack`, with the subcommands `setup`, `update`, `backup` and `restore`, installed by a `curl … | sh` one-liner ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#30](https://github.com/kamui/rakazo-stack/issues/30), [#32](https://github.com/kamui/rakazo-stack/issues/32), [#35](https://github.com/kamui/rakazo-stack/issues/35)).
+- One program, `rakazo-stack`, with the subcommands `setup`, `update`, `backup` and `restore`, installed by a `curl … | sh` one-liner ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#30](https://github.com/kamui/rakazo-stack/issues/30), [#32](https://github.com/kamui/rakazo-stack/issues/32), [#35](https://github.com/kamui/rakazo-stack/issues/35)). After v1 it gained `uninstall` ([§22](#22-rakazo-stack-uninstall), [#119](https://github.com/kamui/rakazo-stack/issues/119)).
 - It installs the newest stable upstream releases of its Components, unmodified, and moves them only when the Self-hoster runs `rakazo-stack update` ([#32](https://github.com/kamui/rakazo-stack/issues/32)). See [ADR 0002](adr/0002-latest-stable-not-pinned.md).
 - It never forks or patches an upstream project. The stack's own code is the program, a compose layer file, the Lemonade relay and the computer-egress sidecar ([#1](https://github.com/kamui/rakazo-stack/issues/1), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
 - No outside account is required except the Model provider the Self-hoster brings. Composio and Tailscale are optional ([#1](https://github.com/kamui/rakazo-stack/issues/1), [#3](https://github.com/kamui/rakazo-stack/issues/3), [#8](https://github.com/kamui/rakazo-stack/issues/8)).
 - Voice runs on the machine through Lemonade. Phone calls are on (`PHONE_CALLS_ENABLED=true`) ([#1](https://github.com/kamui/rakazo-stack/issues/1), [#6](https://github.com/kamui/rakazo-stack/issues/6)).
 - Memory is Hindsight, on only when the Self-hoster gives a Model provider key ([#44](https://github.com/kamui/rakazo-stack/issues/44)). See [ADR 0001](adr/0001-hindsight-for-v1-memory.md).
-- Lifecycle covered: fresh install, re-runs of setup, Update, Backup and restore ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
+- Lifecycle covered: fresh install, re-runs of setup, Update, Backup and restore ([#1](https://github.com/kamui/rakazo-stack/issues/1)), and removal ([#119](https://github.com/kamui/rakazo-stack/issues/119)).
 
 ### Non-goals for v1
 
@@ -67,7 +68,6 @@ From the map's "Out of scope" list ([#1](https://github.com/kamui/rakazo-stack/i
 - Alpine/musl Linux ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
 - Honcho as a memory option (planned after v1) ([#44](https://github.com/kamui/rakazo-stack/issues/44)).
 - Scheduled or automatic Backups. v1 backs up only when run; the docs show a cron example ([#30](https://github.com/kamui/rakazo-stack/issues/30)).
-- An uninstall command. Removal is documented as manual steps ([#17](https://github.com/kamui/rakazo-stack/issues/17)).
 - `rakazo-stack start|stop|status|logs` commands. The Self-hoster uses `docker compose` directly ([#41](https://github.com/kamui/rakazo-stack/issues/41)).
 - A `rakazo-stack memory connect` command ([#49](https://github.com/kamui/rakazo-stack/issues/49)).
 
@@ -112,11 +112,11 @@ On Windows and macOS the Instance runs only while the Self-hoster is signed in, 
 
 ### Preflight
 
-Every `setup`, `update` and `restore` run starts with preflight; `backup` takes only the lock ([§15](#15-rakazo-stack-backup)). A **stop** ends the run before anything on the machine changes. A **warn** prints a warning and carries on. Nothing in preflight is fixed automatically.
+Every `setup`, `update` and `restore` run starts with preflight; `backup` and `uninstall` take only the lock ([§15](#15-rakazo-stack-backup), [§22](#22-rakazo-stack-uninstall)). A **stop** ends the run before anything on the machine changes. A **warn** prints a warning and carries on. Nothing in preflight is fixed automatically.
 
 | Check | Result | Ticket |
 |---|---|---|
-| Another `rakazo-stack` command holds the lock in the Instance folder (every command creates the folder to hold it; see [§16](#16-rakazo-stack-restore) for `restore`) | stop: "another rakazo-stack command is running" | [#32](https://github.com/kamui/rakazo-stack/issues/32) |
+| Another `rakazo-stack` command holds the lock in the Instance folder (every command but `uninstall` creates the folder to hold it; see [§16](#16-rakazo-stack-restore) for `restore`) | stop: "another rakazo-stack command is running" | [#32](https://github.com/kamui/rakazo-stack/issues/32) |
 | WSL: the home directory is under `/mnt/` | stop | [#29](https://github.com/kamui/rakazo-stack/issues/29) |
 | Docker server API < 1.45, or `docker compose version` < 2.24.4 | stop, with install instructions | [#18](https://github.com/kamui/rakazo-stack/issues/18) |
 | Linux: Docker Desktop for Linux is the active engine | stop | [#9, #18] |
@@ -298,7 +298,7 @@ Fixed at `~/rakazo-stack` on every OS, with no option to move it. On Windows tha
   computer-egress/                 build context for the sidecar: Dockerfile, the wrapper, and Rakazo's restrict-computer-egress.sh
   lemonade/                        macOS only: lemond's working folder (config.json, backends), versions/<v>/, models/ (HF_HOME)
   logs/                            setup run logs, one `setup-<UTC time>.log` per run (no secrets); `lemond.log` on macOS
-  .lock                            the lock setup, update, backup and restore take (an OS file lock, released if the program dies)
+  .lock                            the lock every command takes (an OS file lock, released if the program dies)
   .update-check                    when setup or backup last checked for updates, in Unix seconds
   .update.env                      only while update fetches: the new versions' image lines
 ```
@@ -308,7 +308,7 @@ Fixed at `~/rakazo-stack` on every OS, with no option to move it. On Windows tha
 - Compose files sit beside `.env` because Compose reads `.env` and resolves relative paths from the project folder ([#29](https://github.com/kamui/rakazo-stack/issues/29)).
 - The only data inside the folder is native lemond's files on macOS (about 2 GB of models) ([#29](https://github.com/kamui/rakazo-stack/issues/29)).
 - Outside the folder: the macOS LaunchAgent plist, `~/Library/LaunchAgents/com.github.kamui.rakazo-stack.lemond.plist` (mode 600) ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#70](https://github.com/kamui/rakazo-stack/issues/70)), Backups in `~/rakazo-stack-backups/` ([#30](https://github.com/kamui/rakazo-stack/issues/30)), and the program in `~/.local/bin/rakazo-stack` ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
-- The lock that `setup`, `update`, `backup` and `restore` take, and the timestamp of the last update check (`.update-check`), also live in the Instance folder ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#73](https://github.com/kamui/rakazo-stack/issues/73)).
+- The lock that every command takes, and the timestamp of the last update check (`.update-check`), also live in the Instance folder ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#73](https://github.com/kamui/rakazo-stack/issues/73)).
 
 ### `settings.json`
 
@@ -639,7 +639,7 @@ Containerised Lemonade is ruled out on the Mac: the image is amd64 only and Dock
   - Load with `launchctl bootstrap gui/$UID <plist>` when `launchctl print` doesn't show it loaded; reload (`bootout` then `bootstrap`, which is retried for a few seconds while launchd tears the old job down) only when the plist changed. Never `launchctl unload -w`, and never `launchctl enable`: when `launchctl print-disabled gui/$UID` lists the label as disabled, as turning it off in Login Items does, setup leaves it off and adds the checklist item.
 - **Config:** `lemonade --host 127.0.0.1 --port 13315 config set whispercpp.backend=metal auto_evict=false auto_check_model_updates=false` against the running lemond, with the `lemonade` from the same version folder and the key in its environment, not by writing `config.json`. No `-t`, no `metal_args` (gone in Lemonade v2026.45.3) ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#42](https://github.com/kamui/rakazo-stack/issues/42)). This is step 9's settings call on macOS; the models then go through the relay as on Linux.
 - **Health on every run:** `launchctl print gui/$UID/<label>` shows it loaded, and `/api/v1/health` answers 200 with the key, within 60 s. Otherwise a checklist item with the fix (for example re-enabling it in Login Items) or the last 10 lines of `lemond.log`, with the key replaced by `<LEMONADE_API_KEY>` if it appears. A failed download, check or unpack is a checklist item too. Setup never falls back to another voice setup.
-- **Docs:** mention the "Background Items Added" notice macOS 13+ shows on first install, and the manual removal steps: `launchctl bootout`, delete the plist, delete the Instance folder.
+- **Docs:** mention the "Background Items Added" notice macOS 13+ shows on first install, that `rakazo-stack uninstall` removes the LaunchAgent ([§22](#22-rakazo-stack-uninstall)), and the manual removal steps for when the program is gone: `launchctl bootout`, delete the plist, delete the Instance folder.
 - Measured on an M3 Pro: speech 0.8 s for a short reply, transcription 0.8–2.0 s, first Whisper load 17 s ([#16](https://github.com/kamui/rakazo-stack/issues/16)). Measured again on an M3 Pro with Lemonade v2026.48.3, from `api` through the relay, medians of 5: transcription 1.5 s for a 6 s WebM/Opus clip and 1.9 s for a 29 s clip; speech 0.1 s for a short reply once Kokoro is loaded, 2.4 s on the first call after lemond restarted. First downloads: `kokoro-v1` in 6 s and `Whisper-Large-v3-Turbo` in 22 s; first loads 3.0 s and 10.6 s ([#81](https://github.com/kamui/rakazo-stack/issues/81)).
 
 ### Speech that bypasses Lemonade
@@ -755,8 +755,8 @@ Two layers:
 - **Runs** with `network_mode: host`, `cap_add: [NET_ADMIN]` and `restart: unless-stopped`, re-applying the rules every 60 s. Its rules match only `rakazo-c+` bridges, so the relay and screens are unaffected ([#25](https://github.com/kamui/rakazo-stack/issues/25), [#27](https://github.com/kamui/rakazo-stack/issues/27)).
 - **Legacy iptables (Linux):** on every pass, a wrapper checks which backend holds `DOCKER-USER`. If `iptables-legacy -L DOCKER-USER` succeeds and `iptables -L DOCKER-USER` doesn't, it sets `RAKAZO_IPTABLES=iptables-legacy RAKAZO_IP6TABLES=ip6tables-legacy` before running the script ([#40](https://github.com/kamui/rakazo-stack/issues/40)).
 - **The wrapper** runs the script with `--apply`, which never calls `sudo` or systemd. It logs `computer egress rules applied with <iptables>` on its first success and after a failure, and the script's errors otherwise. With arguments it runs the script once with them, after the same backend check, so `docker compose run --rm computer-egress --print` shows the rules and `--remove` deletes them.
-- **When the sidecar goes away,** its rules stay: stopping or removing the container, or `docker compose down`, never runs `--remove`. That fails closed. A Docker restart can start the supervisor before the sidecar, and with the rules in place its probe passes and no computer starts open. The rules match only `rakazo-c+` bridges, and only a Rakazo supervisor in `restricted` mode makes those, so rules left behind change nothing else. They last until the engine's firewall is reset: a reboot on Linux, unless something on the host saves and restores the firewall, and a Docker Desktop restart or `wsl --shutdown` on Windows and macOS, which is expected but untested ([§19](#acceptance-checks-not-yet-run)). Setup never removes them. The steps for removing an Instance by hand ([§20](#20-known-limitations-to-document)) stop the sidecar, then run `docker compose run --rm computer-egress --remove`, before `docker compose down`, unless another Instance uses the same engine. Stopping it first means its next pass can't put the rules back, as in the tests' teardown ([§19](#test-instances), [#78](https://github.com/kamui/rakazo-stack/issues/78)).
-- **Two Instances on one engine.** v1 supports one Instance per machine ([§1](#1-scope)), but a test Instance can run beside a real one, and so can a hand-built Rakazo in `restricted` mode ([§5](#5-compose-layout)). Rakazo's rules match `rakazo-c+` on the whole engine, so every Instance on it shares one set of rules. A second sidecar's pass finds the rules already at the head of each chain and changes nothing. Computers don't clash, because Rakazo names bridges and computers after the bot, not the Instance. The Instances' supervisors share one probe network (`rakazo-egress-probe`, bridge `rakazo-cprobe`). Two probes at once can fail one, and setup's single supervisor restart repeats it. When one of two Instances is removed, the rules have to stay. Running `--remove` then opens the other Instance's computers, running and new alike, because its supervisor checked the rules once and cached the result. That lasts until its sidecar's next pass, up to 60 s.
+- **When the sidecar goes away,** its rules stay: stopping or removing the container, or `docker compose down`, never runs `--remove`. That fails closed. A Docker restart can start the supervisor before the sidecar, and with the rules in place its probe passes and no computer starts open. The rules match only `rakazo-c+` bridges, and only a Rakazo supervisor in `restricted` mode makes those, so rules left behind change nothing else. They last until the engine's firewall is reset: a reboot on Linux, unless something on the host saves and restores the firewall, and a Docker Desktop restart or `wsl --shutdown` on Windows and macOS, which is expected but untested ([§19](#acceptance-checks-not-yet-run)). Setup never removes them. `rakazo-stack uninstall` ([§22](#22-rakazo-stack-uninstall)) and the steps for removing an Instance by hand ([§20](#20-known-limitations-to-document)) stop the sidecar, then run `docker compose run --rm computer-egress --remove`, before `docker compose down`, unless another Instance uses the same engine; `uninstall` finds that out itself. Stopping it first means its next pass can't put the rules back, as in the tests' teardown ([§19](#test-instances), [#78](https://github.com/kamui/rakazo-stack/issues/78)).
+- **Two Instances on one engine.** v1 supports one Instance per machine ([§1](#1-scope)), but a test Instance can run beside a real one, and so can a hand-built Rakazo in `restricted` mode ([§5](#5-compose-layout)). Rakazo's rules match `rakazo-c+` on the whole engine, so every Instance on it shares one set of rules. A second sidecar's pass finds the rules already at the head of each chain and changes nothing. Computers don't clash, because Rakazo names bridges and computers after the bot, not the Instance. The Instances' supervisors share one probe network (`rakazo-egress-probe`, bridge `rakazo-cprobe`). Two probes at once can fail one, and setup's single supervisor restart repeats it. When one of two Instances is removed, the rules have to stay, which `uninstall` does ([§22](#22-rakazo-stack-uninstall)). Running `--remove` then opens the other Instance's computers, running and new alike, because its supervisor checked the rules once and cached the result. That lasts until its sidecar's next pass, up to 60 s.
 - **Where the rules land:** the host's namespace on Linux; Docker Desktop's engine namespace or VM on Windows and macOS ([#25](https://github.com/kamui/rakazo-stack/issues/25), [#27](https://github.com/kamui/rakazo-stack/issues/27)).
 - **Why `restricted`, not `auto`:** `auto` caches its first probe and can settle on `open` if the supervisor starts before the sidecar. `restricted` fails closed: with the rules missing, computer creation returns 500 naming the script, and works again once the sidecar is back, without a supervisor restart ([#25](https://github.com/kamui/rakazo-stack/issues/25), [#27](https://github.com/kamui/rakazo-stack/issues/27)).
 - **On Linux** it replaces upstream's `sudo bash restrict-computer-egress.sh` step and its systemd unit, so setup needs no sudo ([#27](https://github.com/kamui/rakazo-stack/issues/27), [#40](https://github.com/kamui/rakazo-stack/issues/40)).
@@ -1029,6 +1029,7 @@ Each of these was decided from source, docs or a partial run and must pass durin
 - **Composio:** whether it accepts a callback to `http://127.0.0.1:5173/integrations/callback` and to a `ts.net` Instance URL; connecting one Composio-managed app as a Rakazo user and having a bot call it; and the key check's accepting reply, which no real key has produced yet. Only its refusals were recorded, with placeholder keys ([#3](https://github.com/kamui/rakazo-stack/issues/3), [#8](https://github.com/kamui/rakazo-stack/issues/8), [#69](https://github.com/kamui/rakazo-stack/issues/69)).
 - **Tailscale through setup:** with a real auth key, the Instance answering at its `ts.net` address from another device with a valid certificate; password sign-in at both addresses; only the web app answering on the device; a device-name clash ending on the assigned name; the rejoin with no key after the container is recreated; switching off; and the checklist item with HTTPS certificates off. The container's own behaviour was tested by hand on Windows in [#24](https://github.com/kamui/rakazo-stack/issues/24) ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 - **Phones:** Rakazo's phone app with `BETTER_AUTH_URL` on localhost ([#24](https://github.com/kamui/rakazo-stack/issues/24)). Android end to end is optional: v1 documents Android as untested, and the check runs only if an Android phone is at hand ([#28](https://github.com/kamui/rakazo-stack/issues/28), [#79](https://github.com/kamui/rakazo-stack/issues/79)).
+- **Uninstall:** on a Mac by hand: the LaunchAgent unloaded, its plist gone and nothing listening on lemond's port. On a real tailnet: the device still listed after its container goes, and the last message's link opening its page. On WSL 2 with Docker Desktop. The removal and the two-Instance case on Linux are `uninstall_removes_the_instance_and_keeps_the_rules_another_one_needs` ([§22](#uninstall-tests), [#119](https://github.com/kamui/rakazo-stack/issues/119)).
 
 ## 20. Known limitations to document
 
@@ -1047,10 +1048,46 @@ Collected from the decisions above, for the README and docs:
 - Updates are best effort: nobody tests each upstream release before the Self-hoster gets it, which is why Update takes a Backup and offers a rollback ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 - Composio's free-tier cap and routine watches ([#34](https://github.com/kamui/rakazo-stack/issues/34)).
 - A lost Backup passphrase makes the Backup unusable ([#30](https://github.com/kamui/rakazo-stack/issues/30)).
-- Removing an Instance is manual ([#17](https://github.com/kamui/rakazo-stack/issues/17)). The steps start with `docker compose stop computer-egress` and `docker compose run --rm computer-egress --remove` in the Instance folder, before `docker compose down`, and say to skip them when another Instance or a `restricted` Rakazo uses the same Docker engine ([§12](#the-computer-egress-sidecar)).
+- `rakazo-stack uninstall` keeps Backups and images unless asked, and leaves the Tailscale device on the tailnet for the Self-hoster to remove in the admin console ([§22](#22-rakazo-stack-uninstall)). The guide keeps the steps for removing an Instance by hand, for when the program is gone ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#119](https://github.com/kamui/rakazo-stack/issues/119)). They start with `docker compose stop computer-egress` and `docker compose run --rm computer-egress --remove` in the Instance folder, before `docker compose down`, and say to skip them when another Instance or a `restricted` Rakazo uses the same Docker engine ([§12](#the-computer-egress-sidecar)).
 
 ## 21. Left to the implementation
 
 No ticket fixed these names. The implementation picked them, and the docs state them ([#78](https://github.com/kamui/rakazo-stack/issues/78)):
 
 - the rest of `settings.json`'s schema: `rakazo_model`, `memory_model`, `model_connection_due`, `model_providers_left`, `bring_your_own_url`, `holds` and `failed_update`, with the values in [§6](#settingsjson). [docs/files.md](files.md#settingsjson) lists every field.
+- `uninstall`'s `--confirm <name>`, which stands in for the typed name in a scripted run, and `--delete-images`, which answers yes to the images question ([#119](https://github.com/kamui/rakazo-stack/issues/119)).
+
+## 22. `rakazo-stack uninstall`
+
+Removes the Instance and everything setup put on the machine, in one command, and nothing that isn't the Instance's. Docker, Docker Desktop, a Tailscale the Self-hoster runs on the host, and Backups stay ([#119](https://github.com/kamui/rakazo-stack/issues/119)).
+
+### Before anything changes
+
+1. **An Instance folder, then the lock.** Without `~/rakazo-stack`, or with one holding only `.lock` ([§16](#rules)), it stops before taking the lock, so it creates nothing, and says how to delete the program. Otherwise it takes the lock like every command. It runs no preflight.
+2. **The name.** On a terminal it says what goes and offers a Backup: "Take a Backup first? [Y/n]", where Enter takes one under `backup`'s passphrase rules ([§15](#15-rakazo-stack-backup)). It asks the images question ([below](#steps-2)), then for the Instance's name, the Compose project name `rakazo-stack`, as `restore --replace` does. Only once the name matches does it take the Backup, and a failed Backup stops the run. A scripted run passes `--confirm rakazo-stack` instead and is asked nothing: it takes no Backup, and deletes images only with `--delete-images`. Without a terminal and without `--confirm` it stops. A wrong name changes nothing.
+3. **The stack files.** When `.env` is gone but the Compose project still has containers or volumes, Compose can't remove them, so it stops and says to run `setup`, which writes `.env` again, then `uninstall`.
+4. **What it reads first:** the images that the Instance's containers and bot computers run, and its recorded computer image; which of them no other container on the engine uses; and, when the Instance has joined a tailnet (`tailscale_dns_name`), the device's Tailscale IPv4 from `tailscale status --json`, while its container still runs.
+
+### Steps
+
+The guide's steps for removing an Instance by hand, in their order. Each step looks before it acts and says what it removed or that it was already gone, so running the command again after a failure, or after it was interrupted, finishes the removal. A failed step stops the run with "Run `rakazo-stack uninstall` again to finish".
+
+1. **The firewall's rules** ([§12](#the-computer-egress-sidecar)), removed only when nothing else on the engine relies on them: no other Compose project has Rakazo's `supervisor` running (`com.docker.compose.service=supervisor`), and no network with a `rakazo-c…` bridge is left but the Instance's own bot networks and Rakazo's shared probe network (`rakazo-egress-probe`, labelled `rakazo.egressProbe=true`). Then `docker compose stop computer-egress` and `docker compose run --rm -T computer-egress --remove`. Otherwise the rules stay, and the run names what relies on them. A hand-built Rakazo in `restricted` mode counts while its `supervisor` runs. A stopped one doesn't, which is safe: started again without the rules, `restricted` refuses its computers rather than run them open.
+2. **Bot computers:** `rakazo.managed=true` with the Instance's `appdata` volume mounted, as `backup` finds them, removed with `docker rm --force --volumes`.
+3. **The Compose project:** `docker compose --profile '*' down --volumes --rmi local`: its containers, volumes, networks and its two built images.
+4. **Bot-computer networks**, only the Instance's. Rakazo v0.16.0 labels each with `rakazo.computerOwner`: the first 32 hex characters of the SHA-256 of `volume:<project>_appdata`, the volume at its supervisor's `/data` (`computerNetworkOwnerFor` in its `computer-spec.ts`). The probe network goes too when step 1 found nothing else relying on the rules. They go after step 3, because `supervisor` and `web` join each bot network.
+5. **macOS: the LaunchAgent.** `launchctl bootout gui/$UID/<label>` when `launchctl print` shows it loaded, then delete the plist. lemond's child servers end with it, so nothing listens on `13315`.
+6. **Images**, only when the Self-hoster says yes to "Delete the N images (X GB) this Instance used that no other container uses? [y/N]", or a scripted run passes `--delete-images`. Enter keeps them, and the run says how many and how big. Only images pulled by digest count, as for `update`'s cleanup ([§14](#steps)): one that also has a `name:tag` is someone else's too. Each is checked again against every container on the engine just before it goes.
+7. **The Instance folder,** then the program at `~/.local/bin/rakazo-stack`.
+
+The last lines say the Instance is removed and where Backups are: the Backup this run took, or `~/rakazo-stack-backups` and any `--output` folder. For a device that joined a tailnet they link its page in the admin console, `https://console.tailscale.com/admin/machines/<Tailscale IPv4>`, where **Machine settings** holds **Remove**, or the Machines list when the IPv4 couldn't be read.
+
+On Windows every call goes through `docker.exe`, as for the other commands ([§7](#windows-docker-through-dockerexe)).
+
+### The Tailscale device
+
+`uninstall` doesn't run `tailscale logout`. Tailscale's CLI reference says logout removes an ephemeral node at once, but setup refuses ephemeral keys ([§11](#tailscale)). For other devices Tailscale's docs say only that devices "remain in the admin console until removed" ([kb/1111](https://tailscale.com/kb/1111/ephemeral-nodes)). Logout would also expire the node key that each Backup's `tailscale-state` holds, so restoring one would need a new auth key and give a new device name. The Self-hoster removes the device from the link instead. Not tested on a real tailnet ([§19](#acceptance-checks-not-yet-run)).
+
+### Uninstall tests
+
+On Linux CI, `uninstall_removes_the_instance_and_keeps_the_rules_another_one_needs` runs two test Instances on one engine: the first with voice, memory, Tailscale off and one bot computer, the second with one bot computer. A wrong `--confirm` leaves the first alone. Its uninstall with `--delete-images`, killed after it removes the bot computer and run again, finishes. It leaves no container, volume, network, built image, Instance folder or program, keeps the firewall's rules, which the second Instance's supervisor relies on, and says so; the second Instance's bot computer still can't reach the host or the metadata address. It deletes Hindsight's images, which only it used, and keeps Rakazo's, which the second runs. The second's uninstall, without `--delete-images`, then removes the rules and the probe network and keeps its images. `tests/cli.rs` covers the stops before anything changes without Docker.

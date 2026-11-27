@@ -29,7 +29,8 @@ struct TestInstance {
     web_port: u16,
     /// The engine's egress state before this Instance's first `setup` started its sidecar.
     egress_before: OnceCell<EgressBaseline>,
-    _turn: MutexGuard<'static, ()>,
+    /// `None` for an Instance started [`TestInstance::beside`] another, inside its turn.
+    _turn: Option<MutexGuard<'static, ()>>,
 }
 
 /// `rakazo-c` rules on the engine, and whether another Instance's sidecar keeps them.
@@ -49,14 +50,23 @@ impl EgressBaseline {
 
 impl TestInstance {
     fn new() -> Self {
+        let turn = ONE_AT_A_TIME
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self::taking(Some(turn))
+    }
+
+    /// A second Instance on the same engine, for as long as the first one's turn lasts.
+    fn beside(_first: &Self) -> Self {
+        Self::taking(None)
+    }
+
+    fn taking(turn: Option<MutexGuard<'static, ()>>) -> Self {
         let web_port = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
             .unwrap()
             .port();
-        let turn = ONE_AT_A_TIME
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         Self {
             _turn: turn,
             home: tempfile::tempdir().unwrap(),
@@ -3676,4 +3686,267 @@ fn update_moves_postgres_16_to_18_and_rolls_a_failed_update_back() {
         "never swapped back"
     );
     assert_eq!(instance.postgres_major(), "18");
+}
+
+impl TestInstance {
+    /// Copies the program to where `install.sh` puts it, so `uninstall` runs as installed
+    /// and removes itself.
+    fn install_program(&self) -> PathBuf {
+        let program = self.home.path().join(".local/bin/rakazo-stack");
+        fs::create_dir_all(program.parent().unwrap()).unwrap();
+        fs::copy(env!("CARGO_BIN_EXE_rakazo-stack"), &program).unwrap();
+        program
+    }
+
+    /// `uninstall` from the installed copy, without a terminal, in its own process group
+    /// so that a kill also ends the Docker command it runs.
+    fn uninstall_command(&self, args: &[&str]) -> Command {
+        use std::os::unix::process::CommandExt;
+        let mut command = Command::new(self.home.path().join(".local/bin/rakazo-stack"));
+        for (name, _) in std::env::vars_os() {
+            if name.as_encoded_bytes().starts_with(b"RAKAZO_STACK_") {
+                command.env_remove(name);
+            }
+        }
+        command
+            .arg("uninstall")
+            .args(args)
+            .env("HOME", self.home.path())
+            .env("RAKAZO_STACK_TEST_PROJECT", &self.project)
+            .stdin(Stdio::null())
+            .process_group(0);
+        command
+    }
+
+    fn uninstall(&self, args: &[&str]) -> Output {
+        self.uninstall_command(args).output().unwrap()
+    }
+
+    /// Anything of the Instance's left on the engine or in HOME.
+    fn leftovers(&self, bot: &str) -> Vec<String> {
+        let mut left = self.containers("{{.Names}}");
+        left.extend(self.volumes());
+        let listed = |args: &[&str]| -> Vec<String> {
+            let out = docker().args(args).output().unwrap();
+            assert!(out.status.success(), "{}", text(&out));
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(str::to_string)
+                .collect()
+        };
+        left.extend(listed(&[
+            "network",
+            "ls",
+            "--format",
+            "{{.Name}}",
+            "--filter",
+            &format!("label=com.docker.compose.project={}", self.project),
+        ]));
+        left.extend(listed(&[
+            "network",
+            "ls",
+            "--format",
+            "{{.Name}}",
+            "--filter",
+            &format!("label=rakazo.botId={bot}"),
+        ]));
+        for image in ["lemonade-relay", COMPUTER_EGRESS] {
+            left.extend(listed(&[
+                "image",
+                "ls",
+                "--format",
+                "{{.Repository}}",
+                &format!("{}-{image}", self.project),
+            ]));
+        }
+        for path in [
+            self.folder(),
+            self.home.path().join(".local/bin/rakazo-stack"),
+        ] {
+            if path.exists() {
+                left.push(path.display().to_string());
+            }
+        }
+        left
+    }
+}
+
+fn cannot_reach_private_addresses(computer: &str) {
+    let gateways = addresses(
+        computer,
+        "{{range .NetworkSettings.Networks}}{{.Gateway}} {{end}}",
+    );
+    assert!(!gateways.is_empty());
+    for (address, port) in gateways
+        .iter()
+        .map(|gateway| (gateway.as_str(), 22))
+        .chain([("169.254.169.254", 80)])
+    {
+        assert_eq!(
+            connect_from(computer, address, port),
+            124,
+            "{address}:{port} is reachable from {computer}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "needs Docker and pulls Rakazo's and Hindsight's images; CI and the dev machine run it with --include-ignored"]
+fn uninstall_removes_the_instance_and_keeps_the_rules_another_one_needs() {
+    let first = TestInstance::new();
+    let second = TestInstance::beside(&first);
+    let bots = BotComputers(vec![
+        format!("{}-bot", first.project),
+        format!("{}-bot", second.project),
+    ]);
+    assert_eq!(
+        first.egress_baseline(),
+        EgressBaseline {
+            rules: false,
+            other_sidecars: false
+        },
+        "this test checks that the last uninstall removes the engine's rakazo-c rules, so it \
+         needs an engine where no other Instance has them"
+    );
+
+    fs::create_dir_all(first.folder()).unwrap();
+    fs::write(
+        first.folder().join("secrets.env"),
+        format!("OPENROUTER_API_KEY={MODEL_KEY}\n"),
+    )
+    .unwrap();
+    let owner = [
+        ("RAKAZO_STACK_OWNER_EMAIL", OWNER_EMAIL),
+        ("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD),
+    ];
+    let mut env = owner.to_vec();
+    env.extend(UNREACHABLE);
+    let out = first.setup(&["--no-questions"], &env);
+    assert!(out.status.success(), "{}", text(&out));
+    let out = second.setup(&["--no-questions"], &owner);
+    assert!(out.status.success(), "{}", text(&out));
+    for (instance, bot) in [(&first, &bots.0[0]), (&second, &bots.0[1])] {
+        let (status, reply) = instance.create_computer(bot);
+        assert_eq!(status, 200, "{reply}");
+    }
+    let first_only = [first.image_of("hindsight"), first.image_of("hindsight-db")];
+    let shared = first.image_of("api");
+    assert_eq!(second.image_of("api"), shared);
+    first.install_program();
+    second.install_program();
+
+    let containers = first.containers("{{.ID}} {{.State}}");
+    let wrong = first.uninstall(&["--confirm", "rakazo-stack", "--delete-images"]);
+    assert!(!wrong.status.success());
+    assert!(
+        text(&wrong).contains("the name didn't match, so nothing was changed."),
+        "{}",
+        text(&wrong)
+    );
+    assert_eq!(first.containers("{{.ID}} {{.State}}"), containers);
+    assert!(first.folder().join("settings.json").exists());
+    assert_eq!(
+        docker()
+            .args(["inspect", "--format", "{{.State.Status}}"])
+            .arg(format!("rakazo-bot-{}", bots.0[0]))
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+            .unwrap(),
+        "running",
+        "a wrong name left the bot computer alone"
+    );
+
+    let confirm = ["--confirm", first.project.as_str(), "--delete-images"];
+    let mut child = first
+        .uninstall_command(&confirm)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut seen = Vec::new();
+    for line in BufReader::new(child.stdout.take().unwrap()).lines() {
+        let line = line.unwrap();
+        let done = line == "Removed 1 bot computer.";
+        seen.push(line);
+        if done {
+            rustix::process::kill_process_group(
+                rustix::process::Pid::from_child(&child),
+                rustix::process::Signal::KILL,
+            )
+            .unwrap();
+            break;
+        }
+    }
+    let _ = child.wait();
+    assert_eq!(
+        seen.last().map(String::as_str),
+        Some("Removed 1 bot computer."),
+        "{seen:?}"
+    );
+    assert!(
+        first.folder().exists(),
+        "the interrupted run stopped part way"
+    );
+
+    let out = first.uninstall(&confirm);
+    let out_text = text(&out);
+    assert!(out.status.success(), "{out_text}");
+    assert!(
+        out_text.contains(&format!(
+            "The bot-computer firewall's rules stay, because another Compose project on this Docker engine runs Rakazo's supervisor ({})",
+            second.project
+        )),
+        "{out_text}"
+    );
+    assert!(out_text.contains("No bot computers left."), "{out_text}");
+    assert!(out_text.contains("The Instance is removed."), "{out_text}");
+    assert!(out_text.contains("Backups stay"), "{out_text}");
+    assert_eq!(first.leftovers(&bots.0[0]), Vec::<String>::new());
+    assert!(
+        !egress_rules_on_engine().is_empty(),
+        "the second Instance's rules stay"
+    );
+    let second_computer = format!("rakazo-bot-{}", bots.0[1]);
+    cannot_reach_private_addresses(&second_computer);
+    for id in &first_only {
+        assert!(gone_unless_tagged_elsewhere(id), "{id} was kept");
+    }
+    let shared_kept = docker()
+        .args(["image", "inspect", &shared])
+        .output()
+        .unwrap();
+    assert!(
+        shared_kept.status.success(),
+        "the image the second Instance runs was deleted"
+    );
+
+    let out = second.uninstall(&["--confirm", &second.project]);
+    let out_text = text(&out);
+    assert!(out.status.success(), "{out_text}");
+    assert!(
+        out_text.contains("Removed the bot-computer firewall's rules."),
+        "{out_text}"
+    );
+    assert!(out_text.contains("Kept "), "{out_text}");
+    assert_eq!(second.leftovers(&bots.0[1]), Vec::<String>::new());
+    assert!(egress_rules_on_engine().is_empty());
+    let probe = docker()
+        .args([
+            "network",
+            "ls",
+            "-q",
+            "--filter",
+            "label=rakazo.egressProbe=true",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&probe.stdout).trim().is_empty(),
+        "the shared probe network went with the rules"
+    );
+    let kept = docker()
+        .args(["image", "inspect", &shared])
+        .output()
+        .unwrap();
+    assert!(kept.status.success(), "images stay unless asked");
 }
