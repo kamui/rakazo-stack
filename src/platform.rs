@@ -9,6 +9,21 @@ pub enum Platform {
 }
 
 impl Platform {
+    /// How a Backup's manifest names the platform it was made on.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Linux => "linux",
+            Self::Wsl => "wsl",
+            Self::MacOs => "macos",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        [Self::Linux, Self::Wsl, Self::MacOs]
+            .into_iter()
+            .find(|platform| platform.id() == id)
+    }
+
     pub fn detect() -> Self {
         if cfg!(target_os = "macos") {
             return Self::MacOs;
@@ -39,7 +54,15 @@ pub fn wsl_interop_enabled() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_wsl_kernel;
+    use super::{Platform, is_wsl_kernel};
+
+    #[test]
+    fn ids_round_trip() {
+        for platform in [Platform::Linux, Platform::Wsl, Platform::MacOs] {
+            assert_eq!(Platform::from_id(platform.id()), Some(platform));
+        }
+        assert_eq!(Platform::from_id("windows"), None);
+    }
 
     #[test]
     fn recognises_wsl_kernels() {

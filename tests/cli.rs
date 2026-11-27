@@ -67,12 +67,17 @@ fn a_held_lock_stops_a_second_command() {
     fs::create_dir_all(&folder).unwrap();
     let lock = File::create(folder.join(".lock")).unwrap();
     lock.try_lock().unwrap();
-    for command in ["setup", "update", "backup", "restore"] {
-        let out = rakazo_stack(home.path(), &[command]);
+    for command in [
+        &["setup"][..],
+        &["update"],
+        &["backup"],
+        &["restore", "backup.tar.age"],
+    ] {
+        let out = rakazo_stack(home.path(), command);
         assert!(!out.status.success());
         assert!(
             stderr(&out).contains("another rakazo-stack command is running"),
-            "{command}: {}",
+            "{command:?}: {}",
             stderr(&out)
         );
     }

@@ -198,13 +198,13 @@ pub fn evaluate(facts: &Facts) -> Vec<Finding> {
     findings
 }
 
-/// Re-runs of `setup` keep their recorded versions, so only a first `setup` and
-/// `update` look anything up on GitHub.
+/// Re-runs of `setup` keep their recorded versions, so only a first `setup`, `update` and
+/// `restore`, which fetches the compose file of the Backup's Rakazo release, need GitHub.
 fn needs_github(command: Command, first_setup: bool) -> bool {
     match command {
         Command::Setup => first_setup,
         Command::Update => true,
-        Command::Restore => false,
+        Command::Restore => true,
     }
 }
 
@@ -708,7 +708,7 @@ mod tests {
     }
 
     #[test]
-    fn github_is_needed_on_a_first_setup_and_update_only() {
+    fn github_is_needed_on_a_first_setup_update_and_restore() {
         let mut facts = good_facts(Platform::Linux);
         facts.github_reachable = Some(false);
         assert!(stops(&facts)[0].contains("GitHub"));
@@ -718,7 +718,7 @@ mod tests {
         facts.command = Command::Setup;
         assert!(stops(&facts).is_empty());
         facts.command = Command::Restore;
-        assert!(stops(&facts).is_empty());
+        assert!(!stops(&facts).is_empty());
     }
 
     #[test]

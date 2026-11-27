@@ -2080,3 +2080,364 @@ fn backup_writes_one_checked_file_and_the_instance_comes_back() {
     assert!(hindsight.status.success(), "{}", text(&hindsight));
     assert!(text(&hindsight).contains("memory_units"));
 }
+
+impl TestInstance {
+    /// `program` with this Instance's HOME, project and port, and none of the shell's
+    /// own `RAKAZO_STACK_*` variables.
+    fn restore_command(&self, program: &str, env: &[(&str, &str)]) -> Command {
+        self.egress_baseline();
+        let mut command = Command::new(program);
+        for (name, _) in std::env::vars_os() {
+            if name.as_encoded_bytes().starts_with(b"RAKAZO_STACK_") {
+                command.env_remove(name);
+            }
+        }
+        command
+            .env("HOME", self.home.path())
+            .env("RAKAZO_STACK_TEST_PROJECT", &self.project)
+            .env("RAKAZO_STACK_TEST_WEB_PORT", self.web_port.to_string())
+            .envs(env.iter().copied());
+        command
+    }
+
+    /// Runs `restore` with stdin closed, so there is no terminal, as a script runs it.
+    fn restore(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
+        self.restore_command(env!("CARGO_BIN_EXE_rakazo-stack"), env)
+            .arg("restore")
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .expect("run rakazo-stack")
+    }
+
+    /// Runs `restore` on a terminal that `script` gives it, with `typed` as its input.
+    fn restore_typing(&self, args: &[&str], env: &[(&str, &str)], typed: &str) -> Output {
+        let mut line = format!("'{}' restore", env!("CARGO_BIN_EXE_rakazo-stack"));
+        for arg in args {
+            line.push_str(&format!(" '{arg}'"));
+        }
+        let mut command = self.restore_command("script", env);
+        command
+            .args(["-qec", &line, "/dev/null"])
+            .env("SHELL", "/bin/sh");
+        with_stdin(command, typed.as_bytes())
+    }
+
+    fn volumes(&self) -> Vec<String> {
+        let out = docker()
+            .args(["volume", "ls", "-q", "--filter"])
+            .arg(format!("label=com.docker.compose.project={}", self.project))
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn in_supervisor(&self, script: &str) -> String {
+        let out = self.compose(&["exec", "-T", "supervisor", "sh", "-c", script]);
+        assert!(out.status.success(), "{}", text(&out));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// A file in a volume, read in a throwaway container of Rakazo's Postgres image.
+    fn read_from_volume(&self, volume: &str, path: &str) -> Output {
+        docker()
+            .args(["run", "--rm", "--network", "none", "-v"])
+            .arg(format!("{volume}:/v:ro"))
+            .args(["--entrypoint", "cat", &self.image_of("postgres")])
+            .arg(format!("/v/{path}"))
+            .output()
+            .unwrap()
+    }
+}
+
+/// Run inside `hindsight`: what a bank recalls for a query, which needs no LLM.
+const RECALL: &str = r#"
+import json, sys, urllib.request
+KEY = sys.stdin.readline().strip()
+bank, query = sys.argv[1:]
+req = urllib.request.Request("http://localhost:8888/v1/default/banks/%s/memories/recall" % bank, method="POST",
+    data=json.dumps({"query": query, "budget": "low"}).encode(),
+    headers={"Content-Type": "application/json", "Authorization": "Bearer " + KEY})
+with urllib.request.urlopen(req, timeout=600) as r:
+    print(json.dumps([m.get("text", "") for m in json.load(r).get("results", [])]))
+"#;
+
+const OLD_MACHINE_OFF: &str = "RAKAZO_STACK_OLD_MACHINE_OFF";
+const TAILSCALE_STATE: &str = "placeholder-tailscale-state";
+
+/// A Backup, the Instance torn down, and the Backup restored into a fresh HOME and
+/// project: the data, the secrets and the recorded versions come back, and setup's
+/// hand-over needs no Owner password. This proves the `rakazo_app` role step against
+/// Rakazo's images compose file. No `tailscale` container starts; the Backup holds a
+/// `tailscale-state` volume with a placeholder file instead.
+#[test]
+#[ignore = "needs Docker and pulls Rakazo's and Hindsight's images; CI and the dev machine run it with --include-ignored"]
+fn restore_brings_the_instance_back_on_its_recorded_versions() {
+    let kept = tempfile::tempdir().unwrap();
+    let backup = kept.path().join("rakazo-stack-backup.tar.age");
+    let bot = "rkst-restore-bot";
+    let (settings_before, secrets_before, home_sum) = {
+        let instance = TestInstance::new();
+        let folder = instance.folder();
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(
+            folder.join("secrets.env"),
+            format!("OPENROUTER_API_KEY={MODEL_KEY}\n"),
+        )
+        .unwrap();
+        let mut env = vec![
+            ("RAKAZO_STACK_OWNER_EMAIL", OWNER_EMAIL),
+            ("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD),
+        ];
+        env.extend(UNREACHABLE);
+        let first = instance.setup(&["--no-questions"], &env);
+        assert!(first.status.success(), "{}", text(&first));
+
+        let home_sum = instance.in_supervisor(&format!(
+            "mkdir -p /data/homes/{bot} && head -c 1000000 /dev/urandom > /data/homes/{bot}/random.bin \
+             && chown -R 1000:1000 /data/homes/{bot} && sha256sum /data/homes/{bot}/random.bin"
+        ));
+        instance.sql("CREATE TABLE rkst_restore_marker AS SELECT generate_series(1, 1000) AS n");
+        let tenant_key = instance.secret("HINDSIGHT_API_TENANT_API_KEY");
+        let seeded = instance.compose_with_stdin(
+            &[
+                "exec",
+                "-T",
+                "hindsight",
+                "python",
+                "-I",
+                "-c",
+                NEW_BANKS,
+                "restore-check",
+            ],
+            &format!("{tenant_key}\n"),
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&seeded.stdout).trim(),
+            r#"{"restore-check": [200, 200]}"#,
+            "{}",
+            text(&seeded)
+        );
+        let state = format!("{}_tailscale-state", instance.project);
+        let label = format!("com.docker.compose.project={}", instance.project);
+        let created = docker()
+            .args(["volume", "create", "--label", &label, &state])
+            .output()
+            .unwrap();
+        assert!(created.status.success(), "{}", text(&created));
+        let written = docker()
+            .args(["run", "--rm", "--network", "none", "-v"])
+            .arg(format!("{state}:/v"))
+            .args(["--entrypoint", "sh", &instance.image_of("postgres")])
+            .args([
+                "-c",
+                &format!("echo {TAILSCALE_STATE} > /v/tailscaled.state"),
+            ])
+            .output()
+            .unwrap();
+        assert!(written.status.success(), "{}", text(&written));
+
+        let out = instance.backup(Some(BACKUP_PASSPHRASE));
+        assert!(out.status.success(), "{}", text(&out));
+        fs::copy(&instance.backups()[0], &backup).unwrap();
+        let _ = docker().args(["volume", "rm", &state]).output();
+        (
+            fs::read(folder.join("settings.json")).unwrap(),
+            fs::read(folder.join("secrets.env")).unwrap(),
+            home_sum,
+        )
+    };
+    let settings_before: serde_json::Value = serde_json::from_slice(&settings_before).unwrap();
+    let backup_bytes = fs::read(&backup).unwrap();
+    let file = backup.to_str().unwrap();
+
+    let instance = TestInstance::new();
+    let folder = instance.folder();
+    let mut env = vec![("RAKAZO_STACK_BACKUP_PASSPHRASE", BACKUP_PASSPHRASE)];
+    env.extend(UNREACHABLE);
+
+    // A wrong passphrase, a damaged file, and no answer to the Tailscale question all
+    // stop before the machine changes.
+    let wrong = instance.restore(
+        &[file],
+        &[("RAKAZO_STACK_BACKUP_PASSPHRASE", "not-the-passphrase")],
+    );
+    assert!(!wrong.status.success());
+    assert!(
+        text(&wrong).contains("the passphrase doesn't open it"),
+        "{}",
+        text(&wrong)
+    );
+    let damaged = kept.path().join("damaged.tar.age");
+    let mut bytes = backup_bytes.clone();
+    let middle = bytes.len() / 2;
+    bytes[middle] ^= 1;
+    fs::write(&damaged, bytes).unwrap();
+    let out = instance.restore(&[damaged.to_str().unwrap()], &env);
+    assert!(!out.status.success(), "{}", text(&out));
+    let unanswered = instance.restore(&[file], &env);
+    assert!(!unanswered.status.success());
+    assert!(
+        text(&unanswered).contains(OLD_MACHINE_OFF),
+        "{}",
+        text(&unanswered)
+    );
+    assert!(
+        !folder.exists(),
+        "a refused restore left the Instance folder"
+    );
+    assert!(instance.volumes().is_empty(), "{:?}", instance.volumes());
+
+    let mut off_env = env.clone();
+    off_env.push((OLD_MACHINE_OFF, "yes"));
+    let out = instance.restore(&[file], &off_env);
+    let restored = text(&out);
+    println!("{restored}");
+    assert!(out.status.success(), "{restored}");
+    assert!(!restored.contains(BACKUP_PASSPHRASE));
+    for secret in secret_values(&folder) {
+        assert!(!restored.contains(&secret), "restore printed a secret");
+    }
+    assert!(
+        !checklist(&out)
+            .iter()
+            .any(|item| item.contains("RAKAZO_STACK_OWNER_PASSWORD")),
+        "{restored}"
+    );
+    assert_eq!(fs::read(&backup).unwrap(), backup_bytes);
+
+    // The recorded versions and digests, not the latest ones, and the same secrets.
+    assert_eq!(
+        fs::read(folder.join("secrets.env")).unwrap(),
+        secrets_before
+    );
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(folder.join("settings.json")).unwrap()).unwrap();
+    let components = &settings_before["components"];
+    assert_eq!(settings["components"], *components);
+    assert_eq!(
+        settings["filled_by_setup"],
+        settings_before["filled_by_setup"]
+    );
+    let rakazo = &components["rakazo"];
+    assert_eq!(
+        instance.service_env("web", "RAKAZO_IMAGE_TAG"),
+        format!(
+            "{}@{}",
+            rakazo["version"].as_str().unwrap(),
+            rakazo["images"]["app"].as_str().unwrap()
+        )
+    );
+    let configured = |service: &str| {
+        let out = docker()
+            .args(["inspect", "--format", "{{.Config.Image}}"])
+            .arg(format!("{}-{service}-1", instance.project))
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let hindsight = &components["hindsight"]["images"];
+    assert!(configured("hindsight").ends_with(hindsight["hindsight"].as_str().unwrap()));
+    assert!(configured("hindsight-db").ends_with(hindsight["hindsight-db"].as_str().unwrap()));
+
+    // The Owner signs in with the old password; rows, homes and memory are back.
+    let (status, _) = post_json(
+        &format!("{}/api/auth/sign-in/email", instance.origin()),
+        &serde_json::json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(
+        instance.sql("SELECT count(*) FROM rkst_restore_marker"),
+        "1000"
+    );
+    assert_eq!(
+        instance.sql("SELECT count(*) FROM space_memory_configs WHERE provider = 'hindsight'"),
+        "1"
+    );
+    assert_ne!(
+        instance.sql("SELECT count(*) FROM user_voice_credentials"),
+        "0"
+    );
+    assert_eq!(
+        instance.in_supervisor(&format!("sha256sum /data/homes/{bot}/random.bin")),
+        home_sum
+    );
+    assert_eq!(
+        instance.in_supervisor(&format!("stat -c %u:%g /data/homes/{bot}/random.bin")),
+        "1000:1000"
+    );
+    let tenant_key = instance.secret("HINDSIGHT_API_TENANT_API_KEY");
+    let recalled = instance.compose_with_stdin(
+        &[
+            "exec",
+            "-T",
+            "hindsight",
+            "python",
+            "-I",
+            "-c",
+            RECALL,
+            "restore-check",
+            "What does restore-check like to drink?",
+        ],
+        &format!("{tenant_key}\n"),
+    );
+    assert!(recalled.status.success(), "{}", text(&recalled));
+    assert!(text(&recalled).contains("green tea"), "{}", text(&recalled));
+    let state = format!("{}_tailscale-state", instance.project);
+    let read = instance.read_from_volume(&state, "tailscaled.state");
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout).trim(),
+        TAILSCALE_STATE
+    );
+
+    // An Instance here: without --replace, or with a wrong name, nothing changes.
+    let api_started = instance.started_at("api");
+    let refused = instance.restore(&[file], &off_env);
+    assert!(!refused.status.success());
+    assert!(
+        text(&refused).contains("an Instance is already here"),
+        "{}",
+        text(&refused)
+    );
+    let mistyped = instance.restore_typing(&["--replace", file], &off_env, "rakazo-stack\n");
+    assert!(!mistyped.status.success(), "{}", text(&mistyped));
+    assert!(
+        text(&mistyped).contains("the name didn't match"),
+        "{}",
+        text(&mistyped)
+    );
+    assert_eq!(instance.started_at("api"), api_started);
+    assert_eq!(
+        instance.sql("SELECT count(*) FROM rkst_restore_marker"),
+        "1000"
+    );
+
+    // --replace with the name, while the old machine still runs: the device stays out.
+    let mut on_env = env.clone();
+    on_env.push((OLD_MACHINE_OFF, "no"));
+    let replaced = instance.restore_typing(
+        &["--replace", file],
+        &on_env,
+        &format!("{}\n", instance.project),
+    );
+    let replaced_text = text(&replaced);
+    println!("{replaced_text}");
+    assert!(replaced.status.success(), "{replaced_text}");
+    assert_ne!(instance.started_at("api"), api_started);
+    assert_eq!(
+        instance.sql("SELECT count(*) FROM rkst_restore_marker"),
+        "1000"
+    );
+    assert!(
+        !instance.volumes().contains(&state),
+        "{:?}",
+        instance.volumes()
+    );
+    assert_eq!(
+        fs::read(folder.join("secrets.env")).unwrap(),
+        secrets_before
+    );
+}
