@@ -160,7 +160,7 @@ rakazo-stack installs the latest stable release of each Component, best effort, 
 - **Hindsight:** GitHub's latest release of `vectorize-io/hindsight`. Release `vX.Y.Z` maps to image tag `X.Y.Z` (Hindsight's tags have no `v`) ([#44](https://github.com/kamui/rakazo-stack/issues/44)). Tested on 1.3.0.
 - **`hindsight-db`:** `pgvector/pgvector:pg18`. It floats within PostgreSQL 18 (minors and security fixes), never to a new major ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 - **Lemonade:** GitHub's latest release of `lemonade-sdk/lemonade`. Linux/Windows use the image of that tag; macOS downloads the embeddable tarball and checks it against GitHub's published SHA-256 for that asset ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
-- **Tailscale:** the version behind the `stable` tag in the image registry, not GitHub releases, because images lag releases ([#24](https://github.com/kamui/rakazo-stack/issues/24)).
+- **Tailscale:** the version behind the `stable` tag in the image registry, not GitHub releases, because images lag releases ([#24](https://github.com/kamui/rakazo-stack/issues/24)). On Docker Hub, `tailscale/tailscale:stable` gives the digest, and its image index's `org.opencontainers.image.version` annotation gives the version: `1.104.7` is recorded as `v1.104.7` ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 - **Relay and sidecar bases:** fixed in each program release (for example `oven/bun:1.4.4-alpine`). The relay's ffmpeg comes from Alpine and is pinned loosely (`~=8.1`), because Alpine deletes old package versions ([#31](https://github.com/kamui/rakazo-stack/issues/31), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
 - **Recording.** `settings.json` records each Component's running version and image digest ([#32](https://github.com/kamui/rakazo-stack/issues/32)). Because no upstream tag stays put, the stack runs images by recorded digest (for example `RAKAZO_IMAGE_TAG=v0.15.0@sha256:…`), never by a moving tag ([#31](https://github.com/kamui/rakazo-stack/issues/31)).
 - **Lemonade models** change only with Lemonade's version: Lemonade runs with `auto_check_model_updates: false` ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
@@ -187,7 +187,7 @@ rakazo-stack installs the latest stable release of each Component, best effort, 
 - **Two compose files**, both in the Instance folder ([#10](https://github.com/kamui/rakazo-stack/issues/10), [#32](https://github.com/kamui/rakazo-stack/issues/32)):
   - `rakazo.<tag>.images.yml`: Rakazo's `infra/compose/docker-compose.images.yml` from the recorded tag, byte for byte.
   - `compose.stack.yaml`: rakazo-stack's layer, bundled in the program.
-- Setup writes `COMPOSE_FILE=rakazo.<tag>.images.yml:compose.stack.yaml`, `COMPOSE_PATH_SEPARATOR=:` and `COMPOSE_PROFILES` to `.env`, so plain `docker compose up -d` works from the Instance folder ([#10](https://github.com/kamui/rakazo-stack/issues/10)). The separator is spelled out because Windows' `docker.exe` otherwise splits `COMPOSE_FILE` on `;`.
+- Setup writes `COMPOSE_FILE=rakazo.<tag>.images.yml:compose.stack.yaml`, `COMPOSE_PATH_SEPARATOR=:` and `COMPOSE_PROFILES` to `.env`, so plain `docker compose up -d` works from the Instance folder ([#10](https://github.com/kamui/rakazo-stack/issues/10)). `COMPOSE_PROFILES` lists the profiles that are on, and is empty when none is ([#68](https://github.com/kamui/rakazo-stack/issues/68)). The separator is spelled out because Windows' `docker.exe` otherwise splits `COMPOSE_FILE` on `;`.
 - **Upstream's file is never edited.** Everything the stack changes goes through `.env` (which upstream's file already passes through) or the layer file (`!reset`, extra networks, extra services) ([#10](https://github.com/kamui/rakazo-stack/issues/10)).
 
 ### Profiles
@@ -209,7 +209,7 @@ rakazo-stack installs the latest stable release of each Component, best effort, 
 | `lemonade-relay` | built locally ([§9](#the-lemonade-relay)) | `stack`, `egress` | listens on `13306`; `UPSTREAM=${LEMONADE_UPSTREAM:-http://lemonade:13305}`; `LEMONADE_API_KEY`; not published | [#10, #17] |
 | `hindsight` | `ghcr.io/vectorize-io/hindsight-api:<X.Y.Z>@<digest>` (the full image, not `-slim`) | `stack`, `hindsight-data`, `egress` | listens on `8888`; `stop_grace_period: 75s`; healthcheck on `/health`; env in [§10](#hindsight-settings); not published | [#44, #45, #47] |
 | `hindsight-db` | `pgvector/pgvector:pg18@<digest>` | `hindsight-data` | `shm_size: 1g`; `POSTGRES_USER=hindsight`, `POSTGRES_DB=hindsight`, generated password; volume `hindsight-pgdata:/var/lib/postgresql`; healthcheck `pg_isready` | [#44, #48] |
-| `tailscale` | `tailscale/tailscale:<version>@<digest>` | `app` | `TS_USERSPACE=true`, `TS_AUTH_ONCE=true`, `TS_STATE_DIR=/var/lib/tailscale`, `TS_HOSTNAME`, `TS_AUTHKEY`, `TS_SERVE_CONFIG`; volume `tailscale-state` | [#8, #10, #24] |
+| `tailscale` | `tailscale/tailscale:<version>@<digest>` | `app` | `TS_USERSPACE=true`, `TS_AUTH_ONCE=true`, `TS_STATE_DIR=/var/lib/tailscale`, `TS_HOSTNAME`, `TS_AUTHKEY`, `TS_SERVE_CONFIG=/config/serve.json`; volume `tailscale-state`; not published. Upstream's compose file has its own opt-in `tailscale-ingress` service, with the variable `TAILSCALE_IMAGE`; the stack enables neither and uses other names | [#8, #10, #24, #68] |
 | `computer-egress` | built locally ([§12](#the-computer-egress-sidecar)) | `network_mode: host` | `cap_add: [NET_ADMIN]`, `restart: unless-stopped` | [#40](https://github.com/kamui/rakazo-stack/issues/40) |
 
 All long-running services use `restart: unless-stopped`.
@@ -265,6 +265,8 @@ Rakazo's `pgdata`, `appdata` and `webassets` (upstream), plus `lemonade-models`,
 | `RAKAZO_OPENAI_COMPAT_PRIVATE_HOSTS` | `lemonade-relay` | [#10](https://github.com/kamui/rakazo-stack/issues/10) |
 | `SANDBOX_COMPUTER_EGRESS` | `restricted` (never `auto`, never `open`) | [#25, #40] |
 | `BETTER_AUTH_URL`, `WEB_ORIGIN`, `API_URL`, `RAKAZO_HOST` | from the access mode ([§11](#11-access-localhost-tailscale-and-phones)) | [#8, #24] |
+| `TAILSCALE_IMAGE_TAG`, `TS_HOSTNAME` | Tailscale on: the recorded tag and digest, and the device name | ([#68](https://github.com/kamui/rakazo-stack/issues/68)) |
+| `TS_AUTHKEY` | Tailscale on, only until the Instance has joined ([§11](#tailscale)) | ([#68](https://github.com/kamui/rakazo-stack/issues/68)) |
 | `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`, `PI_DEFAULT_PROVIDER`, `PI_DEFAULT_MODEL` | OpenRouter or Anthropic only ([§8](#8-model-provider)) | [#36](https://github.com/kamui/rakazo-stack/issues/36) |
 | `COMPOSIO_API_KEY` | the pasted key, or blank | [#3](https://github.com/kamui/rakazo-stack/issues/3) |
 | `LEMONADE_UPSTREAM` | macOS only: `http://host.docker.internal:<lemond port>` | [#17](https://github.com/kamui/rakazo-stack/issues/17) |
@@ -302,14 +304,15 @@ Fixed at `~/rakazo-stack` on every OS, with no option to move it. On Windows tha
 
 JSON, rewritten by setup on every run ([#29](https://github.com/kamui/rakazo-stack/issues/29)). It holds:
 
-- The Self-hoster's choices: Model provider (no key), access mode, Tailscale device name, bring-your-own Instance URL, the Owner's email, whether memory is on ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
+- The Self-hoster's choices: Model provider (no key), access mode (`access`: `localhost`, `tailscale` or `bring-your-own`), Tailscale device name, bring-your-own Instance URL, the Owner's email, whether memory is on ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
 - Optional overrides: one Rakazo model and one memory model. Only overrides are stored; defaults belong to the program version ([#36](https://github.com/kamui/rakazo-stack/issues/36), [#51](https://github.com/kamui/rakazo-stack/issues/51)).
 - Recorded versions and image digests for each Component, and the program version that wrote it ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
+- Once the Instance has joined a tailnet, the `ts.net` name Tailscale assigned (`tailscale_dns_name`). Without it, joining needs an auth key ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 - Holds ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 - Which database-only settings setup filled in (the Owner's voice, the Owner's model connection, the default Space's memory), so a re-run can tell "removed in Rakazo" from "never set" ([#23](https://github.com/kamui/rakazo-stack/issues/23), [#36](https://github.com/kamui/rakazo-stack/issues/36)).
 - A failed Update, if the last one was rolled back ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 
-The schema so far; later slices add the fields above as they land:
+The schema so far; later slices add the fields above as they land. A bring-your-own Instance URL is `bring_your_own_url`. Switching to another access mode keeps the other modes' values, to pre-fill a switch back:
 
 ```json
 {
@@ -318,11 +321,15 @@ The schema so far; later slices add the fields above as they land:
   "owner_email": "owner@example.com",
   "model_provider": "openrouter",
   "filled_by_setup": ["owner"],
+  "access": "tailscale",
+  "tailscale_device_name": "rakazo",
+  "tailscale_dns_name": "rakazo.example.ts.net",
   "components": {
     "rakazo": {
       "version": "v0.16.0",
       "images": { "app": "sha256:…", "computer": "sha256:…" }
-    }
+    },
+    "tailscale": { "version": "v1.104.7", "digest": "sha256:…" }
   }
 }
 ```
@@ -354,13 +361,14 @@ The Model provider key, `COMPOSIO_API_KEY` and the Tailscale auth key ([#3](http
 
 - The Model provider key is `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`, after its provider. `secrets.env` holds only the chosen provider's: choosing another provider or `none` removes the old line ([#65](https://github.com/kamui/rakazo-stack/issues/65)).
 - Surrounding spaces are dropped from a pasted key. A key with a space, quote, backslash, backtick, `$`, `#` or non-ASCII character is invalid input, because it would change the meaning of its `.env` line ([#65](https://github.com/kamui/rakazo-stack/issues/65)).
+- The Tailscale auth key is `TS_AUTHKEY`. It is the one pasted key that isn't kept: once the Instance has joined, setup removes it from `secrets.env` and `.env`, because `tailscale-state` holds the device's identity ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 
 ## 7. `rakazo-stack setup`
 
 One re-runnable command. It is an interactive wizard on a first run and safe to re-run at any time to change things. A no-questions mode, `rakazo-stack setup --no-questions`, is for scripted runs and for `restore`'s hand-over ([#9](https://github.com/kamui/rakazo-stack/issues/9)). The wizard and the no-questions mode are two front ends to one set of answers ([#61](https://github.com/kamui/rakazo-stack/issues/61)):
 
 - **No-questions mode** takes each answer from its environment variable, then from `settings.json`, then the wizard's default. An answer with no default stops the run when neither gives it. So a first scripted run, with no `settings.json` yet, gives its choices as environment variables, and a scripted re-run can change a choice the same way.
-- **Environment variables** are `RAKAZO_STACK_` followed by the answer's name: `RAKAZO_STACK_OWNER_EMAIL`, `RAKAZO_STACK_OWNER_PASSWORD`, `RAKAZO_STACK_MODEL_PROVIDER`, and each pasted key under its `secrets.env` name ([§6](#pasted-keys)). Of the Model provider keys, only the chosen provider's variable is read. Later questions add theirs under the same scheme. The program removes every `RAKAZO_STACK_*` variable from the environment of the Docker commands it runs.
+- **Environment variables** are `RAKAZO_STACK_` followed by the answer's name: `RAKAZO_STACK_OWNER_EMAIL`, `RAKAZO_STACK_OWNER_PASSWORD`, `RAKAZO_STACK_MODEL_PROVIDER`, and each pasted key under its `secrets.env` name ([§6](#pasted-keys)). Of the Model provider keys, only the chosen provider's variable is read. The access questions are `RAKAZO_STACK_ACCESS` (`localhost`, `tailscale` or `bring-your-own`), `RAKAZO_STACK_TAILSCALE_DEVICE_NAME`, `RAKAZO_STACK_TS_AUTHKEY` and `RAKAZO_STACK_INSTANCE_URL` ([#68](https://github.com/kamui/rakazo-stack/issues/68)). Later questions add theirs under the same scheme. The program removes every `RAKAZO_STACK_*` variable from the environment of the Docker commands it runs.
 - **The wizard** needs a terminal. Without one, and without `--no-questions`, setup stops before changing anything.
 
 ### Questions
@@ -371,27 +379,27 @@ One re-runnable command. It is an interactive wizard on a first run and safe to 
 | Model provider | `openrouter` (default), `openai`, `gemini`, `anthropic` or `none`, typed | Pre-filled | [#36, #65] |
 | Model provider key | Not asked for `none`. Without echo; blank allowed. Checked with the provider before saving ([§8](#key-check)); a rejected key is never saved | "set, press Enter to keep" | [#9, #36, #65] |
 | Composio project API key | Blank allowed. Checked with Composio before saving; a rejected key is never saved | "set, press Enter to keep" | [#3, #9] |
-| Access | localhost only (default), or Tailscale | Pre-filled; switching warns first ([§11](#switching-the-instance-url)) | [#8](https://github.com/kamui/rakazo-stack/issues/8) |
-| Tailscale auth key and device name | A key that isn't ephemeral; device name default `rakazo` | Device name pre-filled with the name Tailscale actually assigned | [#8, #24] |
-| Bring-your-own Instance URL | Advanced, unsupported; mutually exclusive with Tailscale | Pre-filled | [#8](https://github.com/kamui/rakazo-stack/issues/8) |
+| Access | localhost only (default), Tailscale, or bring-your-own (advanced, unsupported) | Pre-filled; switching warns first ([§11](#switching-the-instance-url)) | [#8, #68] |
+| Tailscale auth key and device name | Only with Tailscale access. A key that isn't ephemeral, typed without echo; device name default `rakazo` | Device name pre-filled with the name Tailscale actually assigned. Once joined, Enter skips the key; a key saved before a join succeeded is "set, press Enter to keep" | [#8, #24, #68] |
+| Bring-your-own Instance URL | Only with bring-your-own access. Advanced, unsupported; mutually exclusive with Tailscale | Pre-filled | [#8, #68] |
 | Memory | On when a key is given; Enter keeps it on, `off` stops Hindsight but keeps its data | Pre-filled | [#9](https://github.com/kamui/rakazo-stack/issues/9) |
 
 The wizard asks no model questions. The model overrides are edited in `settings.json` ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
 
-Setup **stops before changing anything** on a failed preflight or invalid input: a short Owner password, no Tailscale auth key on a first join, a malformed bring-your-own URL, or a rejected key ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
+Setup **stops before changing anything** on a failed preflight or invalid input: a short Owner password, no Tailscale auth key on a first join, an auth key that setup can tell is ephemeral or isn't an auth key ([§11](#tailscale)), a malformed bring-your-own URL, `RAKAZO_STACK_INSTANCE_URL` set while the access mode isn't `bring-your-own`, a declined switch of the Instance URL, or a rejected key ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#68](https://github.com/kamui/rakazo-stack/issues/68)).
 
 ### First run, step by step
 
 1. **Lock and preflight** ([§3](#preflight)).
 2. **Questions** (wizard) or environment variables plus `settings.json` (no-questions mode). A first run always takes the Owner password here, which no-questions mode reads from `RAKAZO_STACK_OWNER_PASSWORD`; a scripted re-run reads it here only if that variable is set.
 3. **Check keys.** Model provider key, then on OpenRouter the ZDR only probe ([§8](#zdr-only-probe)), then the Composio key ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#36](https://github.com/kamui/rakazo-stack/issues/36), [#39](https://github.com/kamui/rakazo-stack/issues/39)).
-4. **Resolve versions** for every Component that will run, skipping releases without published images ([§4](#how-versions-are-resolved)).
+4. **Resolve versions** for every Component that will run, skipping releases without published images ([§4](#how-versions-are-resolved)). If Tailscale's version can't be looked up, the run carries on without Tailscale and adds a checklist item ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 5. **Write the Instance folder.** Generate missing secrets; write `secrets.env`, `settings.json`, the fetched Rakazo compose file and egress script, the bundled layer file and build folders, and `.env`; apply modes ([#29](https://github.com/kamui/rakazo-stack/issues/29), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
 6. **macOS only: native Lemonade** ([§9](#macos-native-lemond)): download and verify `lemond`, write the plist, load the LaunchAgent, set `whispercpp.backend=metal` ([#17](https://github.com/kamui/rakazo-stack/issues/17)).
 7. **Build and pull.** Build `lemonade-relay` and `computer-egress`; pull the other images by digest.
-8. **Start.** `docker compose up -d --wait` ([#32](https://github.com/kamui/rakazo-stack/issues/32)). On Windows, first force-recreate any of the Instance's containers that WSL's `docker` made ([below](#windows-docker-through-dockerexe)) ([#41](https://github.com/kamui/rakazo-stack/issues/41)).
+8. **Start.** `docker compose up -d --wait` ([#32](https://github.com/kamui/rakazo-stack/issues/32)). With Tailscale on, this step and step 7's pull name every service but `tailscale`, so its failure can't stop Rakazo; step 10 starts it ([#68](https://github.com/kamui/rakazo-stack/issues/68)). On Windows, first force-recreate any of the Instance's containers that WSL's `docker` made ([below](#windows-docker-through-dockerexe)) ([#41](https://github.com/kamui/rakazo-stack/issues/41)).
 9. **Voice models.** Linux and Windows: set `whispercpp.backend=cpu` against the running Lemonade, never `auto`, which picked Vulkan on a software renderer in [#24](https://github.com/kamui/rakazo-stack/issues/24) ([#1](https://github.com/kamui/rakazo-stack/issues/1)). After a free-disk check, pull and load `kokoro-v1` and that OS's Whisper model through the relay, then run one speech and one transcription so the first-load cost (17 s for Whisper on Metal) happens during setup ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#24](https://github.com/kamui/rakazo-stack/issues/24), [#42](https://github.com/kamui/rakazo-stack/issues/42)).
-10. **Tailscale** (if on): read the device name Tailscale assigned (for example `rakazo-1` on a clash), derive the Instance URL, and if it differs from what `.env` holds, rewrite `.env` and recreate Rakazo's services ([#8](https://github.com/kamui/rakazo-stack/issues/8)).
+10. **Tailscale** (if on): start `tailscale`, then read the device name Tailscale assigned (for example `rakazo-1` on a clash), derive the Instance URL, and if it differs from what `.env` holds, rewrite `.env` and recreate Rakazo's services ([#8](https://github.com/kamui/rakazo-stack/issues/8)). Details are in [§11](#tailscale).
 11. **Egress check.** Look for `restricted computer egress verified` in the supervisor log. If it's missing, add a checklist item that bot computers are off until it's fixed, with the cause. Never fall back to open egress ([#26](https://github.com/kamui/rakazo-stack/issues/26), [#40](https://github.com/kamui/rakazo-stack/issues/40)).
 12. **Database-only settings** ([below](#database-only-settings-in-rakazo)).
 13. **Checklist and update nudge** ([below](#the-checklist)).
@@ -400,6 +408,7 @@ Setup **stops before changing anything** on a failed preflight or invalid input:
 
 - Pre-fill every answer from `settings.json` and the running Instance ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
 - Keep recorded versions; only a Component switched on later starts at its latest version ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
+- Turning Tailscale **off**: Compose leaves a service whose profile is off running, so setup runs `docker compose --profile tailscale rm --stop --force tailscale`. `tailscale-state` is kept, so turning it on again rejoins as the same device with no key. A failed removal is a checklist item ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 - Never regenerate a secret; never print a pasted key ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
 - Rewrite the stack files and `.env`, re-apply file modes, and re-run steps 6–13 idempotently.
 - Turning memory **on** later: generate Hindsight's secrets, resolve and start Hindsight, connect the default Space ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
@@ -449,6 +458,7 @@ Every run ends with a checklist of what is left to do by hand ([#9](https://gith
 - Memory off but a Space still connected to Hindsight: that Space's owner disconnects it under **Settings → Memory**, because until then each reply first tries a recall that fails ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
 - Memory on: how to turn memory on in another Space: **Settings → Memory → Connect memory provider → Hindsight → Advanced → Self-hosted**, `http://hindsight:8888`, and the key from the `HINDSIGHT_API_TENANT_API_KEY` line in `~/rakazo-stack/secrets.env` ([#49](https://github.com/kamui/rakazo-stack/issues/49)).
 - Tailscale on: enable MagicDNS and HTTPS certificates in the Tailscale admin console, and turn off key expiry for the device ([#8](https://github.com/kamui/rakazo-stack/issues/8), [#24](https://github.com/kamui/rakazo-stack/issues/24)).
+- Tailscale didn't join, couldn't be looked up or couldn't be removed, with what to do; or it joined but the tailnet has MagicDNS or HTTPS certificates off, with `docker compose restart tailscale` to run after enabling them ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 - "For private dictation, use Firefox or the Rakazo desktop app" ([#15](https://github.com/kamui/rakazo-stack/issues/15)).
 - After an Update: any Component that became a checklist item ([§14](#failures)) ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 
@@ -654,11 +664,16 @@ Documented in one README FAQ; the stack changes nothing ([#45](https://github.co
 - localhost works fully, microphone included, because browsers treat localhost as secure ([#6](https://github.com/kamui/rakazo-stack/issues/6), [#8](https://github.com/kamui/rakazo-stack/issues/8)).
 - **Why `BETTER_AUTH_URL` stays on loopback with Tailscale:** Rakazo trusts only `WEB_ORIGIN`, `BETTER_AUTH_URL`, its mobile app origins and their loopback twins. With all four on `ts.net`, sign-in at localhost fails with 403 `INVALID_ORIGIN`. With `BETTER_AUTH_URL` on `127.0.0.1`, password sign-in works at both addresses. Costs: the session cookie loses `Secure` and its `__Secure-` prefix (it still travels only over HTTPS on the tailnet or over loopback), and passkeys work only at the `ts.net` address ([#24](https://github.com/kamui/rakazo-stack/issues/24)).
 - Bring-your-own: the proxy, certificates and firewall are the Self-hoster's. Mutually exclusive with Tailscale ([#8](https://github.com/kamui/rakazo-stack/issues/8)). `web` stays on `127.0.0.1:5173`, so the proxy must run on the same machine; setup doesn't offer a wider bind, and the docs say so ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
+- A bring-your-own Instance URL is `https://<host>`, with an optional port and no path, query or credentials. The host is an ASCII hostname or IPv4 address (an international domain in its `xn--` form; no IPv6 address). Setup lowercases it and drops a trailing `/` and the port `443`, as browsers write an origin. `RAKAZO_HOST` is the host without the port ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 
 ### Tailscale
 
 - A stack-managed `tailscale` container joins the Self-hoster's tailnet as its own device, in userspace mode. The host's own Tailscale, if any, isn't used ([#8](https://github.com/kamui/rakazo-stack/issues/8)).
 - Setup asks for a plain auth key that isn't ephemeral (Tailscale removes ephemeral machines after they go offline) and a device name, default `rakazo`. No tags, OAuth or ephemeral nodes. `TS_AUTH_ONCE` plus the `tailscale-state` volume keep the identity, so later restarts need no key ([#8](https://github.com/kamui/rakazo-stack/issues/8), [#24](https://github.com/kamui/rakazo-stack/issues/24)).
+- **What setup checks.** Whether an auth key is ephemeral is stored only on Tailscale's servers: neither the key nor the joined device shows it. Setup refuses an OAuth client secret (`tskey-client-…`, ephemeral by default), a key carrying `ephemeral=true`, and anything not of the form `tskey-auth-…`. An ephemeral `tskey-auth-` key is not detected, so the question and the docs say not to use one. A device name is one DNS label (up to 63 letters, digits and hyphens, not starting or ending with a hyphen), lowercased ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
+- **Joining** (step 10). Setup runs `docker compose up -d --no-deps tailscale` and polls `docker compose exec -T tailscale tailscale status --json --peers=false`, 45 times 2 s apart, until the state is `Running` under the requested name or a numbered variant of it. After a change of name it keeps waiting while the old name is reported, and takes whatever the device reports when the time is up, so a name set in the admin console wins. The Instance URL is `https://` plus `Self.DNSName` without its trailing dot ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
+- **After a join**, setup records the name, removes the auth key from `secrets.env` and `.env`, and, if `.env` changed, recreates Rakazo's services and `tailscale` and waits for the device again, now with no key. Until the first join, `.env` holds the localhost address settings ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
+- **A failure** to start or join is a checklist item and setup carries on. The auth key stays saved for the next run. Setup never prints the container's log or the raw status reply ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 - Serve gets a Let's Encrypt certificate and proxies HTTPS 443 to `http://web:5173`, keeping the `ts.net` Host header that Rakazo's `RAKAZO_HOST` check needs. Only Rakazo's web app is served; nothing else answers on the device ([#24](https://github.com/kamui/rakazo-stack/issues/24)).
 - One-time manual steps (checklist): enable MagicDNS and HTTPS certificates in the admin console (device names then appear in public Certificate Transparency logs), and turn off key expiry for the device ([#8](https://github.com/kamui/rakazo-stack/issues/8), [#24](https://github.com/kamui/rakazo-stack/issues/24)).
 - Anyone on the tailnet can open the Instance URL; Rakazo sign-in (sign-ups off) decides who uses it. Tailscale ACLs are documented as optional hardening ([#8](https://github.com/kamui/rakazo-stack/issues/8)).
@@ -666,7 +681,7 @@ Documented in one README FAQ; the stack changes nothing ([#45](https://github.co
 
 ### Switching the Instance URL
 
-A re-run can turn Tailscale on or off, or change the bring-your-own URL. Before it does, the wizard warns that this signs everyone out, breaks passkeys made on the old address, makes phones sign in again and leaves old email links stale, and asks to confirm. No data is lost ([#8](https://github.com/kamui/rakazo-stack/issues/8)). MCP servers connected with OAuth may need re-adding (unverified) ([#30](https://github.com/kamui/rakazo-stack/issues/30)).
+A re-run can turn Tailscale on or off, change a joined device's name, or change the bring-your-own URL. Before it does, the wizard warns that this signs everyone out, breaks passkeys made on the old address, makes phones sign in again and leaves old email links stale, and asks to confirm. No data is lost ([#8](https://github.com/kamui/rakazo-stack/issues/8)). MCP servers connected with OAuth may need re-adding (unverified) ([#30](https://github.com/kamui/rakazo-stack/issues/30)). The default answer is no, and declining stops the run before anything changes. No-questions mode prints the warning and carries on, because a changed variable is already a deliberate choice. A name that Tailscale changes by itself (a clash, or a rename in the admin console) is applied without asking ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 
 ### Phone apps
 
@@ -908,6 +923,7 @@ Each of these was decided from source, docs or a partial run and must pass durin
 - **Rakazo calls:** whether voice calls through Lemonade need the Owner's AI-recipient consent (`aiConsent`), which v0.16.0 requires for calls but not for chat or memory; if so, it becomes a checklist item ([#45](https://github.com/kamui/rakazo-stack/issues/45)). The exact path, body and detection query of the OpenAI/Gemini `models.connect` call, never run ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
 - **Memory models:** whether OpenAI's `gpt-6-luna` and Gemini's `gemini-3.5-flash-lite` allow the 64,000 output tokens Hindsight's fact extraction asks for; if not, setup lowers `HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS` for that provider ([#44](https://github.com/kamui/rakazo-stack/issues/44)).
 - **Composio:** whether it accepts a callback to `http://127.0.0.1:5173` or a `ts.net` Instance URL ([#3](https://github.com/kamui/rakazo-stack/issues/3), [#8](https://github.com/kamui/rakazo-stack/issues/8)).
+- **Tailscale through setup:** with a real auth key, the Instance answering at its `ts.net` address from another device with a valid certificate; password sign-in at both addresses; only the web app answering on the device; a device-name clash ending on the assigned name; the rejoin with no key after the container is recreated; switching off; and the checklist item with HTTPS certificates off. The container's own behaviour was tested by hand on Windows in [#24](https://github.com/kamui/rakazo-stack/issues/24) ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 - **Phones:** Rakazo's phone app with `BETTER_AUTH_URL` on localhost ([#24](https://github.com/kamui/rakazo-stack/issues/24)). Android end to end is optional: v1 documents Android as untested, and the check runs only if an Android phone is at hand ([#28](https://github.com/kamui/rakazo-stack/issues/28), [#79](https://github.com/kamui/rakazo-stack/issues/79)).
 
 ## 20. Known limitations to document
@@ -938,5 +954,4 @@ No ticket fixes these names. The implementation picks them, and the docs then st
 - the variable name for Hindsight's database password in `secrets.env`;
 - the names of the locally built relay and sidecar images;
 - the update-check timestamp file and the Backup file's extension;
-- the rest of `settings.json`'s schema (its start is in [§6](#settingsjson));
-- whether the Tailscale auth key is kept in `secrets.env` after the first join.
+- the rest of `settings.json`'s schema (its start is in [§6](#settingsjson)).

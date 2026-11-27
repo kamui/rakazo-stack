@@ -4,3 +4,34 @@ services:
   api:
     # The web app proxies /api and /rpc, so the API port stays unpublished (spec §5).
     ports: !reset []
+
+  tailscale:
+    profiles: [tailscale]
+    # `.env` holds the recorded version and digest whenever the profile is on.
+    image: tailscale/tailscale:${TAILSCALE_IMAGE_TAG:-not-recorded}
+    restart: unless-stopped
+    environment:
+      TS_USERSPACE: "true"
+      TS_AUTH_ONCE: "true"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_HOSTNAME: ${TS_HOSTNAME:-rakazo}
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_SERVE_CONFIG: /config/serve.json
+    configs:
+      - source: tailscale-serve
+        target: /config/serve.json
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    networks: [app]
+
+configs:
+  tailscale-serve:
+    # `$$` leaves ${TS_CERT_DOMAIN} for Tailscale to fill in.
+    content: |
+      {
+        "TCP": { "443": { "HTTPS": true } },
+        "Web": { "$${TS_CERT_DOMAIN}:443": { "Handlers": { "/": { "Proxy": "http://web:5173" } } } }
+      }
+
+volumes:
+  tailscale-state:

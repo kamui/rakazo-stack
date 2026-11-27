@@ -133,7 +133,7 @@ pub fn save_key(secrets: &mut Secrets, chosen: Option<(Provider, &PastedKey)>) {
 }
 
 /// Rakazo's Instance-wide chat model, which setup writes to `.env`.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ChatModel<'a> {
     pub provider: Provider,
     pub key: &'a PastedKey,

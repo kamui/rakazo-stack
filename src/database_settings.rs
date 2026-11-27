@@ -124,6 +124,7 @@ fn owner_not_created(reason: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::access::{AccessMode, AuthKey, AuthKeyState};
     use crate::answers::{InputError, Prompt, Wizard};
     use crate::model_provider::{Choice, Provider};
     use crate::secrets::PastedKey;
@@ -198,6 +199,24 @@ mod tests {
         }
         fn add_back(&mut self, _: &str) -> bool {
             panic!("asked to add back")
+        }
+        fn access(&mut self, _: AccessMode) -> Result<String, InputError> {
+            panic!("asked for the access mode")
+        }
+        fn device_name(&mut self, _: &str) -> Result<String, InputError> {
+            panic!("asked for the device name")
+        }
+        fn auth_key(&mut self, _: AuthKeyState) -> Result<Option<AuthKey>, InputError> {
+            panic!("asked for the auth key")
+        }
+        fn instance_url(&mut self, _: Option<&str>) -> Result<String, InputError> {
+            panic!("asked for the Instance URL")
+        }
+        fn offers_instance_url(&self) -> bool {
+            panic!("asked about the Instance URL")
+        }
+        fn confirm_switch(&mut self, _: &str) -> bool {
+            panic!("asked to switch")
         }
     }
 

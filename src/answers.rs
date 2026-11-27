@@ -5,12 +5,17 @@
 use std::fmt;
 use std::io::{BufRead, IsTerminal, Write};
 
+use crate::access::{AccessError, AccessMode, AuthKey, AuthKeyState};
 use crate::model_provider::{Choice, PROVIDER_VAR, Provider};
 use crate::secrets::{PastedKey, Secrets};
 
 pub const NO_QUESTIONS_OPTION: &str = "--no-questions";
 pub const OWNER_EMAIL_VAR: &str = "RAKAZO_STACK_OWNER_EMAIL";
 pub const OWNER_PASSWORD_VAR: &str = "RAKAZO_STACK_OWNER_PASSWORD";
+pub const ACCESS_VAR: &str = "RAKAZO_STACK_ACCESS";
+pub const DEVICE_NAME_VAR: &str = "RAKAZO_STACK_TAILSCALE_DEVICE_NAME";
+pub const AUTH_KEY_VAR: &str = "RAKAZO_STACK_TS_AUTHKEY";
+pub const INSTANCE_URL_VAR: &str = "RAKAZO_STACK_INSTANCE_URL";
 
 /// Rakazo's own bounds, counted in UTF-16 code units as its JavaScript does:
 /// `bootstrap-owner` refuses fewer than 16 and sign-in refuses more than 128.
@@ -30,6 +35,13 @@ pub enum InputError {
     UnknownProvider,
     InvalidKey(Provider),
     InvalidSavedKey(Provider),
+    Access(AccessError),
+}
+
+impl From<AccessError> for InputError {
+    fn from(err: AccessError) -> Self {
+        Self::Access(err)
+    }
 }
 
 impl fmt::Display for InputError {
@@ -72,6 +84,7 @@ impl fmt::Display for InputError {
                 "the {} line in secrets.env isn't a usable key. Correct or remove it.",
                 provider.key_name()
             ),
+            Self::Access(err) => err.fmt(f),
         }
     }
 }
@@ -152,6 +165,16 @@ pub trait FrontEnd {
     fn check_zdr_again(&mut self) -> bool;
     /// "… was removed in Rakazo. Add it back? [y/N]"
     fn add_back(&mut self, question: &str) -> bool;
+    fn access(&mut self, recorded: AccessMode) -> Result<String, InputError>;
+    /// `current` is the recorded name, or the default.
+    fn device_name(&mut self, current: &str) -> Result<String, InputError>;
+    /// A newly given auth key; `None` keeps what the Instance has.
+    fn auth_key(&mut self, state: AuthKeyState) -> Result<Option<AuthKey>, InputError>;
+    fn instance_url(&mut self, recorded: Option<&str>) -> Result<String, InputError>;
+    /// Whether an Instance URL arrives whether or not it's asked for.
+    fn offers_instance_url(&self) -> bool;
+    /// Shows the warning and says whether to switch the Instance URL.
+    fn confirm_switch(&mut self, warning: &str) -> bool;
 }
 
 /// Step 2: stops on invalid input, before anything changes.
@@ -247,6 +270,39 @@ impl<F: Fn(&str) -> Option<String>> FrontEnd for NoQuestions<F> {
     fn add_back(&mut self, _question: &str) -> bool {
         false
     }
+
+    fn access(&mut self, recorded: AccessMode) -> Result<String, InputError> {
+        Ok(self
+            .var(ACCESS_VAR)
+            .unwrap_or_else(|| recorded.as_str().to_string()))
+    }
+
+    fn device_name(&mut self, current: &str) -> Result<String, InputError> {
+        Ok(self
+            .var(DEVICE_NAME_VAR)
+            .unwrap_or_else(|| current.to_string()))
+    }
+
+    fn auth_key(&mut self, _state: AuthKeyState) -> Result<Option<AuthKey>, InputError> {
+        let key = self.var(AUTH_KEY_VAR);
+        Ok(key.map(|key| AuthKey::parse(&key)).transpose()?)
+    }
+
+    fn instance_url(&mut self, recorded: Option<&str>) -> Result<String, InputError> {
+        self.var(INSTANCE_URL_VAR)
+            .or_else(|| recorded.map(str::to_string))
+            .ok_or_else(|| AccessError::MissingUrl.into())
+    }
+
+    fn offers_instance_url(&self) -> bool {
+        self.var(INSTANCE_URL_VAR).is_some()
+    }
+
+    /// A scripted change of choice is already deliberate, so it only warns.
+    fn confirm_switch(&mut self, warning: &str) -> bool {
+        println!("{warning}");
+        true
+    }
 }
 
 /// How the wizard reads a line. `secret` doesn't echo.
@@ -260,6 +316,24 @@ pub struct Wizard<P: Prompt> {
 }
 
 impl<P: Prompt> Wizard<P> {
+    /// An answer where Enter takes what's shown in brackets.
+    fn prefilled(&mut self, question: &str, current: &str) -> Result<String, InputError> {
+        let answer = self
+            .prompt
+            .line(&format!("{question} [{current}]: "))
+            .ok_or(InputError::NoAnswer)?;
+        Ok(match answer.trim() {
+            "" => current.to_string(),
+            answer => answer.to_string(),
+        })
+    }
+
+    fn yes(&mut self, question: &str) -> bool {
+        self.prompt
+            .line(&format!("{question} [y/N] "))
+            .is_some_and(|answer| matches!(answer.trim(), "y" | "Y" | "yes" | "Yes"))
+    }
+
     fn new_password(&mut self) -> Result<Password, InputError> {
         let question = format!("Owner password (at least {PASSWORD_MIN} characters): ");
         let first = self.prompt.secret(&question).ok_or(InputError::NoAnswer)?;
@@ -346,9 +420,53 @@ impl<P: Prompt> FrontEnd for Wizard<P> {
     }
 
     fn add_back(&mut self, question: &str) -> bool {
-        self.prompt
-            .line(&format!("{question} [y/N] "))
-            .is_some_and(|answer| matches!(answer.trim(), "y" | "Y" | "yes" | "Yes"))
+        self.yes(question)
+    }
+
+    fn access(&mut self, recorded: AccessMode) -> Result<String, InputError> {
+        self.prefilled(
+            "Access: localhost, tailscale, or bring-your-own (advanced, unsupported)",
+            recorded.as_str(),
+        )
+    }
+
+    fn device_name(&mut self, current: &str) -> Result<String, InputError> {
+        self.prefilled("Tailscale device name", current)
+    }
+
+    fn auth_key(&mut self, state: AuthKeyState) -> Result<Option<AuthKey>, InputError> {
+        let question = match state {
+            AuthKeyState::Needed => "Tailscale auth key (not ephemeral): ",
+            AuthKeyState::Saved => {
+                "Tailscale auth key: set, press Enter to keep, or paste a new one: "
+            }
+            AuthKeyState::Joined => {
+                "Tailscale auth key (this Instance has joined; press Enter, or paste a new one to join again): "
+            }
+        };
+        let answer = self.prompt.secret(question).ok_or(InputError::NoAnswer)?;
+        match answer.trim() {
+            "" => Ok(None),
+            key => Ok(Some(AuthKey::parse(key)?)),
+        }
+    }
+
+    fn instance_url(&mut self, recorded: Option<&str>) -> Result<String, InputError> {
+        match recorded {
+            Some(url) => self.prefilled("Instance URL", url),
+            None => self
+                .prompt
+                .line("Instance URL (https://…): ")
+                .ok_or(InputError::NoAnswer),
+        }
+    }
+
+    fn offers_instance_url(&self) -> bool {
+        false
+    }
+
+    fn confirm_switch(&mut self, warning: &str) -> bool {
+        self.yes(&format!("{warning}\nSwitch?"))
     }
 }
 

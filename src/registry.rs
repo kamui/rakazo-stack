@@ -1,8 +1,12 @@
-//! Reads image digests from GHCR without pulling anything.
+//! Reads image digests from GHCR and Docker Hub without pulling anything.
+
+use std::collections::HashMap;
 
 use serde::Deserialize;
 
 use crate::http::HttpError;
+use crate::settings::RecordedImage;
+use crate::version::Version;
 
 const MANIFEST_TYPES: &str = "application/vnd.oci.image.index.v1+json, \
      application/vnd.docker.distribution.manifest.list.v2+json, \
@@ -48,6 +52,54 @@ impl<'a> Ghcr<'a> {
     }
 }
 
+/// The release behind Docker Hub's `tailscale/tailscale:stable`. GitHub releases run
+/// ahead of the images, so the registry decides (spec §4).
+pub fn tailscale_stable(agent: &ureq::Agent) -> Result<RecordedImage, HttpError> {
+    let token_url = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:tailscale/tailscale:pull";
+    let body = crate::http::get_bytes(agent, token_url)?;
+    let token = parse_token(&body)
+        .ok_or_else(|| HttpError(format!("{token_url}: no token in the reply")))?;
+    let url = "https://registry-1.docker.io/v2/tailscale/tailscale/manifests/stable";
+    let fail = |reason: String| HttpError(format!("{url}: {reason}"));
+    let mut response = agent
+        .get(url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .header("Accept", MANIFEST_TYPES)
+        .call()
+        .map_err(|err| fail(err.to_string()))?;
+    let status = response.status();
+    if status != 200 {
+        return Err(fail(format!("HTTP {status}")));
+    }
+    let digest = response
+        .headers()
+        .get("docker-content-digest")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+        .ok_or_else(|| fail("no digest in the reply".to_string()))?;
+    let manifest = response
+        .body_mut()
+        .read_to_vec()
+        .map_err(|err| fail(err.to_string()))?;
+    let version = annotated_version(&manifest)
+        .ok_or_else(|| fail("no version annotation in the manifest".to_string()))?;
+    Ok(RecordedImage { version, digest })
+}
+
+/// The release tag, from the image index's version annotation: `1.2.3` is tag `v1.2.3`.
+fn annotated_version(manifest: &[u8]) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Manifest {
+        annotations: HashMap<String, String>,
+    }
+    let mut manifest: Manifest = serde_json::from_slice(manifest).ok()?;
+    let version = manifest
+        .annotations
+        .remove("org.opencontainers.image.version")?;
+    let numeric = version.chars().all(|c| c.is_ascii_digit() || c == '.');
+    (numeric && Version::parse(&version).is_some()).then(|| format!("v{version}"))
+}
+
 fn parse_token(body: &[u8]) -> Option<String> {
     #[derive(Deserialize)]
     struct Token {
@@ -58,7 +110,24 @@ fn parse_token(body: &[u8]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_token;
+    use super::{annotated_version, parse_token};
+
+    #[test]
+    fn reads_the_version_behind_tailscales_stable_tag() {
+        // From the `stable` image index on Docker Hub, shortened.
+        let index = br#"{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json",
+            "manifests":[],"annotations":{"org.opencontainers.image.vendor":"Tailscale",
+            "org.opencontainers.image.version":"1.104.7"}}"#;
+        assert_eq!(annotated_version(index).as_deref(), Some("v1.104.7"));
+        for bad in [
+            r#"{"schemaVersion":2}"#,
+            r#"{"annotations":{}}"#,
+            r#"{"annotations":{"org.opencontainers.image.version":"stable"}}"#,
+            r#"{"annotations":{"org.opencontainers.image.version":"1.2\nX=y"}}"#,
+        ] {
+            assert_eq!(annotated_version(bad.as_bytes()), None, "{bad}");
+        }
+    }
 
     #[test]
     fn reads_the_anonymous_pull_token() {

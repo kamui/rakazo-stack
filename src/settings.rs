@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::access::{AccessMode, DEFAULT_DEVICE_NAME};
 use crate::database_settings::DatabaseSetting;
 use crate::model_provider::Choice;
 use crate::resolve::RakazoRelease;
@@ -25,12 +26,31 @@ pub struct Settings {
     /// Rakazo" from "never set" (spec §7).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filled_by_setup: Vec<DatabaseSetting>,
+    #[serde(default)]
+    pub access: AccessMode,
+    /// The requested name until Tailscale assigns one, then the assigned name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tailscale_device_name: Option<String>,
+    /// `<device>.<tailnet>.ts.net`, recorded once the Instance has joined a tailnet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tailscale_dns_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bring_your_own_url: Option<String>,
     pub components: Components,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Components {
     pub rakazo: RecordedRakazo,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tailscale: Option<RecordedImage>,
+}
+
+/// A Component that runs one image.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordedImage {
+    pub version: String,
+    pub digest: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +74,10 @@ impl Settings {
             model_provider: None,
             rakazo_model: None,
             filled_by_setup: Vec::new(),
+            access: AccessMode::default(),
+            tailscale_device_name: None,
+            tailscale_dns_name: None,
+            bring_your_own_url: None,
             components: Components {
                 rakazo: RecordedRakazo {
                     version: release.tag.clone(),
@@ -62,6 +86,7 @@ impl Settings {
                         computer: release.computer_digest.clone(),
                     },
                 },
+                tailscale: None,
             },
         }
     }
@@ -74,6 +99,12 @@ impl Settings {
         let mut text = serde_json::to_string_pretty(self).expect("settings serialize");
         text.push('\n');
         text
+    }
+
+    pub fn device_name(&self) -> &str {
+        self.tailscale_device_name
+            .as_deref()
+            .unwrap_or(DEFAULT_DEVICE_NAME)
     }
 
     pub fn rakazo_release(&self) -> RakazoRelease {
@@ -102,6 +133,26 @@ mod tests {
         assert_eq!(Settings::parse(&text).unwrap(), settings);
         assert_eq!(settings.rakazo_release().computer_digest, "sha256:ccc");
         assert!(!text.contains("owner_email"));
+    }
+
+    #[test]
+    fn records_the_access_choice_and_older_files_stay_on_localhost() {
+        let older = r#"{"schema":1,"program_version":"0.1.0","components":{"rakazo":{"version":"v0.16.0","images":{"app":"sha256:aaa","computer":"sha256:ccc"}}}}"#;
+        let mut settings = Settings::parse(older).unwrap();
+        assert_eq!(settings.access, AccessMode::Localhost);
+        assert_eq!(settings.components.tailscale, None);
+
+        settings.access = AccessMode::BringYourOwn;
+        settings.bring_your_own_url = Some("https://rakazo.example.com".into());
+        settings.tailscale_device_name = Some("rakazo".into());
+        settings.tailscale_dns_name = Some("rakazo.example.ts.net".into());
+        settings.components.tailscale = Some(RecordedImage {
+            version: "v1.104.7".into(),
+            digest: "sha256:ttt".into(),
+        });
+        let text = settings.to_json();
+        assert!(text.contains("\"access\": \"bring-your-own\""), "{text}");
+        assert_eq!(Settings::parse(&text).unwrap(), settings);
     }
 
     #[test]

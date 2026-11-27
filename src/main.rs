@@ -1,3 +1,4 @@
+mod access;
 mod answers;
 mod checklist;
 mod database_settings;
@@ -17,6 +18,7 @@ mod runlog;
 mod secrets;
 mod settings;
 mod setup;
+mod tailscale;
 mod version;
 
 use std::path::PathBuf;
