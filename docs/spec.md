@@ -112,7 +112,7 @@ On Windows and macOS the Instance runs only while the Self-hoster is signed in, 
 
 ### Preflight
 
-Every `setup`, `update` and `restore` run starts with preflight. A **stop** ends the run before anything on the machine changes. A **warn** prints a warning and carries on. Nothing in preflight is fixed automatically.
+Every `setup`, `update` and `restore` run starts with preflight; `backup` takes only the lock ([§15](#15-rakazo-stack-backup)). A **stop** ends the run before anything on the machine changes. A **warn** prints a warning and carries on. Nothing in preflight is fixed automatically.
 
 | Check | Result | Ticket |
 |---|---|---|
@@ -800,7 +800,7 @@ Sources: ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#42](https://
 
 ### Options
 
-- `--yes` skips both questions. With `--yes` and no Backup passphrase in the environment, `update` stops before changing anything.
+- `--yes` skips both questions. With `--yes` and no Backup passphrase in the environment (`RAKAZO_STACK_BACKUP_PASSPHRASE`, [§15](#file-and-encryption)), `update` stops before changing anything.
 - `--no-backup` skips the Backup; refused when Postgres moves.
 - `--hold <component>=<version>`, `--unhold <component>` ([§4](#floors-and-holds)).
 - If GitHub can't be reached, `update` stops with nothing changed.
@@ -823,7 +823,7 @@ Sources: ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 
 ## 15. `rakazo-stack backup`
 
-Asks nothing, so `update` and cron can run it. Manual only: the program installs no scheduler; the docs show a cron example for Linux ([#30](https://github.com/kamui/rakazo-stack/issues/30)).
+Asks nothing but the passphrase, and only when `RAKAZO_STACK_BACKUP_PASSPHRASE` is unset, so `update` and cron can run it. Manual only: the program installs no scheduler; the docs show a cron example for Linux ([#30](https://github.com/kamui/rakazo-stack/issues/30)). It runs no preflight: it takes the lock and works on the Instance as it runs ([#71](https://github.com/kamui/rakazo-stack/issues/71)).
 
 ### What a Backup holds
 
@@ -838,21 +838,37 @@ Asks nothing, so `update` and cron can run it. Manual only: the program installs
 
 Sources: ([#30](https://github.com/kamui/rakazo-stack/issues/30), [#32](https://github.com/kamui/rakazo-stack/issues/32), [#44](https://github.com/kamui/rakazo-stack/issues/44)).
 
+Inside, the Backup is one tar archive holding these files, in this order ([#71](https://github.com/kamui/rakazo-stack/issues/71)):
+
+| File | What it is |
+|---|---|
+| `manifest.json` | `format` (1), the `program_version` that wrote it, `created` (UTC, `YYYYMMDDTHHMMSSZ`) and `components`, a copy of `settings.json`'s recorded versions and digests |
+| `settings.json`, `secrets.env` | The two files, byte for byte |
+| `rakazo.dump` | `pg_dump -Fc` of Rakazo's database |
+| `hindsight.dump` | `pg_dump -Fc` of `hindsight-db`, when `hindsight-pgdata` exists |
+| `appdata.tar` | GNU tar of `appdata`, with numeric owners |
+| `tailscale-state.tar` | GNU tar of `tailscale-state`, when the volume exists |
+
 ### How it runs
 
-1. Lock.
-2. Stop Rakazo's `api`, `worker` and `supervisor`, and the bot computers (not Compose services; found by the `rakazo.managed=true` label). Postgres keeps running.
-3. With memory off but `hindsight-pgdata` kept, start `hindsight-db` alone for its dump and stop it afterwards ([#1](https://github.com/kamui/rakazo-stack/issues/1)). Dump each database inside its container: `docker compose exec -T <service> pg_dump -Fc --no-owner --no-privileges …` (without `-T`, terminal allocation corrupts the dump). Postgres volumes are never copied, so dumps survive Postgres major moves and moves between OSes.
-4. Archive `appdata` (and `tailscale-state`) in a throwaway Linux container with GNU tar. Dumping first means every row has its file.
-5. Start everything again (unless `update` asked to keep Rakazo stopped).
-6. **Self-check:** decrypt the file, run `pg_restore --list` on each dump, list the archives and check every pipe step's exit code. On any failure, delete the file and exit with an error.
+1. Lock, then the passphrase: from `RAKAZO_STACK_BACKUP_PASSPHRASE`, or typed twice on a terminal. With neither, the run stops before anything changes.
+2. Stop whichever of Rakazo's `api`, `worker` and `supervisor` are running, and the running bot computers (not Compose services; found by the `rakazo.managed=true` label and a mount of the Instance's `appdata` volume, so another Instance's computers on the same engine are left alone). Postgres, `web`, Hindsight's API and Tailscale keep running.
+3. With memory off but `hindsight-pgdata` kept, start `hindsight-db` alone for its dump and remove its container afterwards, as setup leaves it ([#1](https://github.com/kamui/rakazo-stack/issues/1)). `.env` has no `hindsight-db` image while memory is off, so Compose gets a second env file, `.backup.env` in the Instance folder, holding only `HINDSIGHT_DB_IMAGE_TAG` from `settings.json`, and deleted afterwards. Dump each database inside its container: `docker compose exec -T <service> pg_dump -Fc --no-owner --no-privileges …` (without `-T`, terminal allocation corrupts the dump). Postgres volumes are never copied, so dumps survive Postgres major moves and moves between OSes.
+4. Archive `appdata` (and `tailscale-state`) in a throwaway container of Rakazo's own `postgres` image, which is Debian's and has GNU tar, on no network, with the volume mounted read-only. `staging/` and `mcp-packages/` are left out only at the top of `appdata`: `--anchored --exclude=./staging --exclude=./mcp-packages`. Dumping first means every row has its file.
+5. Start again what step 2 stopped, unless `update` asked to keep Rakazo stopped: `docker compose up -d --no-recreate --wait` for the services, then `docker start` for the bot computers. The run prints how long Rakazo was stopped. A failure in steps 2–4 still starts them again.
+6. Write the file. Each part waits in a spool folder in the output folder until then, because a tar header needs its size first. The spool is encrypted to an `age` key that only the running program holds, so a run that dies leaves nothing readable, even on an `--output` drive.
+7. **Self-check:** decrypt the file and read every part back: `pg_restore --list` on each dump, in a throwaway container of the image that made it, `tar --list` on each archive, and a byte comparison for the three small files. Every pipe step's exit code is checked, a file cut short fails `age`'s last-chunk check, and every part written must be there. The file is written as `.<name>.partial` and renamed only once it passes; on any failure it is deleted and the run exits with an error.
 
-Sources: ([#30](https://github.com/kamui/rakazo-stack/issues/30), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
+On WSL every call goes through `docker.exe`, and secrets never go in arguments or the environment: dumps and archives come back on standard output, and the self-check sends parts on standard input.
+
+**Measured** on WSL 2 with Docker Desktop, on a test Instance with memory on, one bot computer, 20 MB of random data in its home and a 10,000-row table ([#71](https://github.com/kamui/rakazo-stack/issues/71)): the Backup was 20.7 MB, so beyond its data an Instance adds well under 1 MB, and Rakazo was stopped for 35 s. With memory off, starting `hindsight-db` alone made it 42 s. The stop lasts from stopping the writers until `up --wait` reports them healthy and the bot computers have started; writing and checking the file come after it.
+
+Sources: ([#30](https://github.com/kamui/rakazo-stack/issues/30), [#32](https://github.com/kamui/rakazo-stack/issues/32), [#71](https://github.com/kamui/rakazo-stack/issues/71)).
 
 ### File and encryption
 
-- One file per Backup, named `rakazo-stack-backup-<timestamp>`, in `~/rakazo-stack-backups/` (mode 700, outside the Instance folder), or `--output <dir>` ([#30](https://github.com/kamui/rakazo-stack/issues/30)).
-- Always encrypted with a passphrase the Self-hoster picks, in the `age` format, implemented inside the program. The `age` CLI can still decrypt it by hand. No unencrypted option: bot computer homes hold logged-in browser profiles and CLI tokens. In no-questions use the passphrase comes from an environment variable. A lost passphrase makes the Backup unusable, and the docs say so ([#30](https://github.com/kamui/rakazo-stack/issues/30)).
+- One file per Backup, named `rakazo-stack-backup-<UTC time>.tar.age` (for example `rakazo-stack-backup-20261127T120101Z.tar.age`), mode 600, in `~/rakazo-stack-backups/` (mode 700, outside the Instance folder), or `--output <dir>`, which is created at mode 700 when missing and otherwise keeps its mode ([#30](https://github.com/kamui/rakazo-stack/issues/30), [#71](https://github.com/kamui/rakazo-stack/issues/71)). The extension names both tools that open it by hand: `age --decrypt -o backup.tar <file>`, then `tar -xf backup.tar`.
+- Always encrypted with a passphrase the Self-hoster picks, in the `age` format (its scrypt passphrase recipient), implemented inside the program with the `age` crate. The `age` CLI can still decrypt it by hand. No unencrypted option: bot computer homes hold logged-in browser profiles and CLI tokens. In no-questions use the passphrase comes from `RAKAZO_STACK_BACKUP_PASSPHRASE`; an empty value counts as unset. The passphrase is never printed or logged. A lost passphrase makes the Backup unusable, and the docs say so ([#30](https://github.com/kamui/rakazo-stack/issues/30), [#71](https://github.com/kamui/rakazo-stack/issues/71)).
 - The program never deletes or rotates Backups ([#30](https://github.com/kamui/rakazo-stack/issues/30)).
 
 ## 16. `rakazo-stack restore`
@@ -965,7 +981,7 @@ Each of these was decided from source, docs or a partial run and must pass durin
 - **macOS:** the Tailscale container ([#24](https://github.com/kamui/rakazo-stack/issues/24)); real lemond children behind the sidecar's rules ([#25](https://github.com/kamui/rakazo-stack/issues/25)); whether Docker Desktop for Mac's default `/dev/shm` is also 64 MB ([#48](https://github.com/kamui/rakazo-stack/issues/48)).
 - **Linux:** a real reboot with the sidecar; a home LAN, tailnet and global IPv6; the legacy-iptables wrapper on a real legacy host (it passed in Docker-in-Docker on both backends, `computer-egress/test/image.sh`) ([#27](https://github.com/kamui/rakazo-stack/issues/27), [#40](https://github.com/kamui/rakazo-stack/issues/40)).
 - **Updates:** an Update across Rakazo releases with the layer file; a Postgres 16 → 18 move on Rakazo's images compose layout; the rollback path; `install.sh --no-setup` driven from the running program ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
-- **Backup and restore:** Backup size and downtime; a Linux-to-macOS round trip; the `rakazo_app` role step against the images compose file ([#30](https://github.com/kamui/rakazo-stack/issues/30)).
+- **Backup and restore:** a Linux-to-macOS round trip; the `rakazo_app` role step against the images compose file ([#30](https://github.com/kamui/rakazo-stack/issues/30)).
 - **Hardware:** a real slow 4-thread x86-64 CPU; Linux on bare metal (Linux figures are derived from Docker Desktop's VM) ([#42](https://github.com/kamui/rakazo-stack/issues/42), [#46](https://github.com/kamui/rakazo-stack/issues/46), [#47](https://github.com/kamui/rakazo-stack/issues/47)).
 - **Rakazo calls:** a voice call with a bot through Lemonade in a browser, which needs a Model provider key; speech and transcription through the browser's own `/api/voice/*` routes passed without one ([#64](https://github.com/kamui/rakazo-stack/issues/64)). With a real OpenAI or Gemini key: `models.connect` accepting it, and the Owner's new bot replying on the model with no step in Rakazo's UI. The call's route, body, detection query, new-key update and refusal of a bad key passed on v0.16.0, the floor and the latest release then, with placeholder keys; the saving runs had the providers made unreachable from `api` ([#67](https://github.com/kamui/rakazo-stack/issues/67)).
 - **Memory models:** Hindsight 1.3.0 retaining and recalling with a real OpenAI key on `gpt-6-luna`, and with a real Gemini key on `gemini-3.5-flash-lite`. Both models' documented output limits allow what fact extraction asks for ([§10](#10-memory)); no call has confirmed it ([#44](https://github.com/kamui/rakazo-stack/issues/44), [#67](https://github.com/kamui/rakazo-stack/issues/67)).
@@ -996,6 +1012,5 @@ Collected from the decisions above, for the README and docs:
 
 No ticket fixes these names. The implementation picks them, and the docs then state them:
 
-- the environment variable for the Backup passphrase in no-questions use (keys and the Owner password follow [§7](#7-rakazo-stack-setup)'s `RAKAZO_STACK_` scheme);
-- the update-check timestamp file and the Backup file's extension;
+- the update-check timestamp file;
 - the rest of `settings.json`'s schema (its start is in [§6](#settingsjson)).

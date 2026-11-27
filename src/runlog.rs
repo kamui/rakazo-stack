@@ -35,7 +35,7 @@ impl RunLog {
 }
 
 /// `YYYYMMDDTHHMMSSZ`, from Howard Hinnant's `civil_from_days`.
-fn utc_stamp(seconds: u64) -> String {
+pub fn utc_stamp(seconds: u64) -> String {
     let days = (seconds / 86_400) as i64;
     let rest = seconds % 86_400;
     let z = days + 719_468;

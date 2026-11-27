@@ -1,6 +1,6 @@
 use std::fs::{self, File};
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 /// Runs the program with a throwaway HOME, so tests never touch a real Instance folder.
 fn rakazo_stack(home: &Path, args: &[&str]) -> Output {
@@ -26,12 +26,38 @@ fn version_prints_the_program_version() {
     );
 }
 
+/// `backup` without a terminal, as cron runs it.
+fn backup(home: &Path, passphrase: Option<&str>) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_rakazo-stack"));
+    command
+        .arg("backup")
+        .env("HOME", home)
+        .env_remove("RAKAZO_STACK_BACKUP_PASSPHRASE")
+        .stdin(Stdio::null());
+    if let Some(passphrase) = passphrase {
+        command.env("RAKAZO_STACK_BACKUP_PASSPHRASE", passphrase);
+    }
+    command.output().expect("run rakazo-stack")
+}
+
 #[test]
-fn backup_is_not_implemented_yet() {
+fn backup_without_a_passphrase_or_an_instance_stops_before_it_starts() {
     let home = tempfile::tempdir().unwrap();
-    let out = rakazo_stack(home.path(), &["backup"]);
+    let out = backup(home.path(), None);
     assert!(!out.status.success());
-    assert!(stderr(&out).contains("not implemented yet"));
+    assert!(
+        stderr(&out).contains("Stop: no Backup passphrase. Set RAKAZO_STACK_BACKUP_PASSPHRASE"),
+        "{}",
+        stderr(&out)
+    );
+    let out = backup(home.path(), Some("placeholder-passphrase"));
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("there is no Instance here"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!home.path().join("rakazo-stack-backups").exists());
 }
 
 #[test]

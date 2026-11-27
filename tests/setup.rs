@@ -1745,3 +1745,338 @@ fn openai_and_gemini_connect_the_owners_chat_through_models_connect() {
     assert_eq!(switched(&items), Vec::<String>::new());
     assert!(settings()["model_providers_left"].is_null());
 }
+
+const BACKUP_PASSPHRASE: &str = "placeholder-backup-passphrase";
+
+impl TestInstance {
+    /// Runs `backup` with stdin closed, as cron does.
+    fn backup(&self, passphrase: Option<&str>) -> Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rakazo-stack"));
+        for (name, _) in std::env::vars_os() {
+            if name.as_encoded_bytes().starts_with(b"RAKAZO_STACK_") {
+                command.env_remove(name);
+            }
+        }
+        if let Some(passphrase) = passphrase {
+            command.env("RAKAZO_STACK_BACKUP_PASSPHRASE", passphrase);
+        }
+        command
+            .arg("backup")
+            .env("HOME", self.home.path())
+            .stdin(Stdio::null())
+            .output()
+            .expect("run rakazo-stack")
+    }
+
+    fn backups(&self) -> Vec<PathBuf> {
+        let mut files: Vec<PathBuf> = fs::read_dir(self.home.path().join("rakazo-stack-backups"))
+            .map(|dir| dir.map(|entry| entry.unwrap().path()).collect())
+            .unwrap_or_default();
+        files.sort();
+        files
+    }
+
+    fn image_of(&self, service: &str) -> String {
+        let out = docker()
+            .args(["inspect", "--format", "{{.Image}}"])
+            .arg(format!("{}-{service}-1", self.project))
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// The `age` CLI's own decryption of a Backup, run from Debian's package in a
+    /// throwaway container of Rakazo's Postgres image. `age` reads a passphrase only
+    /// from a terminal, so `script` gives it one.
+    fn age_decrypt(&self, backup: &Path) -> Vec<u8> {
+        let decrypt = r#"set -e
+apt-get update -qq >/dev/null
+apt-get install -qq -y --no-install-recommends age >/dev/null 2>&1
+cat > /tmp/backup
+printf '%s\n' "$PASSPHRASE" | script -qec 'age --decrypt --output /tmp/plain /tmp/backup' /dev/null >/dev/null
+cat /tmp/plain"#;
+        let mut command = docker();
+        command
+            .args(["run", "--rm", "-i", "--name"])
+            .arg(format!("{}-age", self.project))
+            .args(["-e", &format!("PASSPHRASE={BACKUP_PASSPHRASE}")])
+            .args(["--entrypoint", "bash", &self.image_of("postgres")])
+            .args(["-c", decrypt]);
+        let out = with_stdin(command, &fs::read(backup).unwrap());
+        assert!(out.status.success(), "{}", text(&out));
+        out.stdout
+    }
+}
+
+fn with_stdin(mut command: Command, input: &[u8]) -> Output {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let input = input.to_vec();
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
+    let out = child.wait_with_output().unwrap();
+    writer.join().unwrap().unwrap();
+    out
+}
+
+/// Each file in a tar archive, by name.
+fn tar_entries(archive: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let mut archive = tar::Archive::new(archive);
+    archive
+        .entries()
+        .unwrap()
+        .map(|entry| {
+            let mut entry = entry.unwrap();
+            let name = entry.path().unwrap().to_string_lossy().into_owned();
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut entry, &mut bytes).unwrap();
+            (name, bytes)
+        })
+        .collect()
+}
+
+fn part<'a>(entries: &'a [(String, Vec<u8>)], name: &str) -> &'a [u8] {
+    &entries
+        .iter()
+        .find(|(n, _)| n == name)
+        .unwrap_or_else(|| panic!("no {name}"))
+        .1
+}
+
+#[test]
+#[ignore = "needs Docker and pulls Rakazo's and Hindsight's images; CI and the dev machine run it with --include-ignored"]
+fn backup_writes_one_checked_file_and_the_instance_comes_back() {
+    let instance = TestInstance::new();
+    let folder = instance.folder();
+    let bot = format!("{}-bot", instance.project);
+    let _bots = BotComputers(vec![bot.clone()]);
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(
+        folder.join("secrets.env"),
+        format!("OPENROUTER_API_KEY={MODEL_KEY}\n"),
+    )
+    .unwrap();
+    let mut env = vec![
+        ("RAKAZO_STACK_OWNER_EMAIL", OWNER_EMAIL),
+        ("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD),
+    ];
+    env.extend(UNREACHABLE);
+    let first = instance.setup(&["--no-questions"], &env);
+    assert!(first.status.success(), "{}", text(&first));
+
+    // No terminal and no passphrase: nothing is stopped.
+    let api_started = instance.started_at("api");
+    let refused = instance.backup(None);
+    assert!(!refused.status.success());
+    assert!(
+        text(&refused).contains("no Backup passphrase"),
+        "{}",
+        text(&refused)
+    );
+    assert_eq!(instance.started_at("api"), api_started);
+    assert!(instance.backups().is_empty());
+
+    // Some data: a bot computer whose home holds 20 MB, folders Rakazo rebuilds, and rows.
+    let (status, body) = instance.create_computer(&bot);
+    assert!((200..300).contains(&status), "{status} {body}");
+    let seed = instance.compose(&[
+        "exec",
+        "-T",
+        "supervisor",
+        "sh",
+        "-c",
+        &format!(
+            "head -c 20000000 /dev/urandom > /data/homes/{bot}/random.bin \
+             && mkdir -p /data/homes/{bot}/staging /data/staging/run /data/mcp-packages/pkg \
+             && echo kept > /data/homes/{bot}/staging/kept.txt \
+             && echo rebuilt > /data/staging/run/file && echo rebuilt > /data/mcp-packages/pkg/file"
+        ),
+    ]);
+    assert!(seed.status.success(), "{}", text(&seed));
+    instance.sql("CREATE TABLE rkst_backup_marker AS SELECT generate_series(1, 10000) AS n");
+    let computer = format!("rakazo-bot-{bot}");
+    let running = |name: &str| {
+        let out = docker()
+            .args(["inspect", "--format", "{{.State.Running}}", name])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim() == "true"
+    };
+    assert!(running(&computer));
+
+    let api_started = instance.started_at("api");
+    let out = instance.backup(Some(BACKUP_PASSPHRASE));
+    let out_text = text(&out);
+    println!("{out_text}");
+    assert!(out.status.success(), "{out_text}");
+    assert!(!out_text.contains(BACKUP_PASSPHRASE));
+    let backups = instance.backups();
+    assert_eq!(backups.len(), 1, "{backups:?}");
+    let backup = &backups[0];
+    let name = backup.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(
+        name.starts_with("rakazo-stack-backup-") && name.ends_with("Z.tar.age"),
+        "{name}"
+    );
+    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(backup), 0o600);
+    assert_eq!(mode(backup.parent().unwrap()), 0o700);
+    assert!(!folder.join(".backup.env").exists());
+
+    // Healthy again: the writers restarted, and so did the bot computer.
+    assert_ne!(instance.started_at("api"), api_started);
+    let ps = instance.compose(&["ps", "--format", "{{.Service}} {{.State}} {{.Health}}"]);
+    let states = String::from_utf8_lossy(&ps.stdout).into_owned();
+    for service in [
+        "api",
+        "worker",
+        "supervisor",
+        "postgres",
+        "web",
+        "hindsight-db",
+    ] {
+        assert!(
+            states
+                .lines()
+                .any(|l| l.starts_with(&format!("{service} running")) && !l.contains("unhealthy")),
+            "{service}: {states}"
+        );
+    }
+    assert!(running(&computer));
+    let (status, _) = post_json(
+        &format!("{}/api/auth/sign-in/email", instance.origin()),
+        &serde_json::json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }),
+    );
+    assert_eq!(status, 200);
+
+    // The age CLI opens it, and it holds exactly the Backup's parts.
+    let entries = tar_entries(&instance.age_decrypt(backup));
+    let names: Vec<&str> = entries.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "manifest.json",
+            "settings.json",
+            "secrets.env",
+            "rakazo.dump",
+            "hindsight.dump",
+            "appdata.tar"
+        ]
+    );
+    assert_eq!(
+        part(&entries, "settings.json"),
+        fs::read(folder.join("settings.json")).unwrap()
+    );
+    assert_eq!(
+        part(&entries, "secrets.env"),
+        fs::read(folder.join("secrets.env")).unwrap()
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_slice(part(&entries, "manifest.json")).unwrap();
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(folder.join("settings.json")).unwrap()).unwrap();
+    assert_eq!(manifest["program_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(manifest["components"], settings["components"]);
+
+    let list = |service: &str, dump: &[u8]| {
+        let mut command = docker();
+        command
+            .args(["compose", "-p", &instance.project, "exec", "-T", service])
+            .args(["pg_restore", "--list"])
+            .current_dir(&folder);
+        with_stdin(command, dump)
+    };
+    let rakazo = list("postgres", part(&entries, "rakazo.dump"));
+    assert!(rakazo.status.success(), "{}", text(&rakazo));
+    assert!(text(&rakazo).contains("rkst_backup_marker"));
+    let hindsight = list("hindsight-db", part(&entries, "hindsight.dump"));
+    assert!(hindsight.status.success(), "{}", text(&hindsight));
+    assert!(
+        text(&hindsight).contains("memory_units"),
+        "{}",
+        text(&hindsight)
+    );
+
+    let appdata: Vec<String> = tar_entries(part(&entries, "appdata.tar"))
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+    for kept in [
+        format!("./homes/{bot}/random.bin"),
+        format!("./homes/{bot}/staging/kept.txt"),
+    ] {
+        assert!(appdata.contains(&kept), "{kept}: {appdata:?}");
+    }
+    assert!(
+        !appdata
+            .iter()
+            .any(|n| n.starts_with("./staging") || n.starts_with("./mcp-packages")),
+        "{appdata:?}"
+    );
+
+    // A dump that fails leaves no file, and Rakazo starts again.
+    let stopped = instance.compose(&["stop", "postgres"]);
+    assert!(stopped.status.success(), "{}", text(&stopped));
+    let failed = instance.backup(Some(BACKUP_PASSPHRASE));
+    assert!(!failed.status.success());
+    assert!(
+        text(&failed).contains("pg_dump in postgres failed"),
+        "{}",
+        text(&failed)
+    );
+    assert_eq!(instance.backups(), backups);
+    assert!(running(&computer));
+    let ps = instance.compose(&["ps", "--status", "running", "--services"]);
+    let running_services = String::from_utf8_lossy(&ps.stdout).into_owned();
+    for service in ["api", "worker", "supervisor", "postgres"] {
+        assert!(
+            running_services.lines().any(|l| l == service),
+            "{service}: {running_services}"
+        );
+    }
+
+    // Memory off, with hindsight-pgdata kept: hindsight-db starts for the dump only.
+    let mut off_env = vec![("RAKAZO_STACK_MEMORY", "off")];
+    off_env.extend(UNREACHABLE);
+    let off = instance.setup(&["--no-questions"], &off_env);
+    assert!(off.status.success(), "{}", text(&off));
+    let hindsight_containers = || {
+        instance
+            .containers("{{.Label \"com.docker.compose.service\"}}")
+            .into_iter()
+            .filter(|s| s.starts_with("hindsight"))
+            .collect::<Vec<_>>()
+    };
+    assert!(hindsight_containers().is_empty());
+    let out = instance.backup(Some(BACKUP_PASSPHRASE));
+    let off_text = text(&out);
+    println!("{off_text}");
+    assert!(out.status.success(), "{off_text}");
+    assert!(
+        hindsight_containers().is_empty(),
+        "{:?}",
+        hindsight_containers()
+    );
+    assert!(!folder.join(".backup.env").exists());
+    let backups = instance.backups();
+    assert_eq!(backups.len(), 2, "{backups:?}");
+    let entries = tar_entries(&instance.age_decrypt(&backups[1]));
+    let db_digest = settings["components"]["hindsight"]["images"]["hindsight-db"]
+        .as_str()
+        .unwrap();
+    let mut command = docker();
+    command
+        .args(["run", "--rm", "-i", "--network", "none", "--name"])
+        .arg(format!("{}-list", instance.project))
+        .args(["--entrypoint", "pg_restore"])
+        .arg(format!("pgvector/pgvector:pg18@{db_digest}"))
+        .arg("--list");
+    let hindsight = with_stdin(command, part(&entries, "hindsight.dump"));
+    assert!(hindsight.status.success(), "{}", text(&hindsight));
+    assert!(text(&hindsight).contains("memory_units"));
+}
