@@ -1,8 +1,11 @@
-//! `rakazo-stack setup` (spec §7), so far: resolve Rakazo, write the Instance folder and
-//! bring Rakazo up on localhost.
+//! `rakazo-stack setup` (spec §7), so far: the Owner questions, Rakazo on localhost, the
+//! Owner filled in through Rakazo's own code path, and the Checklist.
 
 use std::time::Duration;
 
+use crate::answers::{self, FrontEnd, NoQuestions, Terminal, Wizard};
+use crate::checklist::Checklist;
+use crate::database_settings::{self, DatabaseSetting};
 use crate::docker::{ContainerSummary, Docker};
 use crate::envfile::{self, EnvInputs, STACK_COMPOSE_FILE};
 use crate::github::{self, RAKAZO_REPO};
@@ -10,8 +13,10 @@ use crate::http;
 use crate::instance::InstanceFolder;
 use crate::overrides;
 use crate::platform::Platform;
+use crate::rakazo::LocalRakazo;
 use crate::registry::Ghcr;
 use crate::resolve::{self, RAKAZO_FLOOR, RakazoRelease, ResolveError};
+use crate::runlog::RunLog;
 use crate::secrets::{self, Secrets};
 use crate::settings::Settings;
 
@@ -32,18 +37,33 @@ pub struct Setup<'a> {
     pub platform: Platform,
     pub docker: &'a Docker,
     pub folder: &'a InstanceFolder,
+    pub no_questions: bool,
 }
 
 impl Setup<'_> {
     pub fn run(&self) -> Result<(), SetupError> {
         let agent = http::agent();
         let recorded = self.load_settings()?;
+        let mut front = self.front_end()?;
+        let answers = answers::collect(
+            front.as_mut(),
+            recorded.as_ref().and_then(|s| s.owner_email.as_deref()),
+            recorded.is_none(),
+        )?;
+        let log = RunLog::create(self.folder.path())?;
+
         let release = match &recorded {
             Some(settings) => settings.rakazo_release(),
-            None => resolve_rakazo(&agent)?,
+            None => resolve_rakazo(&agent, &log)?,
         };
         let mut settings = recorded.unwrap_or_else(|| Settings::new(&release));
         settings.program_version = env!("CARGO_PKG_VERSION").to_string();
+        if settings.owner_email.as_deref() != Some(answers.owner_email.as_str()) {
+            settings
+                .filled_by_setup
+                .retain(|filled| *filled != DatabaseSetting::Owner);
+            settings.owner_email = Some(answers.owner_email.clone());
+        }
 
         let mut secrets = Secrets::parse(&self.read_text("secrets.env")?.unwrap_or_default());
         secrets.fill_missing(secrets::random_hex);
@@ -72,16 +92,47 @@ impl Setup<'_> {
         self.folder.reapply_modes()?;
 
         if self.platform == Platform::Wsl {
-            self.recreate_containers_made_in_wsl(&project)?;
+            self.recreate_containers_made_in_wsl(&project, &log)?;
         }
-        println!("Pulling Rakazo {} images…", release.tag);
+        log.say(&format!("Pulling Rakazo {} images…", release.tag));
         self.compose(&["pull", "--quiet"])?;
-        println!("Starting Rakazo…");
+        log.say("Starting Rakazo…");
         self.compose(&["up", "-d", "--wait", "--wait-timeout", WAIT_TIMEOUT_SECONDS])?;
         let origin = format!("http://127.0.0.1:{web_port}");
         wait_for_web(&agent, &origin)?;
-        println!("Rakazo {} is running at {origin}", release.tag);
+        log.say(&format!("Rakazo {} is running at {origin}", release.tag));
+
+        let mut checklist = Checklist::default();
+        let rakazo = LocalRakazo {
+            docker: self.docker,
+            folder: self.folder.path(),
+            agent: &agent,
+            origin: &origin,
+        };
+        database_settings::fill_in(
+            &rakazo,
+            front.as_mut(),
+            &answers.owner_email,
+            answers.owner_password,
+            &mut settings.filled_by_setup,
+            &mut checklist,
+        );
+        self.folder
+            .write("settings.json", settings.to_json().as_bytes())?;
+        log.say(checklist.render().trim_end());
         Ok(())
+    }
+
+    fn front_end(&self) -> Result<Box<dyn FrontEnd>, SetupError> {
+        if self.no_questions {
+            Ok(Box::new(NoQuestions {
+                env: |name: &str| std::env::var(name).ok(),
+            }))
+        } else {
+            Ok(Box::new(Wizard {
+                prompt: Terminal::attached()?,
+            }))
+        }
     }
 
     fn load_settings(&self) -> Result<Option<Settings>, SetupError> {
@@ -116,7 +167,11 @@ impl Setup<'_> {
 
     /// A WSL-run Compose gives containers mounts served from the distro, which fail after
     /// a reboot, so containers it made are recreated through `docker.exe` (spec §7).
-    fn recreate_containers_made_in_wsl(&self, project: &str) -> Result<(), SetupError> {
+    fn recreate_containers_made_in_wsl(
+        &self,
+        project: &str,
+        log: &RunLog,
+    ) -> Result<(), SetupError> {
         let filter = format!("label=com.docker.compose.project={project}");
         let out =
             self.docker
@@ -125,10 +180,10 @@ impl Setup<'_> {
         if services.is_empty() {
             return Ok(());
         }
-        println!(
+        log.say(&format!(
             "Recreating containers made by WSL's docker: {}",
             services.join(", ")
-        );
+        ));
         let mut args = vec!["up", "--no-start", "--no-deps", "--force-recreate"];
         args.extend(services.iter().map(String::as_str));
         self.compose(&args)
@@ -151,7 +206,7 @@ fn services_made_in_wsl(ps_output: &str) -> Vec<String> {
     services
 }
 
-fn resolve_rakazo(agent: &ureq::Agent) -> Result<RakazoRelease, SetupError> {
+fn resolve_rakazo(agent: &ureq::Agent, log: &RunLog) -> Result<RakazoRelease, SetupError> {
     let tags = github::fetch_stable_tags(agent, RAKAZO_REPO)?;
     let ghcr = Ghcr::new(agent);
     let resolution = resolve::choose_rakazo(&tags, |image, tag| {
@@ -160,13 +215,13 @@ fn resolve_rakazo(agent: &ureq::Agent) -> Result<RakazoRelease, SetupError> {
     match resolution {
         Ok(resolution) => {
             for skipped in &resolution.skipped {
-                println!("{}", skipped.describe());
+                log.say(&skipped.describe());
             }
             Ok(resolution.release)
         }
         Err(ResolveError::NothingAtFloor { skipped }) => {
             for skipped in &skipped {
-                println!("{}", skipped.describe());
+                log.say(&skipped.describe());
             }
             Err(SetupError(format!(
                 "No Rakazo release at or above {RAKAZO_FLOOR} has published images yet. Try again later."

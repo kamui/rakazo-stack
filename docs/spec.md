@@ -287,7 +287,7 @@ Fixed at `~/rakazo-stack` on every OS, with no option to move it. On Windows tha
   relay/                           build context for lemonade-relay
   computer-egress/                 build context for the sidecar, with Rakazo's restrict-computer-egress.sh
   lemonade/                        macOS only: versions/<v>/, config, models (HF_HOME)
-  logs/                            setup run logs (no secrets); lemond logs on macOS
+  logs/                            setup run logs, one `setup-<UTC time>.log` per run (no secrets); lemond logs on macOS
   .lock                            the lock setup, update, backup and restore take (an OS file lock, released if the program dies)
 ```
 
@@ -315,6 +315,8 @@ The schema so far; later slices add the fields above as they land:
 {
   "schema": 1,
   "program_version": "0.1.0",
+  "owner_email": "owner@example.com",
+  "filled_by_setup": ["owner"],
   "components": {
     "rakazo": {
       "version": "v0.16.0",
@@ -344,17 +346,21 @@ Generated once, on the run that first needs them, and never regenerated ([#9](ht
 
 #### Pasted keys
 
-The Model provider key, `COMPOSIO_API_KEY` and the Tailscale auth key ([#3](https://github.com/kamui/rakazo-stack/issues/3), [#8](https://github.com/kamui/rakazo-stack/issues/8), [#36](https://github.com/kamui/rakazo-stack/issues/36)). A re-run shows a pasted key as "set, press Enter to keep, or paste a new one" and never prints it ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
+The Model provider key, `COMPOSIO_API_KEY` and the Tailscale auth key ([#3](https://github.com/kamui/rakazo-stack/issues/3), [#8](https://github.com/kamui/rakazo-stack/issues/8), [#36](https://github.com/kamui/rakazo-stack/issues/36)). A re-run shows a pasted key as "set, press Enter to keep, or paste a new one" and never prints it ([#9](https://github.com/kamui/rakazo-stack/issues/9)). In no-questions mode each pasted key comes from `RAKAZO_STACK_` followed by its name in `secrets.env`, for example `RAKAZO_STACK_COMPOSIO_API_KEY` ([#61](https://github.com/kamui/rakazo-stack/issues/61)).
 
 ## 7. `rakazo-stack setup`
 
-One re-runnable command. It is an interactive wizard on a first run and safe to re-run at any time to change things. A no-questions mode reads `settings.json`, with keys and the Owner password from environment variables, for scripted runs and for `restore`'s hand-over ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
+One re-runnable command. It is an interactive wizard on a first run and safe to re-run at any time to change things. A no-questions mode, `rakazo-stack setup --no-questions`, is for scripted runs and for `restore`'s hand-over ([#9](https://github.com/kamui/rakazo-stack/issues/9)). The wizard and the no-questions mode are two front ends to one set of answers ([#61](https://github.com/kamui/rakazo-stack/issues/61)):
+
+- **No-questions mode** takes each answer from its environment variable, then from `settings.json`, then the wizard's default. An answer with no default stops the run when neither gives it. So a first scripted run, with no `settings.json` yet, gives its choices as environment variables, and a scripted re-run can change a choice the same way.
+- **Environment variables** are `RAKAZO_STACK_` followed by the answer's name: `RAKAZO_STACK_OWNER_EMAIL` and `RAKAZO_STACK_OWNER_PASSWORD`, and each pasted key under its `secrets.env` name ([§6](#pasted-keys)). Later questions add theirs under the same scheme. The program removes every `RAKAZO_STACK_*` variable from the environment of the Docker commands it runs.
+- **The wizard** needs a terminal. Without one, and without `--no-questions`, setup stops before changing anything.
 
 ### Questions
 
 | Question | First run | Re-run | Ticket |
 |---|---|---|---|
-| Owner email and password | Asked. Password at least 16 characters | Password asked only when a database-only setting will be filled in; never saved | [#9, #19, #21] |
+| Owner email and password | Asked; the password twice, without echo. Password 16–128 characters, Rakazo's own bounds | Email pre-filled. Password asked only when a database-only setting will be filled in; never saved | [#9, #19, #21, #61] |
 | Model provider | OpenRouter (default), OpenAI, Gemini, Anthropic, or none | Pre-filled | [#36](https://github.com/kamui/rakazo-stack/issues/36) |
 | Model provider key | Blank allowed. Checked with the provider before saving; a rejected key is never saved | "set, press Enter to keep" | [#9, #36] |
 | Composio project API key | Blank allowed. Checked with Composio before saving; a rejected key is never saved | "set, press Enter to keep" | [#3, #9] |
@@ -370,7 +376,7 @@ Setup **stops before changing anything** on a failed preflight or invalid input:
 ### First run, step by step
 
 1. **Lock and preflight** ([§3](#preflight)).
-2. **Questions** (wizard) or `settings.json` plus environment variables (no-questions mode).
+2. **Questions** (wizard) or environment variables plus `settings.json` (no-questions mode). A first run always takes the Owner password here, which no-questions mode reads from `RAKAZO_STACK_OWNER_PASSWORD`; a scripted re-run reads it here only if that variable is set.
 3. **Check keys.** Model provider key, then on OpenRouter the ZDR only probe ([§8](#zdr-only-probe)), then the Composio key ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#36](https://github.com/kamui/rakazo-stack/issues/36), [#39](https://github.com/kamui/rakazo-stack/issues/39)).
 4. **Resolve versions** for every Component that will run, skipping releases without published images ([§4](#how-versions-are-resolved)).
 5. **Write the Instance folder.** Generate missing secrets; write `secrets.env`, `settings.json`, the fetched Rakazo compose file and egress script, the bundled layer file and build folders, and `.env`; apply modes ([#29](https://github.com/kamui/rakazo-stack/issues/29), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
@@ -401,23 +407,23 @@ Sequence ([#21](https://github.com/kamui/rakazo-stack/issues/21), [#23](https://
 
 1. Wait for health checks (Rakazo, the relay, Lemonade, and Hindsight when memory is on; Hindsight takes about 60–70 s).
 2. **Detect** what exists with read-only SQL as the database owner role in Rakazo's Postgres (no password needed):
-   - Owner: a verified `user` with a `credential` account.
+   - Owner: a verified `user` with the Owner email and a `credential` account. `docker compose exec -T postgres psql -U rakazo -d rakazo` with the query on stdin, after `SET default_transaction_read_only = on`. The email is trimmed and lowercased first, as `bootstrap-owner` stores it ([#61](https://github.com/kamui/rakazo-stack/issues/61)).
    - Voice: any `user_voice_credentials` row for the Owner.
    - Memory: `SELECT 1 FROM space_memory_configs WHERE "spaceId" = $1 AND provider = 'hindsight'` for the Owner's default Space.
    - Model connection (OpenAI/Gemini only): an existing connection for the Owner.
 3. **Decide** what to fill:
    - Missing and never filled by setup: fill it.
-   - Missing but `settings.json` says setup filled it before: treat it as removed in Rakazo's UI. The wizard asks "Your voice settings were removed in Rakazo. Add them back? [y/N]" (same for memory and the model connection); no-questions mode leaves it removed ([#23](https://github.com/kamui/rakazo-stack/issues/23)).
+   - Missing but `settings.json` says setup filled it before: treat it as removed in Rakazo's UI. The wizard asks "Your voice settings were removed in Rakazo. Add them back? [y/N]" (same for the Owner, memory and the model connection); no-questions mode leaves it removed ([#23](https://github.com/kamui/rakazo-stack/issues/23)). Changing the Owner email clears the Owner from `filled_by_setup`, so the new address counts as never set ([#61](https://github.com/kamui/rakazo-stack/issues/61)).
    - Present: leave it alone, even if it differs from what setup would write ([#21](https://github.com/kamui/rakazo-stack/issues/21)).
-4. Only if something will be filled: ask for the Owner password.
-5. Owner missing: `docker compose exec -T -e OWNER_EMAIL -e OWNER_PASSWORD api node dist/cli/bootstrap-owner.js`. Never run `bootstrap-owner` as a check: it ignores arguments (including `--help`) and rewrites `deployment_settings` on every run ([#11](https://github.com/kamui/rakazo-stack/issues/11), [#21](https://github.com/kamui/rakazo-stack/issues/21)).
-6. `POST /api/auth/sign-in/email` with `{email, password}`; read `.token`; send it as `Authorization: Bearer …`. Send no `Origin`, cookie or `Sec-Fetch-*` headers. Sign-in is rate-limited to 10 tries per 15 minutes ([#11](https://github.com/kamui/rakazo-stack/issues/11), [#21](https://github.com/kamui/rakazo-stack/issues/21)).
+4. Only if something will be filled: ask for the Owner password, unless step 2 already took it. No-questions mode never asks: without `RAKAZO_STACK_OWNER_PASSWORD` nothing is filled, and a checklist item says to run again with it set ([#61](https://github.com/kamui/rakazo-stack/issues/61)).
+5. Owner missing: run Rakazo's `dist/cli/bootstrap-owner.js` in `api` with `OWNER_EMAIL` and `OWNER_PASSWORD` set. The password must not reach an argument list, and WSL's environment doesn't reach `docker.exe`, so setup runs `docker compose exec -T api node -e <script>` and writes `{"email","password"}` to its stdin; the script sets both variables and imports `bootstrap-owner.js` ([#61](https://github.com/kamui/rakazo-stack/issues/61)). Never run `bootstrap-owner` as a check: it ignores arguments (including `--help`) and rewrites `deployment_settings` on every run ([#11](https://github.com/kamui/rakazo-stack/issues/11), [#21](https://github.com/kamui/rakazo-stack/issues/21)).
+6. `POST /api/auth/sign-in/email` with `{email, password}`; read `.token` (on v0.16.0 already the signed value the bearer plugin requires); send it as `Authorization: Bearer …`. Send no `Origin`, cookie or `Sec-Fetch-*` headers. Sign-in is rate-limited to 10 tries per 15 minutes ([#11](https://github.com/kamui/rakazo-stack/issues/11), [#21](https://github.com/kamui/rakazo-stack/issues/21)).
 7. Voice missing: `POST /rpc/voice/connect` with `{"json":{"provider":"openai-compatible","baseUrl":"http://lemonade-relay:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"<Whisper model>"}}`. The server lists models and voices before saving and picks the voice (`af_heart`) ([#11](https://github.com/kamui/rakazo-stack/issues/11), [#21](https://github.com/kamui/rakazo-stack/issues/21), [#24](https://github.com/kamui/rakazo-stack/issues/24)).
 8. OpenAI or Gemini and no Owner connection: the `models.connect` RPC with the key and `makeDefault`. A new key on a re-run updates this connection ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
 9. Memory on and missing: `POST /rpc/memory/connectProvider` with `{"json":{"provider":"hindsight","settings":{"mode":"local","baseUrl":"http://hindsight:8888"},"credentials":{"apiKey":"<HINDSIGHT_API_TENANT_API_KEY>"}}}`. Pass nothing for `retainConversations` or other memory toggles: Rakazo's defaults stay ([#44](https://github.com/kamui/rakazo-stack/issues/44), [#45](https://github.com/kamui/rakazo-stack/issues/45), [#50](https://github.com/kamui/rakazo-stack/issues/50)).
 10. `POST /api/auth/sign-out`; discard the token ([#21](https://github.com/kamui/rakazo-stack/issues/21)).
 11. Record in `settings.json` what was filled.
-12. A non-2xx reply (`{"json":{"code","status","message"}}`) becomes a checklist item with its message and the UI steps; setup carries on ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#21](https://github.com/kamui/rakazo-stack/issues/21)).
+12. A non-2xx reply (`{"json":{"code","status","message"}}` from `/rpc`, `{"code","message"}` from `/api/auth`) becomes a checklist item with its message and the UI steps; setup carries on. So does a failed `bootstrap-owner`, with its error message; with no Owner, nothing after it is filled ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#21](https://github.com/kamui/rakazo-stack/issues/21), [#61](https://github.com/kamui/rakazo-stack/issues/61)).
 
 Setup never touches other users' settings or other Spaces ([#11](https://github.com/kamui/rakazo-stack/issues/11), [#49](https://github.com/kamui/rakazo-stack/issues/49)).
 
@@ -902,8 +908,7 @@ Collected from the decisions above, for the README and docs:
 
 No ticket fixes these names. The implementation picks them, and the docs then state them:
 
-- the no-questions option (the README says "not decided yet");
-- the environment variables for keys, the Owner password and the Backup passphrase in no-questions use;
+- the environment variable for the Backup passphrase in no-questions use (keys and the Owner password follow [§7](#7-rakazo-stack-setup)'s `RAKAZO_STACK_` scheme);
 - macOS lemond's port and the LaunchAgent label;
 - the variable name for Hindsight's database password in `secrets.env`;
 - the names of the locally built relay and sidecar images;

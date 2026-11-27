@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::database_settings::DatabaseSetting;
 use crate::resolve::RakazoRelease;
 
 pub const SCHEMA: u32 = 1;
@@ -12,6 +13,12 @@ pub struct Settings {
     pub schema: u32,
     /// The program version that last wrote the file.
     pub program_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_email: Option<String>,
+    /// The database-only settings setup has filled in, so a re-run can tell "removed in
+    /// Rakazo" from "never set" (spec §7).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filled_by_setup: Vec<DatabaseSetting>,
     pub components: Components,
 }
 
@@ -37,6 +44,8 @@ impl Settings {
         Self {
             schema: SCHEMA,
             program_version: env!("CARGO_PKG_VERSION").to_string(),
+            owner_email: None,
+            filled_by_setup: Vec::new(),
             components: Components {
                 rakazo: RecordedRakazo {
                     version: release.tag.clone(),
@@ -84,5 +93,23 @@ mod tests {
         assert!(text.contains("\"version\": \"v0.16.0\""));
         assert_eq!(Settings::parse(&text).unwrap(), settings);
         assert_eq!(settings.rakazo_release().computer_digest, "sha256:ccc");
+        assert!(!text.contains("owner_email"));
+    }
+
+    #[test]
+    fn records_the_owner_email_and_what_setup_filled() {
+        let mut settings = Settings::new(&RakazoRelease {
+            tag: "v0.16.0".into(),
+            app_digest: "sha256:aaa".into(),
+            computer_digest: "sha256:ccc".into(),
+        });
+        settings.owner_email = Some("owner@example.com".into());
+        settings.filled_by_setup = vec![DatabaseSetting::Owner];
+        let text = settings.to_json();
+        assert!(
+            text.contains("\"filled_by_setup\": [\n    \"owner\"\n  ]"),
+            "{text}"
+        );
+        assert_eq!(Settings::parse(&text).unwrap(), settings);
     }
 }

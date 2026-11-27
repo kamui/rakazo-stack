@@ -1,3 +1,6 @@
+mod answers;
+mod checklist;
+mod database_settings;
 mod docker;
 mod envfile;
 mod github;
@@ -6,8 +9,10 @@ mod instance;
 mod overrides;
 mod platform;
 mod preflight;
+mod rakazo;
 mod registry;
 mod resolve;
+mod runlog;
 mod secrets;
 mod settings;
 mod setup;
@@ -33,7 +38,11 @@ struct Cli {
 #[derive(Subcommand, Clone, Copy)]
 enum Command {
     /// Set up the Instance, or change its settings.
-    Setup,
+    Setup {
+        /// Ask nothing: take answers from environment variables, then settings.json.
+        #[arg(long)]
+        no_questions: bool,
+    },
     /// Move every Component to its newest release.
     Update,
     /// Write an encrypted Backup of the Instance.
@@ -45,7 +54,7 @@ enum Command {
 impl Command {
     fn name(self) -> &'static str {
         match self {
-            Self::Setup => "setup",
+            Self::Setup { .. } => "setup",
             Self::Update => "update",
             Self::Backup => "backup",
             Self::Restore => "restore",
@@ -54,7 +63,7 @@ impl Command {
 
     fn preflight(self) -> Option<preflight::Command> {
         match self {
-            Self::Setup => Some(preflight::Command::Setup),
+            Self::Setup { .. } => Some(preflight::Command::Setup),
             Self::Update => Some(preflight::Command::Update),
             Self::Restore => Some(preflight::Command::Restore),
             Self::Backup => None,
@@ -114,12 +123,13 @@ fn main() -> ExitCode {
         eprintln!("Preflight passed.");
     }
 
-    if let Command::Setup = command {
+    if let Command::Setup { no_questions } = command {
         let docker = docker::Docker::find(platform).expect("preflight found Docker");
         let setup = setup::Setup {
             platform,
             docker: &docker,
             folder: &folder,
+            no_questions,
         };
         return match setup.run() {
             Ok(()) => ExitCode::SUCCESS,
