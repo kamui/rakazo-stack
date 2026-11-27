@@ -1,12 +1,13 @@
 //! `setup` against real Docker: starts Rakazo on localhost with voice, creates the Owner
-//! and their voice, switches to a bring-your-own Instance URL, and tears the test Instance
-//! down afterwards, its built relay image included. No test starts a `tailscale`
-//! container: it would try to join a real tailnet.
+//! and their voice, switches to a bring-your-own Instance URL, runs memory, and tears the
+//! test Instance down afterwards, its built relay image included. No test starts a
+//! `tailscale` container: it would try to join a real tailnet.
 
 mod common;
 
 use std::cell::OnceCell;
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -153,14 +154,13 @@ impl TestInstance {
         serde_json::from_slice(&out.stdout).unwrap_or_else(|_| panic!("{}", text(&out)))
     }
 
-    /// Every address of `lemonade` and the relay, from a container on a bridge of its own,
-    /// which is how Rakazo's supervisor attaches a bot computer.
-    fn reachable_from_a_bot_bridge(&self) -> Vec<String> {
-        let mut targets = vec![
-            "lemonade:13305".to_string(),
-            "lemonade-relay:13306".to_string(),
-        ];
-        for (service, port) in [("lemonade", 13305), ("lemonade-relay", 13306)] {
+    /// Which of each service's name and addresses a container on a bridge of its own
+    /// reaches over TCP: that is how Rakazo's supervisor attaches a bot computer.
+    /// `networks` is how many networks the service is on.
+    fn reachable_from_a_bot_bridge(&self, services: &[(&str, u16, usize)]) -> Vec<String> {
+        let mut targets = Vec::new();
+        for &(service, port, networks) in services {
+            targets.push(format!("{service}:{port}"));
             let out = docker()
                 .args([
                     "inspect",
@@ -172,7 +172,7 @@ impl TestInstance {
                 .unwrap();
             assert!(out.status.success(), "{}", text(&out));
             let ips = String::from_utf8_lossy(&out.stdout).into_owned();
-            assert_eq!(ips.split_whitespace().count(), 2, "on stack and egress");
+            assert_eq!(ips.split_whitespace().count(), networks, "{service}: {ips}");
             targets.extend(ips.split_whitespace().map(|ip| format!("{ip}:{port}")));
         }
         let network = format!("{}-bot-probe", self.project);
@@ -183,7 +183,7 @@ impl TestInstance {
             .unwrap();
         assert!(created.status.success(), "{}", text(&created));
         let script = format!(
-            "const reached = []; for (const t of {targets:?}) {{ try {{ await fetch('http://' + t + '/live', {{ signal: AbortSignal.timeout(3000) }}); reached.push(t); }} catch {{}} }} console.log(JSON.stringify(reached));"
+            "const net = require('node:net'); const reach = (t) => new Promise((done) => {{ const [host, port] = t.split(':'); const socket = net.connect({{ host, port: Number(port) }}); const end = (ok) => {{ socket.destroy(); done(ok); }}; socket.setTimeout(3000, () => end(false)); socket.on('connect', () => end(true)); socket.on('error', () => end(false)); }}); const reached = []; for (const t of {targets:?}) {{ if (await reach(t)) reached.push(t); }} console.log(JSON.stringify(reached));"
         );
         let probe = docker()
             .args(["run", "--rm", "--network", &network, "--label", &label])
@@ -194,6 +194,34 @@ impl TestInstance {
         let _ = docker().args(["network", "rm", &network]).output();
         assert!(probe.status.success(), "{}", text(&probe));
         serde_json::from_slice(&probe.stdout).unwrap()
+    }
+
+    /// `docker compose` for this Instance, with `stdin` on its standard input.
+    fn compose_with_stdin(&self, args: &[&str], stdin: &str) -> Output {
+        let mut child = docker()
+            .args(["compose", "-p", &self.project])
+            .args(args)
+            .current_dir(self.folder())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin.as_bytes())
+            .unwrap();
+        child.wait_with_output().unwrap()
+    }
+
+    fn secret(&self, name: &str) -> String {
+        fs::read_to_string(self.folder().join("secrets.env"))
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{name}=")).map(str::to_string))
+            .unwrap_or_else(|| panic!("no {name} in secrets.env"))
     }
 
     fn containers(&self, format: &str) -> Vec<String> {
@@ -595,6 +623,11 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
         "{first_text}"
     );
     assert!(first_text.contains("Voice is ready"), "{first_text}");
+    let services = instance.containers("{{.Label \"com.docker.compose.service\"}}");
+    assert!(
+        !services.iter().any(|s| s.starts_with("hindsight")),
+        "without a key nothing of Hindsight's runs: {services:?}"
+    );
     assert_eq!(
         instance.sql("SELECT count(*) FROM session"),
         "0",
@@ -671,7 +704,8 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
         "Lemonade refuses a request without its key"
     );
     assert_eq!(
-        instance.reachable_from_a_bot_bridge(),
+        instance
+            .reachable_from_a_bot_bridge(&[("lemonade", 13305, 2), ("lemonade-relay", 13306, 2)]),
         Vec::<String>::new(),
         "a bot computer's bridge reaches neither Lemonade nor the relay"
     );
@@ -844,6 +878,7 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
     let third = instance.setup(
         &["--no-questions"],
         &[
+            ("RAKAZO_STACK_MEMORY", "off"),
             ("ALL_PROXY", "http://127.0.0.1:9"),
             ("HTTPS_PROXY", "http://127.0.0.1:9"),
             ("NO_PROXY", "127.0.0.1"),
@@ -1227,4 +1262,327 @@ fn bot_computers_get_restricted_egress_and_fail_closed_without_the_sidecar() {
         supervisor_started,
         "without restarting the supervisor"
     );
+}
+
+/// Setup's own calls to the Model provider go to a proxy nothing listens on, so a saved
+/// placeholder key is kept unchecked; GitHub and the registries stay reachable. Hindsight
+/// 1.3.0 only warns when its own LLM check fails.
+const UNREACHABLE: [(&str, &str); 3] = [
+    ("ALL_PROXY", "http://127.0.0.1:9"),
+    ("HTTPS_PROXY", "http://127.0.0.1:9"),
+    (
+        "NO_PROXY",
+        "127.0.0.1,*github.com,*githubusercontent.com,ghcr.io,*docker.io",
+    ),
+];
+
+const ANOTHER_SPACE_ITEM: &str = "To turn memory on in another Space, its owner opens Settings → Memory → Connect memory provider → Hindsight → Advanced → Self-hosted, with http://hindsight:8888 and the key from the HINDSIGHT_API_TENANT_API_KEY line in ~/rakazo-stack/secrets.env.";
+
+/// Run inside `hindsight`: creates banks the way a new Rakazo bot's first write does, in
+/// chunks mode, which needs no LLM. Prints one JSON line of each call's status.
+const NEW_BANKS: &str = r#"
+import json, sys, threading, urllib.error, urllib.request
+KEY = sys.stdin.readline().strip()
+def call(method, path, body):
+    req = urllib.request.Request("http://localhost:8888" + path, method=method,
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + KEY})
+    try:
+        with urllib.request.urlopen(req, timeout=600) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return "%d %s" % (e.code, e.read()[:300].decode())
+results = {}
+def bank(name):
+    results[name] = [
+        call("PATCH", "/v1/default/banks/%s/config" % name, {"updates": {"retain_extraction_mode": "chunks"}}),
+        call("POST", "/v1/default/banks/%s/memories" % name,
+             {"items": [{"content": "First memory for %s: likes green tea." % name, "document_id": name + "-1"}], "async": False}),
+    ]
+threads = [threading.Thread(target=bank, args=(name,)) for name in sys.argv[1:]]
+for t in threads: t.start()
+for t in threads: t.join()
+print(json.dumps(results, sort_keys=True))
+"#;
+
+#[test]
+#[ignore = "needs Docker and pulls Rakazo's and Hindsight's images; CI and the dev machine run it with --include-ignored"]
+fn memory_runs_hindsight_connects_the_default_space_and_turns_off_and_on() {
+    let instance = TestInstance::new();
+    let folder = instance.folder();
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(
+        folder.join("secrets.env"),
+        format!("OPENROUTER_API_KEY={MODEL_KEY}\n"),
+    )
+    .unwrap();
+
+    let mut env = vec![
+        ("RAKAZO_STACK_OWNER_EMAIL", OWNER_EMAIL),
+        ("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD),
+    ];
+    env.extend(UNREACHABLE);
+    let first = instance.setup(&["--no-questions"], &env);
+    let first_text = text(&first);
+    assert!(first.status.success(), "{first_text}");
+    assert!(!first_text.contains(MODEL_KEY), "setup printed the key");
+    let items = checklist(&first);
+    assert!(
+        items.contains(&ANOTHER_SPACE_ITEM.to_string()),
+        "{first_text}"
+    );
+    assert_eq!(
+        items.len(),
+        4,
+        "voice, another Space, ZDR, dictation: {first_text}"
+    );
+
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(folder.join("settings.json")).unwrap()).unwrap();
+    assert_eq!(settings["memory"], "on");
+    assert_eq!(
+        settings["filled_by_setup"],
+        serde_json::json!(["owner", "voice", "memory"])
+    );
+    let hindsight = &settings["components"]["hindsight"];
+    assert!(
+        hindsight["version"].as_str().unwrap() >= "1.3.0",
+        "{settings}"
+    );
+    for image in ["hindsight", "hindsight-db"] {
+        assert!(
+            hindsight["images"][image]
+                .as_str()
+                .unwrap()
+                .starts_with("sha256:"),
+            "{settings}"
+        );
+    }
+
+    let ps = instance.compose(&["ps", "--format", "{{.Service}} {{.Health}}"]);
+    let mut health: Vec<String> = String::from_utf8_lossy(&ps.stdout)
+        .lines()
+        .filter(|l| l.starts_with("hindsight"))
+        .map(str::to_string)
+        .collect();
+    health.sort();
+    assert_eq!(
+        health,
+        ["hindsight healthy", "hindsight-db healthy"],
+        "{first_text}"
+    );
+
+    // The default Space only, connected through Rakazo, with no memory toggle set.
+    let connected = instance.sql(
+        "SELECT c.provider || ' ' || s.\"isDefault\" || ' ' || c.settings::text FROM space_memory_configs c JOIN spaces s ON s.id = c.\"spaceId\"",
+    );
+    assert_eq!(
+        connected,
+        r#"hindsight true {"mode": "local", "baseUrl": "http://hindsight:8888"}"#
+    );
+
+    for (name, value) in [
+        ("HINDSIGHT_API_LLM_PROVIDER", "openrouter"),
+        ("HINDSIGHT_API_LLM_MODEL", "~z-ai/glm-flash-latest"),
+        ("HINDSIGHT_API_LLM_REASONING_EFFORT", "low"),
+        (
+            "HINDSIGHT_API_LLM_EXTRA_BODY",
+            r#"{"provider":{"zdr":true,"data_collection":"deny"}}"#,
+        ),
+        ("HINDSIGHT_API_RERANKER_MAX_CANDIDATES", "100"),
+        ("HINDSIGHT_API_WORKER_ID", "hindsight"),
+        ("HINDSIGHT_API_MCP_ENABLED", "false"),
+    ] {
+        assert_eq!(instance.service_env("hindsight", name), value, "{name}");
+    }
+    assert!(instance.service_env("hindsight", "HINDSIGHT_API_LLM_API_KEY") == MODEL_KEY);
+    let hindsight_env = instance.compose(&["exec", "-T", "hindsight", "env"]);
+    let per_operation: Vec<String> = String::from_utf8_lossy(&hindsight_env.stdout)
+        .lines()
+        .filter(|l| {
+            ["RETAIN", "REFLECT", "CONSOLIDATION", "MENTAL_MODEL_REFRESH"]
+                .iter()
+                .any(|op| l.starts_with(&format!("HINDSIGHT_API_{op}_LLM_")))
+        })
+        .map(|l| l.split('=').next().unwrap().to_string())
+        .collect();
+    assert!(per_operation.is_empty(), "{per_operation:?}");
+    for service in ["api", "worker"] {
+        assert_eq!(
+            instance.service_env(service, "HINDSIGHT_API_LLM_API_KEY"),
+            "",
+            "{service} sees Hindsight's key"
+        );
+    }
+
+    // hindsight-db is reachable only from hindsight, and neither is published.
+    let networks = |service: &str| -> Vec<String> {
+        let id = instance.compose(&["ps", "-q", service]);
+        let id = String::from_utf8_lossy(&id.stdout).trim().to_string();
+        let out = docker()
+            .args([
+                "inspect",
+                "--format",
+                "{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}",
+                &id,
+            ])
+            .output()
+            .unwrap();
+        let mut names: Vec<String> = String::from_utf8_lossy(&out.stdout)
+            .split_whitespace()
+            .map(|n| {
+                n.trim_start_matches(&format!("{}_", instance.project))
+                    .to_string()
+            })
+            .collect();
+        names.sort();
+        names
+    };
+    assert_eq!(networks("hindsight-db"), ["hindsight-data"]);
+    assert_eq!(networks("hindsight"), ["egress", "hindsight-data", "stack"]);
+    let published: Vec<String> = instance
+        .containers("{{.Label \"com.docker.compose.service\"}} {{.Ports}}")
+        .into_iter()
+        .filter(|line| line.contains("->"))
+        .collect();
+    assert_eq!(published.len(), 1, "only web: {published:?}");
+    let reach = r#"
+const [host, port] = process.argv.slice(1);
+const socket = require("node:net").connect({ host, port: Number(port), timeout: 3000 });
+socket.on("connect", () => { console.log("reached"); process.exit(0); });
+socket.on("error", () => { console.log("unreachable"); process.exit(0); });
+socket.on("timeout", () => { console.log("unreachable"); process.exit(0); });
+"#;
+    for (host, port, expected) in [
+        ("hindsight", "8888", "reached"),
+        ("hindsight-db", "5432", "unreachable"),
+    ] {
+        let out = instance.compose(&["exec", "-T", "api", "node", "-e", reach, host, port]);
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            expected,
+            "api to {host}: {}",
+            text(&out)
+        );
+    }
+    assert_eq!(
+        instance.reachable_from_a_bot_bridge(&[("hindsight", 8888, 3), ("hindsight-db", 5432, 1)]),
+        Vec::<String>::new(),
+        "a bot computer's bridge reaches neither Hindsight nor its database"
+    );
+    let shm = instance.compose(&["exec", "-T", "hindsight-db", "df", "-k", "/dev/shm"]);
+    assert!(
+        String::from_utf8_lossy(&shm.stdout).contains(" 1048576 "),
+        "{}",
+        text(&shm)
+    );
+
+    // The shm_size case (#48): new banks once memory_units passes 8 MB, where Postgres
+    // builds their indexes in parallel. Seeded without an LLM, then grown by copying rows.
+    let tenant_key = instance.secret("HINDSIGHT_API_TENANT_API_KEY");
+    let new_banks = |names: &[&str]| -> String {
+        let mut args = vec!["exec", "-T", "hindsight", "python", "-I", "-c", NEW_BANKS];
+        args.extend(names);
+        let out = instance.compose_with_stdin(&args, &format!("{tenant_key}\n"));
+        assert!(out.status.success(), "{}", text(&out));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert_eq!(new_banks(&["seed"]), r#"{"seed": [200, 200]}"#);
+    let db_sql = |query: &str| -> String {
+        let out = instance.compose(&[
+            "exec",
+            "-T",
+            "hindsight-db",
+            "psql",
+            "-X",
+            "-tA",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            "hindsight",
+            "-d",
+            "hindsight",
+            "-c",
+            query,
+        ]);
+        assert!(out.status.success(), "{}", text(&out));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let columns = db_sql(
+        "SELECT string_agg(quote_ident(column_name), ',' ORDER BY ordinal_position) FROM information_schema.columns WHERE table_name = 'memory_units' AND column_name <> 'id'",
+    );
+    db_sql(&format!(
+        "INSERT INTO memory_units (id,{columns}) SELECT gen_random_uuid(),{columns} FROM memory_units, generate_series(1, 20000)"
+    ));
+    let size: u64 = db_sql("SELECT pg_relation_size('memory_units')")
+        .parse()
+        .unwrap();
+    assert!(size > 8 * 1024 * 1024, "memory_units is only {size} bytes");
+    assert_eq!(
+        new_banks(&["second-a", "second-b"]),
+        r#"{"second-a": [200, 200], "second-b": [200, 200]}"#,
+        "a second bank needs shm_size on hindsight-db"
+    );
+    let units = db_sql("SELECT count(*) FROM memory_units");
+
+    // Off: both containers stop, the volume stays, and the still-connected Space is listed.
+    let mut off_env = vec![("RAKAZO_STACK_MEMORY", "off")];
+    off_env.extend(UNREACHABLE);
+    let off = instance.setup(&["--no-questions"], &off_env);
+    let off_text = text(&off);
+    assert!(off.status.success(), "{off_text}");
+    let services = instance.containers("{{.Label \"com.docker.compose.service\"}}");
+    assert!(
+        !services.iter().any(|s| s.starts_with("hindsight")),
+        "{services:?}"
+    );
+    let volumes = docker()
+        .args([
+            "volume",
+            "ls",
+            "-q",
+            "--filter",
+            &format!("label=com.docker.compose.project={}", instance.project),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&volumes.stdout)
+            .lines()
+            .any(|v| v == format!("{}_hindsight-pgdata", instance.project)),
+        "{}",
+        text(&volumes)
+    );
+    let items = checklist(&off);
+    assert!(
+        items.iter().any(|item| item.starts_with(&format!(
+            "Memory is off, but the Space \"Personal\", connected by {OWNER_EMAIL}, is still connected to Hindsight."
+        ))),
+        "{off_text}"
+    );
+    assert!(!items.contains(&ANOTHER_SPACE_ITEM.to_string()));
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(folder.join("settings.json")).unwrap()).unwrap();
+    assert_eq!(settings["memory"], "off");
+    assert_eq!(settings["components"]["hindsight"], *hindsight);
+
+    // On again: the same version, and the old memories are back.
+    let secrets_before = fs::read(folder.join("secrets.env")).unwrap();
+    let mut on_env = vec![("RAKAZO_STACK_MEMORY", "on")];
+    on_env.extend(UNREACHABLE);
+    let on = instance.setup(&["--no-questions"], &on_env);
+    let on_text = text(&on);
+    assert!(on.status.success(), "{on_text}");
+    assert_eq!(
+        fs::read(folder.join("secrets.env")).unwrap(),
+        secrets_before
+    );
+    assert_eq!(db_sql("SELECT count(*) FROM memory_units"), units);
+    assert!(checklist(&on).contains(&ANOTHER_SPACE_ITEM.to_string()));
+
+    for secret in secret_values(&folder) {
+        for output in [&first_text, &off_text, &on_text] {
+            assert!(!output.contains(&secret), "setup printed a secret");
+        }
+    }
 }

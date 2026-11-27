@@ -152,12 +152,7 @@ impl<'a> ChatModel<'a> {
             return Ok(None);
         };
         let model = override_model.unwrap_or(default);
-        // It goes into a `.env` line unquoted.
-        let usable = !model.is_empty()
-            && model
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || "~-_./:@".contains(c));
-        if !usable {
+        if !is_model_id(model) {
             return Err("settings.json's rakazo_model isn't a model id.".to_string());
         }
         Ok(Some(Self {
@@ -166,6 +161,14 @@ impl<'a> ChatModel<'a> {
             model,
         }))
     }
+}
+
+/// A model id that can go into a `.env` line unquoted.
+pub fn is_model_id(model: &str) -> bool {
+    !model.is_empty()
+        && model
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "~-_./:@".contains(c))
 }
 
 /// The Checklist item about the key itself, if any.

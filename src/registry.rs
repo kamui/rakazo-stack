@@ -55,10 +55,7 @@ impl<'a> Ghcr<'a> {
 /// The release behind Docker Hub's `tailscale/tailscale:stable`. GitHub releases run
 /// ahead of the images, so the registry decides (spec §4).
 pub fn tailscale_stable(agent: &ureq::Agent) -> Result<RecordedImage, HttpError> {
-    let token_url = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:tailscale/tailscale:pull";
-    let body = crate::http::get_bytes(agent, token_url)?;
-    let token = parse_token(&body)
-        .ok_or_else(|| HttpError(format!("{token_url}: no token in the reply")))?;
+    let token = docker_hub_token(agent, "tailscale/tailscale")?;
     let url = "https://registry-1.docker.io/v2/tailscale/tailscale/manifests/stable";
     let fail = |reason: String| HttpError(format!("{url}: {reason}"));
     let mut response = agent
@@ -84,6 +81,40 @@ pub fn tailscale_stable(agent: &ureq::Agent) -> Result<RecordedImage, HttpError>
     let version = annotated_version(&manifest)
         .ok_or_else(|| fail("no version annotation in the manifest".to_string()))?;
     Ok(RecordedImage { version, digest })
+}
+
+/// The digest Docker Hub's `repository:tag` points to, or `None` when it has no such tag.
+pub fn docker_hub_digest(
+    agent: &ureq::Agent,
+    repository: &str,
+    tag: &str,
+) -> Result<Option<String>, HttpError> {
+    let token = docker_hub_token(agent, repository)?;
+    let url = format!("https://registry-1.docker.io/v2/{repository}/manifests/{tag}");
+    let response = agent
+        .head(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .header("Accept", MANIFEST_TYPES)
+        .call()
+        .map_err(|err| HttpError(format!("{url}: {err}")))?;
+    match response.status().as_u16() {
+        200 => response
+            .headers()
+            .get("docker-content-digest")
+            .and_then(|v| v.to_str().ok())
+            .map(|digest| Some(digest.to_string()))
+            .ok_or_else(|| HttpError(format!("{url}: no digest in the reply"))),
+        404 => Ok(None),
+        status => Err(HttpError(format!("{url}: HTTP {status}"))),
+    }
+}
+
+fn docker_hub_token(agent: &ureq::Agent, repository: &str) -> Result<String, HttpError> {
+    let url = format!(
+        "https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repository}:pull"
+    );
+    let body = crate::http::get_bytes(agent, &url)?;
+    parse_token(&body).ok_or_else(|| HttpError(format!("{url}: no token in the reply")))
 }
 
 /// The release tag, from the image index's version annotation: `1.2.3` is tag `v1.2.3`.

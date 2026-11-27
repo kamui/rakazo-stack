@@ -17,6 +17,14 @@ const RAKAZO_SECRETS: [(&str, usize); 6] = [
 /// Lemonade's key, on every OS; only the relay sends it (spec §6).
 pub const LEMONADE_API_KEY: (&str, usize) = ("LEMONADE_API_KEY", 32);
 
+pub const HINDSIGHT_DB_PASSWORD: &str = "HINDSIGHT_DB_PASSWORD";
+pub const HINDSIGHT_TENANT_KEY: &str = "HINDSIGHT_API_TENANT_API_KEY";
+
+/// Hindsight's two (spec §6), generated on the first run with memory on. The tenant key
+/// is 64 characters, inside Hindsight's 8–4096.
+const HINDSIGHT_SECRETS: [(&str, usize); 2] =
+    [(HINDSIGHT_DB_PASSWORD, 16), (HINDSIGHT_TENANT_KEY, 32)];
+
 const HEADER: &str =
     "# rakazo-stack secrets. Back this file up with the Instance; never share it.\n";
 
@@ -91,9 +99,26 @@ impl Secrets {
         }
     }
 
-    /// Adds every missing generated secret; existing values are kept as they are.
-    pub fn fill_missing(&mut self, mut random_hex: impl FnMut(usize) -> String) {
-        for (key, bytes) in RAKAZO_SECRETS.into_iter().chain([LEMONADE_API_KEY]) {
+    /// Adds every missing generated secret except Hindsight's; existing values are kept
+    /// as they are.
+    pub fn fill_missing(&mut self, random_hex: impl FnMut(usize) -> String) {
+        self.fill(
+            RAKAZO_SECRETS.into_iter().chain([LEMONADE_API_KEY]),
+            random_hex,
+        );
+    }
+
+    /// As [`Self::fill_missing`], for Hindsight's secrets.
+    pub fn fill_missing_hindsight(&mut self, random_hex: impl FnMut(usize) -> String) {
+        self.fill(HINDSIGHT_SECRETS, random_hex);
+    }
+
+    fn fill(
+        &mut self,
+        wanted: impl IntoIterator<Item = (&'static str, usize)>,
+        mut random_hex: impl FnMut(usize) -> String,
+    ) {
+        for (key, bytes) in wanted {
             if self.get(key).is_none() {
                 self.entries.push((key.to_string(), random_hex(bytes)));
             }
@@ -101,7 +126,18 @@ impl Secrets {
     }
 
     pub fn rakazo(&self) -> impl Iterator<Item = (&'static str, &str)> {
-        RAKAZO_SECRETS
+        self.present(&RAKAZO_SECRETS)
+    }
+
+    pub fn hindsight(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        self.present(&HINDSIGHT_SECRETS)
+    }
+
+    fn present(
+        &self,
+        names: &'static [(&'static str, usize)],
+    ) -> impl Iterator<Item = (&'static str, &str)> {
+        names
             .iter()
             .filter_map(|(key, _)| self.get(key).map(|value| (*key, value)))
     }
@@ -161,6 +197,20 @@ mod tests {
         secrets.set_pasted("OPENROUTER_API_KEY", Some(&key));
         assert!(!format!("{secrets:?}").contains(key.expose()));
         assert_eq!(Secrets::parse(&secrets.to_text()), secrets);
+    }
+
+    #[test]
+    fn hindsights_secrets_are_generated_only_when_asked_for() {
+        let mut secrets = Secrets::default();
+        secrets.fill_missing(|n| "x".repeat(n * 2));
+        assert_eq!(secrets.hindsight().count(), 0);
+        secrets.fill_missing_hindsight(|n| "y".repeat(n * 2));
+        assert_eq!(secrets.get(HINDSIGHT_DB_PASSWORD).map(str::len), Some(32));
+        assert_eq!(secrets.get(HINDSIGHT_TENANT_KEY).map(str::len), Some(64));
+        let kept = secrets.clone();
+        secrets.fill_missing_hindsight(|_| panic!("nothing is missing"));
+        assert_eq!(secrets, kept);
+        assert_eq!(secrets.rakazo().count(), 6);
     }
 
     #[test]
