@@ -5,21 +5,45 @@
 
 mod common;
 
+use std::cell::OnceCell;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 use common::{docker, is_wsl};
 
 static NEXT_INSTANCE: AtomicUsize = AtomicUsize::new(0);
+/// Test Instances run one at a time: their sidecars share the engine's firewall, and
+/// their supervisors share upstream's fixed probe network name.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 /// One test Instance: its own HOME, Compose project and web port, removed on drop with
-/// its volumes and networks.
+/// its volumes, networks, built images and the sidecar's firewall rules.
 struct TestInstance {
     home: tempfile::TempDir,
     project: String,
     web_port: u16,
+    /// The engine's egress state before this Instance's first `setup` started its sidecar.
+    egress_before: OnceCell<EgressBaseline>,
+    _turn: MutexGuard<'static, ()>,
+}
+
+/// `rakazo-c` rules on the engine, and whether another Instance's sidecar keeps them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EgressBaseline {
+    rules: bool,
+    other_sidecars: bool,
+}
+
+impl EgressBaseline {
+    /// Rules nobody's sidecar keeps: a stopped Instance's, or upstream's own install.
+    /// They aren't this test's to remove.
+    fn foreign(self) -> bool {
+        self.rules && !self.other_sidecars
+    }
 }
 
 impl TestInstance {
@@ -29,7 +53,11 @@ impl TestInstance {
             .local_addr()
             .unwrap()
             .port();
+        let turn = ONE_AT_A_TIME
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         Self {
+            _turn: turn,
             home: tempfile::tempdir().unwrap(),
             project: format!(
                 "rkst-test-{}-{}",
@@ -37,6 +65,7 @@ impl TestInstance {
                 NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed)
             ),
             web_port,
+            egress_before: OnceCell::new(),
         }
     }
 
@@ -46,6 +75,7 @@ impl TestInstance {
 
     /// Runs `setup` with stdin closed, so there is no terminal, as on CI.
     fn setup(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
+        self.egress_baseline();
         let mut command = Command::new(env!("CARGO_BIN_EXE_rakazo-stack"));
         for (name, _) in std::env::vars_os() {
             if name.as_encoded_bytes().starts_with(b"RAKAZO_STACK_") {
@@ -62,6 +92,13 @@ impl TestInstance {
             .stdin(Stdio::null())
             .output()
             .expect("run rakazo-stack")
+    }
+
+    fn egress_baseline(&self) -> EgressBaseline {
+        *self.egress_before.get_or_init(|| EgressBaseline {
+            rules: !egress_rules_on_engine().is_empty(),
+            other_sidecars: self.other_sidecars_running(),
+        })
     }
 
     fn origin(&self) -> String {
@@ -174,6 +211,7 @@ impl TestInstance {
 
 impl Drop for TestInstance {
     fn drop(&mut self) {
+        self.remove_egress_rules();
         let mut down = docker();
         down.args([
             "compose",
@@ -204,6 +242,217 @@ fn published_ports(instance: &TestInstance) -> Vec<String> {
                 .filter(|port| port.contains("->"))
                 .map(move |port| format!("{service} {port}"))
         })
+        .collect()
+}
+
+impl TestInstance {
+    fn compose(&self, args: &[&str]) -> Output {
+        docker()
+            .args(["compose", "-p", &self.project])
+            .args(args)
+            .current_dir(self.folder())
+            .output()
+            .unwrap()
+    }
+
+    fn sidecar_image(&self) -> String {
+        format!("{}-computer-egress", self.project)
+    }
+
+    /// Runs the sidecar image once with the wrapper's arguments, in the engine's namespace.
+    fn run_sidecar_image(&self, args: &[&str]) -> Output {
+        docker()
+            .args(["run", "--rm", "--pull", "never", "--network", "host"])
+            .args(["--cap-add", "NET_ADMIN", &self.sidecar_image()])
+            .args(args)
+            .output()
+            .unwrap()
+    }
+
+    fn other_sidecars_running(&self) -> bool {
+        let out = docker()
+            .args(["ps", "--filter"])
+            .arg(format!(
+                "label=com.docker.compose.service={COMPUTER_EGRESS}"
+            ))
+            .args(["--format", "{{.Label \"com.docker.compose.project\"}}"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .any(|project| project.trim() != self.project)
+    }
+
+    /// The rules match every `rakazo-c+` bridge on the engine, so another Instance's are
+    /// the same rules. They are removed only when this Instance's sidecar added them and,
+    /// once it has stopped, no other sidecar keeps them. Stopping first means that of two
+    /// test Instances ending together, the one that stops last still sees none.
+    fn remove_egress_rules(&self) {
+        let Some(before) = self.egress_before.get() else {
+            return;
+        };
+        if before.foreign() || !self.folder().exists() {
+            return;
+        }
+        let _ = self.compose(&["stop", COMPUTER_EGRESS]);
+        if self.other_sidecars_running() {
+            return;
+        }
+        let _ = self.run_sidecar_image(&["--remove"]);
+    }
+
+    fn service_log(&self, service: &str) -> String {
+        text(&self.compose(&["logs", "--no-log-prefix", service]))
+    }
+
+    fn started_at(&self, service: &str) -> String {
+        let id = self.compose(&["ps", "-q", service]);
+        let id = String::from_utf8_lossy(&id.stdout).trim().to_string();
+        let out = docker()
+            .args(["inspect", "--format", "{{.State.StartedAt}}", &id])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// `POST /computers` on the supervisor, as Rakazo's API calls it, for a bot whose home
+    /// setup makes the way upstream's data-init would.
+    fn create_computer(&self, bot: &str) -> (u16, String) {
+        let home = format!("/data/homes/{bot}");
+        let mkdir = self.compose(&[
+            "exec",
+            "-T",
+            "supervisor",
+            "sh",
+            "-c",
+            &format!("mkdir -p {home} && chown 1000:1000 {home}"),
+        ]);
+        assert!(mkdir.status.success(), "{}", text(&mkdir));
+        let out = self.compose(&[
+            "exec",
+            "-T",
+            "supervisor",
+            "node",
+            "-e",
+            CREATE_COMPUTER,
+            bot,
+            "rkst-space",
+        ]);
+        let reply = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let (status, body) = reply.split_once(' ').unwrap_or((&reply, ""));
+        (status.parse().unwrap_or(0), body.to_string())
+    }
+
+    fn wait_for_log(&self, service: &str, needle: &str, count: usize) {
+        for _ in 0..60 {
+            if self.service_log(service).matches(needle).count() >= count {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+        panic!(
+            "{service} never logged {needle:?}: {}",
+            self.service_log(service)
+        );
+    }
+}
+
+const CREATE_COMPUTER: &str = r#"
+const [botId, spaceId] = process.argv.slice(1);
+fetch("http://127.0.0.1:7091/computers", {
+  method: "POST",
+  headers: {
+    authorization: `Bearer ${process.env.SANDBOX_SUPERVISOR_TOKEN}`,
+    "content-type": "application/json",
+    "x-rakazo-bot-id": botId,
+    "x-rakazo-space-id": spaceId,
+  },
+  body: JSON.stringify({ botId, spaceId, homePath: `/data/homes/${botId}` }),
+}).then(async (r) => console.log(r.status, (await r.text()).replace(/\s+/g, " ")));
+"#;
+
+/// Bot computers are named by bot, not by Compose project, so `compose down` leaves them.
+struct BotComputers(Vec<String>);
+
+impl Drop for BotComputers {
+    fn drop(&mut self) {
+        for bot in &self.0 {
+            let _ = docker()
+                .args(["rm", "-f", "-v", &format!("rakazo-bot-{bot}")])
+                .output();
+            let networks = docker()
+                .args(["network", "ls", "-q", "--filter"])
+                .arg(format!("label=rakazo.botId={bot}"))
+                .output()
+                .unwrap();
+            for network in String::from_utf8_lossy(&networks.stdout).split_whitespace() {
+                let _ = docker().args(["network", "rm", network]).output();
+            }
+        }
+    }
+}
+
+/// How a TCP connection from inside a container ended: 0 opened, 124 timed out (dropped),
+/// anything else refused.
+fn connect_from(container: &str, address: &str, port: u16) -> i32 {
+    let out = docker()
+        .args(["exec", container, "bash", "-c"])
+        .arg(format!(
+            "timeout 3 bash -c 'exec 3<>/dev/tcp/{address}/{port}' 2>/dev/null; echo $?"
+        ))
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
+}
+
+fn addresses(container: &str, format: &str) -> Vec<String> {
+    let out = docker()
+        .args(["inspect", "--format", format, container])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .filter(|address| address.contains('.'))
+        .map(str::to_string)
+        .collect()
+}
+
+const COMPUTER_EGRESS: &str = "computer-egress";
+
+/// Every `rakazo-c` rule in the engine's `DOCKER-USER`, on both iptables backends, read
+/// from a throwaway container on the sidecar's own base image. Only that chain: Docker's
+/// own chains name each running computer's `rakazo-c…` bridge too.
+fn egress_rules_on_engine() -> Vec<String> {
+    let base = include_str!("../computer-egress/Dockerfile")
+        .lines()
+        .find_map(|line| line.strip_prefix("FROM "))
+        .unwrap()
+        .trim();
+    let name = format!(
+        "rkst-test-{}-firewall-{}",
+        std::process::id(),
+        NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed)
+    );
+    let out = docker()
+        .args(["run", "--rm", "--name", &name, "--network", "host"])
+        .args(["--cap-add", "NET_ADMIN", base, "sh", "-c"])
+        .arg(
+            "apk add --quiet --no-cache iptables iptables-legacy >/dev/null && \
+             for t in iptables ip6tables iptables-legacy ip6tables-legacy; do \
+               $t -S DOCKER-USER 2>/dev/null || true; \
+             done",
+        )
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "couldn't read the engine's firewall: {}",
+        text(&out)
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|rule| rule.contains("rakazo-c"))
+        .map(str::to_string)
         .collect()
 }
 
@@ -784,4 +1033,198 @@ fn invalid_input_stops_before_anything_changes() {
         assert_eq!(left, [".lock"], "only the lock is there");
         assert!(instance.containers("{{.Names}}").is_empty());
     }
+}
+
+#[test]
+#[ignore = "needs Docker and pulls Rakazo's images; CI and the dev machine run it with --include-ignored"]
+fn bot_computers_get_restricted_egress_and_fail_closed_without_the_sidecar() {
+    let instance = TestInstance::new();
+    let folder = instance.folder();
+    let bots = BotComputers(vec![
+        format!("{}-bot-1", instance.project),
+        format!("{}-bot-2", instance.project),
+    ]);
+
+    let fake_bin = tempfile::tempdir().unwrap();
+    let sudo_ran = fake_bin.path().join("sudo-ran");
+    let sudo = fake_bin.path().join("sudo");
+    fs::write(
+        &sudo,
+        format!("#!/bin/sh\ntouch '{}'\nexit 1\n", sudo_ran.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&sudo, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        fake_bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    assert_eq!(
+        instance.egress_baseline(),
+        EgressBaseline {
+            rules: false,
+            other_sidecars: false
+        },
+        "this test removes the engine's rakazo-c rules part-way, so it needs an engine \
+         where no other Instance has them"
+    );
+    let out = instance.setup(
+        &["--no-questions"],
+        &[
+            ("RAKAZO_STACK_OWNER_EMAIL", OWNER_EMAIL),
+            ("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD),
+            ("PATH", &path),
+        ],
+    );
+    let out_text = text(&out);
+    assert!(out.status.success(), "{out_text}");
+    assert!(!sudo_ran.exists(), "setup ran sudo");
+    assert!(
+        !checklist(&out).iter().any(|item| item.contains("egress")),
+        "{out_text}"
+    );
+    assert!(
+        instance
+            .service_log("supervisor")
+            .contains("restricted computer egress verified")
+    );
+    let env = fs::read_to_string(folder.join(".env")).unwrap();
+    assert!(
+        env.lines()
+            .any(|l| l == "SANDBOX_COMPUTER_EGRESS=restricted")
+    );
+
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(folder.join("settings.json")).unwrap()).unwrap();
+    let tag = settings["components"]["rakazo"]["version"]
+        .as_str()
+        .unwrap();
+    let upstream = ureq::Agent::new_with_defaults()
+        .get(format!(
+            "https://raw.githubusercontent.com/elie222/rakazo/{tag}/infra/compose/restrict-computer-egress.sh"
+        ))
+        .call()
+        .unwrap()
+        .into_body()
+        .read_to_vec()
+        .unwrap();
+    let in_image = docker()
+        .args(["run", "--rm", "--pull", "never", "--entrypoint", "cat"])
+        .args([
+            &instance.sidecar_image(),
+            "/usr/local/lib/rakazo/restrict-computer-egress.sh",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        in_image.stdout, upstream,
+        "the script in the image is Rakazo's, byte for byte"
+    );
+    let printed = instance.run_sidecar_image(&["--print"]);
+    let printed = String::from_utf8_lossy(&printed.stdout).into_owned();
+    assert!(!printed.is_empty());
+    for rule in printed.lines() {
+        assert!(
+            rule.contains(" -i rakazo-c+ "),
+            "{rule} matches more than computer bridges"
+        );
+    }
+
+    let (status, reply) = instance.create_computer(&bots.0[0]);
+    assert_eq!(status, 200, "{reply}");
+    let computer = format!("rakazo-bot-{}", bots.0[0]);
+    assert_eq!(
+        connect_from(&computer, "1.1.1.1", 443),
+        0,
+        "the internet is reachable"
+    );
+    let gateways = addresses(
+        &computer,
+        "{{range .NetworkSettings.Networks}}{{.Gateway}} {{end}}",
+    );
+    let app_gateway = addresses(
+        &format!("{}-api-1", instance.project),
+        "{{range .NetworkSettings.Networks}}{{.Gateway}} {{end}}",
+    );
+    for (what, address, port) in gateways
+        .iter()
+        .flat_map(|g| [("the host", g.as_str(), 22), ("the host", g.as_str(), 1)])
+        .chain(
+            app_gateway
+                .iter()
+                .map(|g| ("a private-range address", g.as_str(), 1)),
+        )
+        .chain([("the metadata address", "169.254.169.254", 80)])
+    {
+        assert_eq!(
+            connect_from(&computer, address, port),
+            124,
+            "{what} {address}:{port} is reachable"
+        );
+    }
+    for (service, port) in [("api", 3100), ("postgres", 5432)] {
+        let container = format!("{}-{service}-1", instance.project);
+        let ips = addresses(
+            &container,
+            "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}",
+        );
+        assert!(!ips.is_empty());
+        for ip in ips {
+            assert_ne!(
+                connect_from(&computer, &ip, port),
+                0,
+                "{service} at {ip} is reachable"
+            );
+        }
+    }
+
+    assert!(
+        instance
+            .compose(&["stop", COMPUTER_EGRESS])
+            .status
+            .success()
+    );
+    let removed = instance.compose(&["run", "--rm", COMPUTER_EGRESS, "--remove"]);
+    assert!(removed.status.success(), "{}", text(&removed));
+    assert!(egress_rules_on_engine().is_empty());
+    assert!(
+        instance
+            .compose(&["restart", "supervisor"])
+            .status
+            .success()
+    );
+    instance.wait_for_log("supervisor", "computer egress probe failed", 1);
+    let (status, reply) = instance.create_computer(&bots.0[1]);
+    assert_eq!(
+        status, 500,
+        "without the rules a computer is refused: {reply}"
+    );
+    assert!(reply.contains("restrict-computer-egress.sh"), "{reply}");
+
+    let supervisor_started = instance.started_at("supervisor");
+    let applied = instance
+        .service_log(COMPUTER_EGRESS)
+        .matches("computer egress rules applied")
+        .count();
+    assert!(
+        instance
+            .compose(&["start", COMPUTER_EGRESS])
+            .status
+            .success()
+    );
+    instance.wait_for_log(
+        COMPUTER_EGRESS,
+        "computer egress rules applied",
+        applied + 1,
+    );
+    let (status, reply) = instance.create_computer(&bots.0[1]);
+    assert_eq!(
+        status, 200,
+        "with the rules back a computer starts: {reply}"
+    );
+    assert_eq!(
+        instance.started_at("supervisor"),
+        supervisor_started,
+        "without restarting the supervisor"
+    );
 }

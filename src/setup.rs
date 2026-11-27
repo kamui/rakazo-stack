@@ -9,6 +9,7 @@ use crate::access::{self, AUTH_KEY_NAME, Access};
 use crate::answers::{self, FrontEnd, NoQuestions, Terminal, Wizard};
 use crate::checklist::Checklist;
 use crate::composio;
+use crate::computer_egress;
 use crate::database_settings;
 use crate::docker::{ContainerSummary, Docker};
 use crate::envfile::{self, EnvInputs, STACK_COMPOSE_FILE, TailscaleEnv};
@@ -90,6 +91,8 @@ pub struct Setup<'a> {
     pub docker: &'a Docker,
     pub folder: &'a InstanceFolder,
     pub no_questions: bool,
+    /// From preflight: `docker info` reports the `nftables` firewall backend.
+    pub nftables: bool,
 }
 
 impl Setup<'_> {
@@ -200,7 +203,24 @@ impl Setup<'_> {
         }
 
         let rakazo_file = envfile::rakazo_compose_file(&release.tag);
-        if self.folder.read(&rakazo_file)?.is_none() {
+        let fetched = self.folder.read(&rakazo_file)?.is_some();
+        // The compose file is written last, so its presence means the script beside it
+        // came from the same tag.
+        let script = match self
+            .folder
+            .read(computer_egress::SCRIPT)?
+            .filter(|_| fetched)
+        {
+            Some(script) => script,
+            None => github::fetch_file(
+                &agent,
+                RAKAZO_REPO,
+                &release.tag,
+                computer_egress::UPSTREAM_SCRIPT,
+            )?,
+        };
+        computer_egress::write_build_folder(self.folder, &script)?;
+        if !fetched {
             let upstream =
                 github::fetch_file(&agent, RAKAZO_REPO, &release.tag, RAKAZO_COMPOSE_PATH)?;
             self.folder.write(&rakazo_file, &upstream)?;
@@ -251,7 +271,9 @@ impl Setup<'_> {
         let rakazo_services =
             self.services_besides(&[VOICE_SERVICES.as_slice(), &[tailscale::SERVICE]].concat())?;
         log.say(&format!("Pulling Rakazo {} images…", stack.release.tag));
-        self.compose_for(&["pull", "--quiet"], &rakazo_services)?;
+        self.compose_for(&["pull", "--quiet", "--ignore-buildable"], &rakazo_services)?;
+        log.say("Building the computer-egress sidecar…");
+        self.compose(&["build", "--quiet", computer_egress::SERVICE])?;
         let voice_started = self.start_voice(&log, &mut checklist);
         log.say("Starting Rakazo…");
         self.start(&stack, &rakazo_services)?;
@@ -296,6 +318,13 @@ impl Setup<'_> {
             checklist.add(tailscale::console_item(settings.device_name()));
         }
 
+        computer_egress::check(
+            self.docker,
+            self.folder.path(),
+            self.nftables,
+            &log,
+            &mut checklist,
+        )?;
         let rakazo = LocalRakazo {
             docker: self.docker,
             folder: self.folder.path(),
