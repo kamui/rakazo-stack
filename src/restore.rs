@@ -17,6 +17,7 @@ use crate::docker::Docker;
 use crate::envfile::{self, EnvInputs};
 use crate::http;
 use crate::instance::InstanceFolder;
+use crate::lemonade::transcription_model;
 use crate::lemond;
 use crate::memory;
 use crate::overrides;
@@ -110,6 +111,9 @@ struct VersionPlan {
     /// Lemonade's record is an image digest, or on macOS a tarball's SHA-256, so it
     /// doesn't carry over to an OS that runs Lemonade the other way.
     lemonade_afresh: bool,
+    /// The Whisper model the Owner's voice connection was made with on the Backup's OS,
+    /// when that is the other side of the macOS line (spec §9).
+    voice_model_due: Option<&'static str>,
 }
 
 /// What happens to the Backup's `tailscale-state`.
@@ -153,6 +157,9 @@ impl Restore<'_> {
     ) -> Result<(), RestoreError> {
         println!("Reading the Backup…");
         let mut opened = open(self.file, passphrase).map_err(RestoreError::before)?;
+        if let Some(platform) = overrides::backup_platform() {
+            opened.manifest.platform = Some(platform);
+        }
         let plan = version_rule(
             &opened.manifest,
             &opened.settings,
@@ -729,15 +736,16 @@ fn version_rule(
         }
     }
     let native = |platform: Platform| platform == Platform::MacOs;
+    let other_side = manifest
+        .platform
+        .as_deref()
+        .and_then(Platform::from_id)
+        .filter(|from| native(*from) != native(here));
     Ok(VersionPlan {
         rakazo_to_latest: resolve::below_floor(&settings.components.rakazo.version),
         hindsight_to_latest: hindsight.is_some_and(|h| resolve::hindsight_below_floor(&h.version)),
-        lemonade_afresh: settings.components.lemonade.is_some()
-            && manifest
-                .platform
-                .as_deref()
-                .and_then(Platform::from_id)
-                .is_some_and(|from| native(from) != native(here)),
+        lemonade_afresh: settings.components.lemonade.is_some() && other_side.is_some(),
+        voice_model_due: other_side.map(transcription_model),
     })
 }
 
@@ -792,6 +800,9 @@ impl VersionPlan {
         }
         if self.lemonade_afresh {
             settings.components.lemonade = None;
+        }
+        if let Some(model) = self.voice_model_due {
+            settings.voice_model_due = Some(model.to_string());
         }
         Ok(())
     }
@@ -1127,6 +1138,44 @@ mod tests {
         plan.apply(&mut dropped, &http::agent(), &|_| {}).unwrap();
         assert_eq!(dropped.components.lemonade, None);
         assert_eq!(dropped.components.rakazo, recorded.components.rakazo);
+    }
+
+    #[test]
+    fn voice_moves_off_the_backups_whisper_model_only_across_the_native_line() {
+        let due = |from: Option<&str>, here: Platform| {
+            version_rule(
+                &manifest(env!("CARGO_PKG_VERSION"), from),
+                &settings("v0.16.0"),
+                &ALL_PARTS,
+                &secrets(),
+                here,
+            )
+            .unwrap()
+            .voice_model_due
+        };
+        assert_eq!(
+            due(Some("macos"), Platform::Linux),
+            Some("Whisper-Large-v3-Turbo")
+        );
+        assert_eq!(due(Some("linux"), Platform::MacOs), Some("Whisper-Small"));
+        assert_eq!(due(Some("wsl"), Platform::MacOs), Some("Whisper-Small"));
+        assert_eq!(due(Some("linux"), Platform::Wsl), None);
+        assert_eq!(due(Some("macos"), Platform::MacOs), None);
+        assert_eq!(due(None, Platform::Linux), None);
+
+        let mut restored = settings("v0.16.0");
+        VersionPlan {
+            voice_model_due: Some("Whisper-Small"),
+            ..VersionPlan::default()
+        }
+        .apply(&mut restored, &http::agent(), &|_| {})
+        .unwrap();
+        assert_eq!(restored.voice_model_due.as_deref(), Some("Whisper-Small"));
+        let mut same_os = settings("v0.16.0");
+        VersionPlan::default()
+            .apply(&mut same_os, &http::agent(), &|_| {})
+            .unwrap();
+        assert_eq!(same_os, settings("v0.16.0"));
     }
 
     #[test]

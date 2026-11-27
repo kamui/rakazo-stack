@@ -8,7 +8,7 @@ use std::process::{Output, Stdio};
 use std::time::Duration;
 
 use crate::answers::Password;
-use crate::database_settings::{Connect, DefaultSpace, Rakazo, Session};
+use crate::database_settings::{Connect, DefaultSpace, Rakazo, Session, VoiceConnection};
 use crate::docker::Docker;
 use crate::lemonade::{RELAY_URL, SPEECH_MODEL, TRANSCRIPTION_MODEL};
 use crate::memory::ConnectedSpace;
@@ -182,14 +182,24 @@ impl Rakazo for LocalRakazo<'_> {
             .ok_or_else(|| "Rakazo's sign-in reply had no token".to_string())
     }
 
-    fn connect_voice(&self, session: &Session) -> Result<(), String> {
+    fn connect_voice(&self, session: &Session, voice_id: Option<&str>) -> Result<(), String> {
         self.post(
             "/rpc/voice/connect",
             Some(session),
             &[],
-            &voice_connect_body(),
+            &voice_connect_body(voice_id),
         )
         .map(drop)
+    }
+
+    fn voice_connection(&self, session: &Session) -> Result<Option<VoiceConnection>, String> {
+        let reply = self.post(
+            "/rpc/voice/credentials",
+            Some(session),
+            &[],
+            r#"{"json":{}}"#,
+        )?;
+        self_hosted_voice(&reply)
     }
 
     fn connect_model(
@@ -249,18 +259,42 @@ fn voice_query(email: &str) -> String {
     )
 }
 
+const SELF_HOSTED_VOICE: &str = "openai-compatible";
+
 /// oRPC's body shape. Rakazo checks the server (models, then voices) before it saves,
-/// and picks the voice.
-fn voice_connect_body() -> String {
-    serde_json::json!({
-        "json": {
-            "provider": "openai-compatible",
-            "baseUrl": RELAY_URL,
-            "ttsModel": SPEECH_MODEL,
-            "sttModel": TRANSCRIPTION_MODEL,
-        }
-    })
-    .to_string()
+/// and picks the voice unless it is given one.
+fn voice_connect_body(voice_id: Option<&str>) -> String {
+    let mut body = serde_json::json!({
+        "provider": SELF_HOSTED_VOICE,
+        "baseUrl": RELAY_URL,
+        "ttsModel": SPEECH_MODEL,
+        "sttModel": TRANSCRIPTION_MODEL,
+    });
+    if let Some(voice_id) = voice_id {
+        body["voiceId"] = voice_id.into();
+    }
+    serde_json::json!({ "json": body }).to_string()
+}
+
+/// Rakazo lists the newest connection first, the one `voice.connect` updates.
+fn self_hosted_voice(reply: &str) -> Result<Option<VoiceConnection>, String> {
+    #[derive(serde::Deserialize)]
+    struct Listed {
+        provider: String,
+        #[serde(flatten)]
+        connection: VoiceConnection,
+    }
+    #[derive(serde::Deserialize)]
+    struct Reply {
+        json: Vec<Listed>,
+    }
+    let reply: Reply = serde_json::from_str(reply)
+        .map_err(|err| format!("unexpected reply from Rakazo's voice.credentials: {err}"))?;
+    Ok(reply
+        .json
+        .into_iter()
+        .find(|listed| listed.provider == SELF_HOSTED_VOICE)
+        .map(|listed| listed.connection))
 }
 
 /// The name setup gives its connection, so that a new key goes to it even when the user
@@ -403,11 +437,36 @@ mod tests {
 
     #[test]
     fn the_voice_connect_body_is_the_specs() {
-        let body: serde_json::Value = serde_json::from_str(&voice_connect_body()).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&voice_connect_body(None)).unwrap();
         assert_eq!(
             body,
             serde_json::json!({"json":{"provider":"openai-compatible","baseUrl":"http://lemonade-relay:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Small"}})
         );
+        let kept: serde_json::Value =
+            serde_json::from_str(&voice_connect_body(Some("af_bella"))).unwrap();
+        assert_eq!(kept["json"]["voiceId"], "af_bella");
+        assert_eq!(kept["json"]["sttModel"], "Whisper-Small");
+    }
+
+    #[test]
+    fn reads_the_newest_self_hosted_connection_from_the_credentials_list() {
+        let reply = format!(
+            r#"{{"json":[{{"id":"placeholder-hosted-id","provider":"elevenlabs","hasKey":true,"isDefault":false,"voiceId":"placeholder-voice","speechModel":"","transcribe":true,"endpoint":"","sttEndpoint":"","ttsModel":"","sttModel":""}},{}]}}"#,
+            &RECORDED_VOICE_CONNECTED[8..RECORDED_VOICE_CONNECTED.len() - 1]
+        );
+        let connection = self_hosted_voice(&reply).unwrap().unwrap();
+        assert_eq!(
+            connection,
+            VoiceConnection {
+                is_default: true,
+                voice_id: "af_heart".into(),
+                endpoint: RELAY_URL.into(),
+                stt_endpoint: String::new(),
+                stt_model: "Whisper-Small".into(),
+            }
+        );
+        assert_eq!(self_hosted_voice(r#"{"json":[]}"#).unwrap(), None);
+        assert!(self_hosted_voice("<html>").is_err());
     }
 
     /// `POST /rpc/voice/connect` on Rakazo v0.16.0, with the id replaced.
@@ -593,7 +652,10 @@ mod tests {
         fn voice_exists(&self, _: &str) -> Result<bool, String> {
             unreachable!()
         }
-        fn connect_voice(&self, _: &Session) -> Result<(), String> {
+        fn connect_voice(&self, _: &Session, _: Option<&str>) -> Result<(), String> {
+            unreachable!()
+        }
+        fn voice_connection(&self, _: &Session) -> Result<Option<VoiceConnection>, String> {
             unreachable!()
         }
         fn model_connection(&self, _: &str, _: Provider) -> Result<Option<String>, String> {

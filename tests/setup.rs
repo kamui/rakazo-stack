@@ -608,6 +608,11 @@ impl OwnerSession {
         self.try_post(path, body).unwrap()
     }
 
+    fn sign_out(self) {
+        let (status, reply) = self.post("/api/auth/sign-out", &serde_json::json!({}));
+        assert_eq!(status, 200, "{reply}");
+    }
+
     fn try_post(&self, path: &str, body: &serde_json::Value) -> Result<(u16, String), ureq::Error> {
         let mut response = self
             .agent
@@ -2516,6 +2521,21 @@ fn restore_brings_the_instance_back_on_its_recorded_versions() {
             .unwrap();
         assert!(written.status.success(), "{}", text(&written));
 
+        // The Owner's voice as setup connects it on a Mac, with a voice the Owner picked.
+        let session = OwnerSession::sign_in(&instance.origin());
+        session.rpc(
+            "voice/connect",
+            serde_json::json!({
+                "provider": "openai-compatible",
+                "baseUrl": "http://lemonade-relay:13306/api/v1",
+                "ttsModel": "kokoro-v1",
+                "sttModel": MAC_WHISPER,
+                "voiceId": PICKED_VOICE,
+            }),
+        );
+        session.sign_out();
+        assert_eq!(owner_voice(&instance.origin())["sttModel"], MAC_WHISPER);
+
         let out = instance.backup(Some(BACKUP_PASSPHRASE));
         assert!(out.status.success(), "{}", text(&out));
         fs::copy(&instance.backups()[0], &backup).unwrap();
@@ -2633,9 +2653,11 @@ fn restore_brings_the_instance_back_on_its_recorded_versions() {
         instance.sql("SELECT count(*) FROM space_memory_configs WHERE provider = 'hindsight'"),
         "1"
     );
-    assert_ne!(
-        instance.sql("SELECT count(*) FROM user_voice_credentials"),
-        "0"
+    // The same OS as far as restore knows, so setup leaves the voice connection alone.
+    let voice = owner_voice(&instance.origin());
+    assert_eq!(
+        (&voice["sttModel"], &voice["voiceId"]),
+        (&MAC_WHISPER.into(), &PICKED_VOICE.into())
     );
     assert_eq!(
         instance.in_supervisor(&format!("sha256sum /data/homes/{bot}/random.bin")),
@@ -2716,6 +2738,79 @@ fn restore_brings_the_instance_back_on_its_recorded_versions() {
         fs::read(folder.join("secrets.env")).unwrap(),
         secrets_before
     );
+
+    // A Backup from a Mac: without the Owner password the voice move waits for setup,
+    // which reconnects the relay with this OS's Whisper model and keeps the voice.
+    let mut from_mac = on_env.clone();
+    from_mac.push(("RAKAZO_STACK_TEST_BACKUP_PLATFORM", "macos"));
+    let replaced = instance.restore_typing(
+        &["--replace", file],
+        &from_mac,
+        &format!("{}\n", instance.project),
+    );
+    let replaced_text = text(&replaced);
+    println!("{replaced_text}");
+    assert!(replaced.status.success(), "{replaced_text}");
+    // `script` ends its lines with `\r\n`, which `checklist` doesn't split on.
+    assert!(
+        replaced_text.lines().any(|line| line.starts_with(&format!(
+            "  - The Owner's voice may still transcribe with {MAC_WHISPER}"
+        )) && line.contains("RAKAZO_STACK_OWNER_PASSWORD")),
+        "{replaced_text}"
+    );
+    assert_eq!(instance.settings()["voice_model_due"], MAC_WHISPER);
+    let mut env = vec![
+        ("RAKAZO_STACK_OWNER_EMAIL", OWNER_EMAIL),
+        ("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD),
+    ];
+    env.extend(UNREACHABLE);
+    let rerun = instance.setup(&["--no-questions"], &env);
+    assert!(rerun.status.success(), "{}", text(&rerun));
+    assert!(
+        !checklist(&rerun)
+            .iter()
+            .any(|item| item.contains("voice") || item.contains("Voice")),
+        "{}",
+        text(&rerun)
+    );
+    let voice = owner_voice(&instance.origin());
+    assert_eq!(
+        (
+            &voice["sttModel"],
+            &voice["voiceId"],
+            &voice["endpoint"],
+            &voice["isDefault"]
+        ),
+        (
+            &"Whisper-Small".into(),
+            &PICKED_VOICE.into(),
+            &"http://lemonade-relay:13306/api/v1".into(),
+            &true.into()
+        )
+    );
+    assert_eq!(
+        instance.sql("SELECT count(*) FROM user_voice_credentials"),
+        "1"
+    );
+    assert_eq!(instance.settings().get("voice_model_due"), None);
+}
+
+/// macOS's Whisper model (spec §9), and a Kokoro voice other than the `af_heart` Rakazo
+/// picks by itself.
+const MAC_WHISPER: &str = "Whisper-Large-v3-Turbo";
+const PICKED_VOICE: &str = "af_bella";
+
+/// The Owner's self-hosted voice connection, as Rakazo's settings page lists it.
+fn owner_voice(origin: &str) -> serde_json::Value {
+    let session = OwnerSession::sign_in(origin);
+    let mut listed = session.rpc("voice/credentials", serde_json::json!({}));
+    session.sign_out();
+    let connections = listed.as_array_mut().unwrap();
+    let position = connections
+        .iter()
+        .position(|c| c["provider"] == "openai-compatible")
+        .expect("a self-hosted voice connection");
+    connections.swap_remove(position)
 }
 
 impl TestInstance {

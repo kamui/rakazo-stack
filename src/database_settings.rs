@@ -113,6 +113,28 @@ pub struct DefaultSpace {
     pub memory: bool,
 }
 
+/// The Owner's self-hosted voice connection, as `voice.credentials` lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceConnection {
+    pub is_default: bool,
+    pub voice_id: String,
+    pub endpoint: String,
+    pub stt_endpoint: String,
+    pub stt_model: String,
+}
+
+impl VoiceConnection {
+    /// Setup's own connection as it was made on another OS: the voice in use, transcribing
+    /// through the relay with `model`. Anything else is the Self-hoster's own choice.
+    pub fn is_setups_with(&self, model: &str) -> bool {
+        self.is_default
+            && self.endpoint == RELAY_URL
+            && self.stt_endpoint.is_empty()
+            && self.stt_model == model
+    }
+}
+
 /// The running Instance's Rakazo, as the fill-in sequence uses it.
 pub trait Rakazo {
     /// Read-only: a verified user with this email and a password (`credential`) account.
@@ -128,8 +150,12 @@ pub trait Rakazo {
     fn spaces_on_hindsight(&self) -> Result<Vec<ConnectedSpace>, String>;
     fn bootstrap_owner(&self, email: &str, password: &Password) -> Result<(), String>;
     fn sign_in(&self, email: &str, password: &Password) -> Result<Session, String>;
-    /// `POST /rpc/voice/connect` with the relay, `kokoro-v1` and `Whisper-Small`.
-    fn connect_voice(&self, session: &Session) -> Result<(), String>;
+    /// `POST /rpc/voice/connect` with the relay, `kokoro-v1` and this OS's Whisper model.
+    /// It updates the Owner's self-hosted connection when there is one; `voice_id` keeps
+    /// the voice, which Rakazo otherwise sets to the server's first.
+    fn connect_voice(&self, session: &Session, voice_id: Option<&str>) -> Result<(), String>;
+    /// `POST /rpc/voice/credentials`: the self-hosted connection `connect_voice` would update.
+    fn voice_connection(&self, session: &Session) -> Result<Option<VoiceConnection>, String>;
     /// `POST /rpc/models/connect` with the key.
     fn connect_model(
         &self,
@@ -161,6 +187,8 @@ pub struct ModelFill<'a> {
 pub struct Fillable<'a> {
     /// The voice models are there, so voice is a setting to fill.
     pub voice: bool,
+    /// `settings.json`'s `voice_model_due`, cleared once the Owner's connection is off it.
+    pub voice_model_due: Option<&'a mut Option<String>>,
     /// Hindsight's tenant key, when memory is on.
     pub memory: Option<&'a str>,
     pub model: Option<ModelFill<'a>>,
@@ -195,20 +223,35 @@ pub fn fill_in(
         return;
     }
     // A new Owner account has no voice yet, whatever an earlier one had.
-    let voice = if !fillable.voice {
-        Decision::Leave
+    let voice_present = if !fillable.voice {
+        None
     } else if fill_owner {
-        Decision::Fill
+        Some(false)
     } else {
         match rakazo.voice_exists(email) {
-            Ok(present) => decide(present, filled.contains(&DatabaseSetting::Voice)),
+            Ok(present) => Some(present),
             Err(err) => {
                 checklist.add(voice_not_connected(&format!(
                     "setup couldn't check Rakazo's database for it ({err})"
                 )));
-                Decision::Leave
+                None
             }
         }
+    };
+    let voice = match voice_present {
+        None => Decision::Leave,
+        Some(_) if fill_owner => Decision::Fill,
+        Some(present) => decide(present, filled.contains(&DatabaseSetting::Voice)),
+    };
+    // A restore from the other side of the macOS line (spec §16). A connection made on
+    // this run already has this OS's model.
+    let voice_model = match (voice_present, fillable.voice_model_due.take()) {
+        (Some(true), Some(due)) => due.clone().map(|model| (model, due)),
+        (Some(false), Some(due)) => {
+            *due = None;
+            None
+        }
+        _ => None,
     };
     let fill_voice = wanted(
         front,
@@ -228,7 +271,7 @@ pub fn fill_in(
         _ => None,
     };
     let fill_memory = memory_space.is_some() || (fill_owner && fillable.memory.is_some());
-    if !fill_owner && !fill_voice && !fill_memory && connect.is_none() {
+    if !fill_owner && !fill_voice && !fill_memory && connect.is_none() && voice_model.is_none() {
         return;
     }
 
@@ -238,6 +281,9 @@ pub fn fill_in(
         }
         if fill_voice {
             checklist.add(voice_not_connected(reason));
+        }
+        if let Some((stale, _)) = &voice_model {
+            checklist.add(voice_model_not_changed(stale, reason));
         }
         if let (Some(model), Some(connect)) = (model, &connect) {
             checklist.add(model_not_connected(model, connect, reason));
@@ -283,6 +329,9 @@ pub fn fill_in(
             if fill_voice {
                 checklist.add(voice_not_connected(&reason));
             }
+            if let Some((stale, _)) = &voice_model {
+                checklist.add(voice_model_not_changed(stale, &reason));
+            }
             if let (Some(model), Some(connect)) = (model, &connect) {
                 checklist.add(model_not_connected(model, connect, &reason));
             }
@@ -293,12 +342,25 @@ pub fn fill_in(
         }
     };
     if fill_voice {
-        match rakazo.connect_voice(&session) {
+        match rakazo.connect_voice(&session, None) {
             Ok(()) => {
                 record(filled, DatabaseSetting::Voice);
                 checklist.add(voice_consent());
             }
             Err(err) => checklist.add(voice_not_connected(&err)),
+        }
+    }
+    if let Some((stale, due)) = voice_model {
+        let moved = match rakazo.voice_connection(&session) {
+            Ok(Some(connection)) if connection.is_setups_with(&stale) => {
+                rakazo.connect_voice(&session, Some(&connection.voice_id))
+            }
+            Ok(_) => Ok(()),
+            Err(err) => Err(err),
+        };
+        match moved {
+            Ok(()) => *due = None,
+            Err(err) => checklist.add(voice_model_not_changed(&stale, &err)),
         }
     }
     if let (Some(fill), Some(connect)) = (fillable.model.as_mut(), connect) {
@@ -484,6 +546,12 @@ fn voice_consent() -> String {
     )
 }
 
+fn voice_model_not_changed(stale: &str, reason: &str) -> String {
+    format!(
+        "The Owner's voice may still transcribe with {stale}, the Whisper model of the OS the Backup was made on, which this machine doesn't download: {reason}. Run `rakazo-stack setup` again, or in Rakazo open Settings → Voice and change the Transcription model to {TRANSCRIPTION_MODEL}."
+    )
+}
+
 fn voice_not_connected(reason: &str) -> String {
     format!(
         "Voice wasn't connected for the Owner: {reason}. Run `rakazo-stack setup` again, or in Rakazo open Settings → Voice, pick Self-hosted, and enter the Server URL {RELAY_URL}, the Speech model {SPEECH_MODEL} and the Transcription model {TRANSCRIPTION_MODEL}."
@@ -519,6 +587,10 @@ mod tests {
         bootstrap_error: Option<String>,
         sign_in_error: Option<String>,
         connect_error: Option<String>,
+        /// What `voice.credentials` lists, and the voice each `voice.connect` kept.
+        voice_connection: Option<VoiceConnection>,
+        credentials_error: Option<String>,
+        voice_ids: RefCell<Vec<Option<String>>>,
         memory_error: Option<String>,
         /// The providers the Owner has a connection to.
         connections: RefCell<Vec<Provider>>,
@@ -536,15 +608,26 @@ mod tests {
             self.calls.borrow_mut().push("detect voice");
             Ok(*self.voice.borrow())
         }
-        fn connect_voice(&self, session: &Session) -> Result<(), String> {
+        fn connect_voice(&self, session: &Session, voice_id: Option<&str>) -> Result<(), String> {
             assert_eq!(session.token, "placeholder-token");
             self.calls.borrow_mut().push("connect voice");
+            self.voice_ids
+                .borrow_mut()
+                .push(voice_id.map(str::to_string));
             match &self.connect_error {
                 Some(err) => Err(err.clone()),
                 None => {
                     *self.voice.borrow_mut() = true;
                     Ok(())
                 }
+            }
+        }
+        fn voice_connection(&self, session: &Session) -> Result<Option<VoiceConnection>, String> {
+            assert_eq!(session.token, "placeholder-token");
+            self.calls.borrow_mut().push("voice credentials");
+            match &self.credentials_error {
+                Some(err) => Err(err.clone()),
+                None => Ok(self.voice_connection.clone()),
             }
         }
         fn model_connection(&self, _: &str, provider: Provider) -> Result<Option<String>, String> {
@@ -1038,6 +1121,205 @@ mod tests {
         let items = run(&rakazo, &mut front, None, &mut vec![DatabaseSetting::Owner]);
         assert!(items[0].starts_with("Voice wasn't connected"), "{items:?}");
         assert!(items[0].contains(OWNER_PASSWORD_VAR));
+    }
+
+    const OTHER_OS_MODEL: &str = "Whisper-Large-v3-Turbo";
+
+    fn made_on_another_os() -> VoiceConnection {
+        VoiceConnection {
+            is_default: true,
+            voice_id: "af_bella".into(),
+            endpoint: RELAY_URL.into(),
+            stt_endpoint: String::new(),
+            stt_model: OTHER_OS_MODEL.into(),
+        }
+    }
+
+    /// A re-run after a restore whose Backup came from the other side of the macOS line.
+    fn run_restored(
+        rakazo: &FakeRakazo,
+        front: &mut dyn FrontEnd,
+        password: Option<Password>,
+        due: &mut Option<String>,
+    ) -> Vec<String> {
+        let mut checklist = Checklist::default();
+        fill_in(
+            rakazo,
+            front,
+            EMAIL,
+            password,
+            Fillable {
+                voice: true,
+                voice_model_due: Some(due),
+                ..Default::default()
+            },
+            &mut vec![DatabaseSetting::Owner, DatabaseSetting::Voice],
+            &mut checklist,
+        );
+        checklist.items().map(str::to_string).collect()
+    }
+
+    fn restored(connection: VoiceConnection) -> FakeRakazo {
+        FakeRakazo {
+            owner: RefCell::new(true),
+            voice: RefCell::new(true),
+            voice_connection: Some(connection),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn only_setups_connection_from_the_other_os_counts_as_made_there() {
+        assert!(made_on_another_os().is_setups_with(OTHER_OS_MODEL));
+        assert!(!made_on_another_os().is_setups_with("Whisper-Small"));
+        for changed in [
+            VoiceConnection {
+                is_default: false,
+                ..made_on_another_os()
+            },
+            VoiceConnection {
+                endpoint: "http://speech.example:8000/v1".into(),
+                ..made_on_another_os()
+            },
+            VoiceConnection {
+                stt_endpoint: "http://whisper.example:9000/v1".into(),
+                ..made_on_another_os()
+            },
+            VoiceConnection {
+                stt_model: "Whisper-Medium".into(),
+                ..made_on_another_os()
+            },
+        ] {
+            assert!(!changed.is_setups_with(OTHER_OS_MODEL), "{changed:?}");
+        }
+    }
+
+    #[test]
+    fn a_restore_from_the_other_os_moves_voice_to_this_oss_model_and_keeps_the_voice() {
+        let rakazo = restored(made_on_another_os());
+        let mut due = Some(OTHER_OS_MODEL.to_string());
+        let items = run_restored(&rakazo, &mut Silent, Some(password()), &mut due);
+        assert_eq!(
+            *rakazo.calls.borrow(),
+            [
+                "detect",
+                "detect voice",
+                "sign-in",
+                "voice credentials",
+                "connect voice",
+                "sign-out"
+            ]
+        );
+        assert_eq!(*rakazo.voice_ids.borrow(), [Some("af_bella".to_string())]);
+        assert_eq!(due, None);
+        assert_eq!(items.len(), 1, "only the standing item: {items:?}");
+    }
+
+    #[test]
+    fn a_connection_the_self_hoster_changed_is_left_alone_after_a_restore() {
+        let rakazo = restored(VoiceConnection {
+            stt_model: "Whisper-Medium".into(),
+            ..made_on_another_os()
+        });
+        let mut due = Some(OTHER_OS_MODEL.to_string());
+        run_restored(&rakazo, &mut Silent, Some(password()), &mut due);
+        assert!(!rakazo.calls.borrow().contains(&"connect voice"));
+        assert_eq!(due, None);
+
+        let rakazo = FakeRakazo {
+            voice_connection: None,
+            ..restored(made_on_another_os())
+        };
+        let mut due = Some(OTHER_OS_MODEL.to_string());
+        run_restored(&rakazo, &mut Silent, Some(password()), &mut due);
+        assert!(!rakazo.calls.borrow().contains(&"connect voice"));
+        assert_eq!(due, None);
+    }
+
+    #[test]
+    fn without_a_password_the_move_waits_for_a_later_run() {
+        let rakazo = restored(made_on_another_os());
+        let mut front = crate::answers::NoQuestions {
+            env: |_: &str| None,
+        };
+        let mut due = Some(OTHER_OS_MODEL.to_string());
+        let items = run_restored(&rakazo, &mut front, None, &mut due);
+        assert_eq!(*rakazo.calls.borrow(), ["detect", "detect voice"]);
+        assert_eq!(due.as_deref(), Some(OTHER_OS_MODEL));
+        assert_eq!(items.len(), 2, "{items:?}");
+        assert!(items[0].contains(OTHER_OS_MODEL), "{items:?}");
+        assert!(items[0].contains(OWNER_PASSWORD_VAR), "{items:?}");
+        assert!(
+            items[0].contains("change the Transcription model to Whisper-Small"),
+            "{items:?}"
+        );
+    }
+
+    #[test]
+    fn a_failed_move_keeps_it_due_and_still_signs_out() {
+        for rakazo in [
+            FakeRakazo {
+                connect_error: Some("Couldn't reach the speech server (HTTP 400)".into()),
+                ..restored(made_on_another_os())
+            },
+            FakeRakazo {
+                credentials_error: Some("Couldn't reach the speech server (HTTP 400)".into()),
+                ..restored(made_on_another_os())
+            },
+        ] {
+            let mut due = Some(OTHER_OS_MODEL.to_string());
+            let items = run_restored(&rakazo, &mut Silent, Some(password()), &mut due);
+            assert_eq!(rakazo.calls.borrow().last().unwrap(), &"sign-out");
+            assert_eq!(due.as_deref(), Some(OTHER_OS_MODEL));
+            assert!(items[0].contains("(HTTP 400)"), "{items:?}");
+        }
+    }
+
+    #[test]
+    fn a_missing_connection_is_connected_afresh_and_nothing_stays_due() {
+        let rakazo = FakeRakazo {
+            voice: RefCell::new(false),
+            ..restored(made_on_another_os())
+        };
+        let mut due = Some(OTHER_OS_MODEL.to_string());
+        let mut checklist = Checklist::default();
+        fill_in(
+            &rakazo,
+            &mut Silent,
+            EMAIL,
+            Some(password()),
+            Fillable {
+                voice: true,
+                voice_model_due: Some(&mut due),
+                ..Default::default()
+            },
+            &mut vec![DatabaseSetting::Owner],
+            &mut checklist,
+        );
+        assert_eq!(due, None);
+        assert!(!rakazo.calls.borrow().contains(&"voice credentials"));
+        assert_eq!(*rakazo.voice_ids.borrow(), [None]);
+    }
+
+    #[test]
+    fn voice_not_ready_keeps_the_move_due() {
+        let rakazo = restored(made_on_another_os());
+        let mut due = Some(OTHER_OS_MODEL.to_string());
+        let mut checklist = Checklist::default();
+        fill_in(
+            &rakazo,
+            &mut Silent,
+            EMAIL,
+            None,
+            Fillable {
+                voice_model_due: Some(&mut due),
+                ..Default::default()
+            },
+            &mut vec![DatabaseSetting::Owner, DatabaseSetting::Voice],
+            &mut checklist,
+        );
+        assert_eq!(*rakazo.calls.borrow(), ["detect"]);
+        assert_eq!(due.as_deref(), Some(OTHER_OS_MODEL));
     }
 
     fn fill_memory(

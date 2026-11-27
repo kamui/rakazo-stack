@@ -5,6 +5,7 @@ const PROJECT_VAR: &str = "RAKAZO_STACK_TEST_PROJECT";
 const WEB_PORT_VAR: &str = "RAKAZO_STACK_TEST_WEB_PORT";
 const RAKAZO_FLOOR_VAR: &str = "RAKAZO_STACK_TEST_RAKAZO_FLOOR";
 const NEXT_RAKAZO_VAR: &str = "RAKAZO_STACK_TEST_NEXT_RAKAZO";
+const BACKUP_PLATFORM_VAR: &str = "RAKAZO_STACK_TEST_BACKUP_PLATFORM";
 
 /// The Compose project name (spec §5: `rakazo-stack`).
 pub fn compose_project() -> String {
@@ -37,6 +38,14 @@ pub fn next_rakazo() -> Option<(String, std::path::PathBuf)> {
     let (tag, file) = value.split_once('=')?;
     crate::version::Version::parse(tag)?;
     Some((tag.to_string(), file.into()))
+}
+
+/// The platform `restore` takes a Backup as made on, in place of its manifest's, so a
+/// test on one OS can restore a Backup from the other side of the macOS line (spec §19).
+pub fn backup_platform() -> Option<String> {
+    std::env::var(BACKUP_PLATFORM_VAR)
+        .ok()
+        .filter(|id| crate::platform::Platform::from_id(id).is_some())
 }
 
 fn is_valid_project(name: &str) -> bool {
