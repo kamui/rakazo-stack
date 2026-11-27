@@ -17,6 +17,7 @@ use crate::github::{self, HINDSIGHT_REPO, RAKAZO_REPO};
 use crate::http;
 use crate::instance::InstanceFolder;
 use crate::lemonade::{self, LEMONADE_IMAGE, LEMONADE_REPO, LemonadeRelease, LocalLemonade};
+use crate::lemond::{self, Lemond};
 use crate::memory::{self, HindsightModel, Memory, MemoryEnv};
 use crate::model_provider::{self, ChatModel, Choice, Provider};
 use crate::overrides;
@@ -29,7 +30,7 @@ use crate::resolve::{
     RakazoRelease, Resolution, ResolveError,
 };
 use crate::runlog::RunLog;
-use crate::secrets::{self, HINDSIGHT_TENANT_KEY, Secrets};
+use crate::secrets::{self, HINDSIGHT_TENANT_KEY, LEMONADE_API_KEY, Secrets};
 use crate::settings::Settings;
 use crate::tailscale::{self, Joined};
 use crate::voice;
@@ -208,13 +209,17 @@ impl Setup<'_> {
         }
         settings.model_provider = Some(answers.model_provider);
         settings.rakazo_model.clone_from(&rakazo_model);
-        let lemonade = match (self.platform, settings.lemonade_release()) {
-            (Platform::MacOs, _) => None,
-            (_, Some(recorded)) => Some(recorded),
-            (_, None) => {
-                let release = resolve_lemonade(&agent, &log)?;
+        let native = self.platform == Platform::MacOs;
+        let lemonade_release = match settings.lemonade_release() {
+            Some(recorded) => recorded,
+            None => {
+                let release = if native {
+                    lemond::resolve(&agent, &log).map_err(SetupError)?
+                } else {
+                    resolve_lemonade(&agent, &log)?
+                };
                 settings.record_lemonade(&release);
-                Some(release)
+                release
             }
         };
         settings.memory_model.clone_from(&memory_model);
@@ -279,7 +284,7 @@ impl Setup<'_> {
             web_port: overrides::web_port(),
             access,
             chat,
-            lemonade,
+            lemonade: (!native).then(|| lemonade_release.clone()),
             hindsight: hindsight.zip(hindsight_model),
         };
         self.folder
@@ -294,6 +299,11 @@ impl Setup<'_> {
         self.folder
             .write(".env", stack.env(&settings, &secrets).as_bytes())?;
         self.folder.reapply_modes()?;
+
+        let lemond = native.then(|| self.lemond(&stack.project, lemonade_release, &secrets));
+        let lemond_ready = lemond
+            .as_ref()
+            .is_some_and(|lemond| lemond.set_up(&agent, &log, &mut checklist));
 
         // Compose leaves a service whose profile is off running, so it is removed by
         // name. Its volume stays, to rejoin as the same device later.
@@ -355,13 +365,13 @@ impl Setup<'_> {
             ));
         }
 
-        // macOS's native lemond is its own slice; until then it has no voice models step.
         let voice_ready = voice_started
-            && stack.lemonade.is_some()
+            && (stack.lemonade.is_some() || lemond_ready)
             && voice::prepare_models(
                 &LocalLemonade {
                     docker: self.docker,
                     folder: self.folder.path(),
+                    native: lemond.as_ref(),
                 },
                 || {
                     let home = self.folder.path().parent()?;
@@ -458,6 +468,22 @@ impl Setup<'_> {
                 false
             }
         }
+    }
+
+    fn lemond(&self, project: &str, release: LemonadeRelease, secrets: &Secrets) -> Lemond {
+        let instance = self.folder.path();
+        let layout = lemond::Layout {
+            home: instance
+                .parent()
+                .expect("the Instance folder is in HOME")
+                .into(),
+            instance: instance.into(),
+            label: lemond::label(project),
+        };
+        let key = secrets
+            .get(LEMONADE_API_KEY.0)
+            .expect("setup generated the key");
+        Lemond::new(layout, release, key)
     }
 
     fn front_end(&self) -> Result<Box<dyn FrontEnd>, SetupError> {

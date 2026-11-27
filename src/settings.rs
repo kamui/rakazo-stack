@@ -52,7 +52,7 @@ pub struct Components {
     pub rakazo: RecordedRakazo,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tailscale: Option<RecordedImage>,
-    /// Linux and Windows; on macOS Lemonade runs natively.
+    /// On macOS the digest is the embeddable tarball's SHA-256, since lemond runs natively.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lemonade: Option<RecordedImage>,
     /// Recorded the first time memory runs, and kept while it is off, so turning it on

@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use crate::docker::{ContainerSummary, Docker, Info, server_api_version};
 use crate::github;
+use crate::lemond::{self, PortHolder};
 use crate::overrides;
 use crate::platform::{self, Platform};
 use crate::resolve;
@@ -96,6 +97,8 @@ pub struct Facts {
     pub free_disk: Option<u64>,
     pub web_port_number: u16,
     pub web_port: Option<PortState>,
+    /// macOS only: what holds lemond's port.
+    pub lemond_port: Option<PortHolder>,
     pub github_reachable: Option<bool>,
 }
 
@@ -168,6 +171,12 @@ pub fn evaluate(facts: &Facts) -> Vec<Finding> {
         findings.push(Finding::stop(format!(
             "Port {} on 127.0.0.1, where Rakazo's web app listens, is already in use. Stop whatever uses it, then run this again.",
             facts.web_port_number
+        )));
+    }
+    if let Some(PortHolder::Other(holder)) = &facts.lemond_port {
+        findings.push(Finding::stop(format!(
+            "Port {} on 127.0.0.1, where this Instance's own lemond listens, is used by {holder}. Stop it or move it to another port, then run this again.",
+            lemond::PORT
         )));
     }
     if facts.command == Command::Setup
@@ -318,6 +327,8 @@ pub fn gather(
             .filter(|_| reachable)
             .map(|d| web_port_state(platform, d, web_port_number)),
         web_port_number,
+        lemond_port: (platform == Platform::MacOs)
+            .then(|| lemond::port_holder(&overrides::compose_project())),
         info,
         docker: docker_state,
         windows_edition: wsl.then(windows_edition).flatten(),
@@ -512,6 +523,7 @@ mod tests {
             free_disk: Some(100_000_000_000),
             web_port_number: 5173,
             web_port: Some(PortState::Free),
+            lemond_port: (platform == Platform::MacOs).then_some(PortHolder::Free),
             github_reachable: Some(true),
         }
     }
@@ -680,6 +692,18 @@ mod tests {
         facts.web_port = Some(PortState::Taken);
         assert!(stops(&facts)[0].contains("5173"));
         facts.web_port = Some(PortState::HeldByInstance);
+        assert!(stops(&facts).is_empty());
+    }
+
+    #[test]
+    fn a_taken_lemond_port_stops_naming_its_holder_but_lemond_itself_does_not() {
+        let mut facts = good_facts(Platform::MacOs);
+        facts.lemond_port = Some(PortHolder::Other("python3 (process 777)".into()));
+        let found = stops(&facts);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("13315"), "{}", found[0]);
+        assert!(found[0].contains("python3 (process 777)"));
+        facts.lemond_port = Some(PortHolder::Lemond);
         assert!(stops(&facts).is_empty());
     }
 

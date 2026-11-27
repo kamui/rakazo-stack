@@ -81,11 +81,19 @@ fn api_bytes(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, HttpError> {
     http::body_if_ok(response, url)
 }
 
+fn releases_url(repo: &str) -> String {
+    format!("https://api.github.com/repos/{repo}/releases?per_page=30")
+}
+
+/// The newest releases as GitHub lists them, assets included.
+pub fn fetch_releases(agent: &ureq::Agent, repo: &str) -> Result<Vec<u8>, HttpError> {
+    api_bytes(agent, &releases_url(repo))
+}
+
 pub fn fetch_stable_tags(agent: &ureq::Agent, repo: &str) -> Result<Vec<String>, HttpError> {
-    let url = format!("https://api.github.com/repos/{repo}/releases?per_page=30");
-    let body = api_bytes(agent, &url)?;
+    let body = fetch_releases(agent, repo)?;
     stable_tags(&String::from_utf8_lossy(&body))
-        .map_err(|err| HttpError(format!("{url}: unexpected reply: {err}")))
+        .map_err(|err| HttpError(format!("{}: unexpected reply: {err}", releases_url(repo))))
 }
 
 /// A file from a repo at a tag, exactly as committed.
