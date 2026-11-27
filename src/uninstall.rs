@@ -174,12 +174,22 @@ impl Uninstall<'_> {
             .filter(|id| !ours.contains(id))
             .collect();
         let mut used = self.images_of(&ours.into_iter().collect::<Vec<_>>())?;
-        if let Some(settings) = settings {
-            let computer = format!(
-                "ghcr.io/{COMPUTER_IMAGE}@{}",
-                settings.components.rakazo.images.computer
-            );
-            if let Ok(id) = self.docker(&["image", "inspect", "--format", "{{.Id}}", &computer]) {
+        // A re-run after `down` finds no containers, so the images also come from what
+        // the Instance names.
+        let mut named: Vec<String> = settings
+            .map(|settings| {
+                format!(
+                    "ghcr.io/{COMPUTER_IMAGE}@{}",
+                    settings.components.rakazo.images.computer
+                )
+            })
+            .into_iter()
+            .collect();
+        if stack && let Ok(listing) = self.compose(&["--profile", "*", "config", "--images"]) {
+            named.extend(listing.split_whitespace().map(str::to_string));
+        }
+        for image in &named {
+            if let Ok(id) = self.docker(&["image", "inspect", "--format", "{{.Id}}", image]) {
                 used.insert(id.trim().to_string());
             }
         }
