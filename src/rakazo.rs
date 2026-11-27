@@ -440,12 +440,12 @@ mod tests {
         let body: serde_json::Value = serde_json::from_str(&voice_connect_body(None)).unwrap();
         assert_eq!(
             body,
-            serde_json::json!({"json":{"provider":"openai-compatible","baseUrl":"http://lemonade-relay:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Small"}})
+            serde_json::json!({"json":{"provider":"openai-compatible","baseUrl":"http://lemonade-relay:13306/api/v1","ttsModel":"kokoro-v1","sttModel":TRANSCRIPTION_MODEL}})
         );
         let kept: serde_json::Value =
             serde_json::from_str(&voice_connect_body(Some("af_bella"))).unwrap();
         assert_eq!(kept["json"]["voiceId"], "af_bella");
-        assert_eq!(kept["json"]["sttModel"], "Whisper-Small");
+        assert_eq!(kept["json"]["sttModel"], TRANSCRIPTION_MODEL);
     }
 
     #[test]

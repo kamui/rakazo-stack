@@ -1106,7 +1106,7 @@ mod tests {
         assert_eq!(filled, [DatabaseSetting::Owner]);
         assert!(items[0].contains("Couldn't reach the speech server (HTTP 400)"));
         assert!(items[0].contains("http://lemonade-relay:13306/api/v1"));
-        assert!(items[0].contains("Whisper-Small"));
+        assert!(items[0].contains(TRANSCRIPTION_MODEL));
     }
 
     #[test]
@@ -1123,7 +1123,11 @@ mod tests {
         assert!(items[0].contains(OWNER_PASSWORD_VAR));
     }
 
-    const OTHER_OS_MODEL: &str = "Whisper-Large-v3-Turbo";
+    const OTHER_OS_MODEL: &str = if cfg!(target_os = "macos") {
+        "Whisper-Small"
+    } else {
+        "Whisper-Large-v3-Turbo"
+    };
 
     fn made_on_another_os() -> VoiceConnection {
         VoiceConnection {
@@ -1171,7 +1175,7 @@ mod tests {
     #[test]
     fn only_setups_connection_from_the_other_os_counts_as_made_there() {
         assert!(made_on_another_os().is_setups_with(OTHER_OS_MODEL));
-        assert!(!made_on_another_os().is_setups_with("Whisper-Small"));
+        assert!(!made_on_another_os().is_setups_with(TRANSCRIPTION_MODEL));
         for changed in [
             VoiceConnection {
                 is_default: false,
@@ -1250,7 +1254,9 @@ mod tests {
         assert!(items[0].contains(OTHER_OS_MODEL), "{items:?}");
         assert!(items[0].contains(OWNER_PASSWORD_VAR), "{items:?}");
         assert!(
-            items[0].contains("change the Transcription model to Whisper-Small"),
+            items[0].contains(&format!(
+                "change the Transcription model to {TRANSCRIPTION_MODEL}"
+            )),
             "{items:?}"
         );
     }

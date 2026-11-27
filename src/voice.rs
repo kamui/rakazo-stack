@@ -112,13 +112,16 @@ mod tests {
     #[derive(Default)]
     struct FakeLemonade {
         installed: Vec<String>,
-        fail: Option<&'static str>,
+        fail: Option<String>,
         calls: RefCell<Vec<String>>,
     }
 
     impl FakeLemonade {
         fn step(&self, name: String) -> Result<(), String> {
-            let failed = self.fail.is_some_and(|step| name.starts_with(step));
+            let failed = self
+                .fail
+                .as_deref()
+                .is_some_and(|step| name.starts_with(step));
             self.calls.borrow_mut().push(name);
             if failed {
                 Err("HTTP 500".into())
@@ -171,13 +174,13 @@ mod tests {
         assert_eq!(
             *lemonade.calls.borrow(),
             [
-                "configure",
-                "installed",
-                "pull kokoro-v1",
-                "pull Whisper-Small",
-                "load kokoro-v1",
-                "load Whisper-Small",
-                "warm"
+                "configure".to_string(),
+                "installed".into(),
+                "pull kokoro-v1".into(),
+                format!("pull {TRANSCRIPTION_MODEL}"),
+                "load kokoro-v1".into(),
+                format!("load {TRANSCRIPTION_MODEL}"),
+                "warm".into(),
             ]
         );
         assert!(said.contains(&"  kokoro-v1: file 1 of 1, 50%".to_string()));
@@ -191,7 +194,7 @@ mod tests {
     #[test]
     fn a_rerun_with_the_models_there_skips_the_pull_and_the_disk_check() {
         let lemonade = FakeLemonade {
-            installed: vec!["Whisper-Small".into(), "kokoro-v1".into()],
+            installed: vec![TRANSCRIPTION_MODEL.into(), "kokoro-v1".into()],
             ..Default::default()
         };
         let mut said = Vec::new();
@@ -233,15 +236,17 @@ mod tests {
 
     #[test]
     fn each_failure_becomes_one_checklist_item() {
+        let pull_whisper = format!("pull {TRANSCRIPTION_MODEL}");
+        let whisper_missing = format!("{TRANSCRIPTION_MODEL} didn't download");
         for (step, expected) in [
             ("configure", "couldn't configure Lemonade (HTTP 500)"),
             ("installed", "couldn't reach Lemonade through the relay"),
-            ("pull Whisper-Small", "Whisper-Small didn't download"),
+            (pull_whisper.as_str(), whisper_missing.as_str()),
             ("load kokoro-v1", "couldn't load kokoro-v1"),
             ("warm", "the voice check failed"),
         ] {
             let lemonade = FakeLemonade {
-                fail: Some(step),
+                fail: Some(step.to_string()),
                 ..Default::default()
             };
             let (ready, _, checklist) = run(&lemonade, None);
