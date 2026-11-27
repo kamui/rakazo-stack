@@ -161,8 +161,14 @@ fn setup_starts_rakazo_on_localhost_and_a_second_run_changes_nothing() {
 
     let published: Vec<String> = instance
         .containers("{{.Label \"com.docker.compose.service\"}} {{.Ports}}")
-        .into_iter()
-        .filter(|line| line.contains("->"))
+        .iter()
+        .filter_map(|line| line.split_once(' '))
+        .flat_map(|(service, ports)| {
+            ports
+                .split(", ")
+                .filter(|port| port.contains("->"))
+                .map(move |port| format!("{service} {port}"))
+        })
         .collect();
     assert_eq!(
         published,
