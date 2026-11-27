@@ -1,5 +1,6 @@
-//! `setup` against real Docker: starts Rakazo on localhost, creates the Owner, and tears
-//! the test Instance down afterwards.
+//! `setup` against real Docker: starts Rakazo on localhost, creates the Owner, switches to
+//! a bring-your-own Instance URL, and tears the test Instance down afterwards. No test
+//! starts a `tailscale` container: it would try to join a real tailnet.
 
 mod common;
 
@@ -132,6 +133,21 @@ impl Drop for TestInstance {
         }
         let _ = down.output();
     }
+}
+
+/// Each host port mapping of the Instance's containers, after its service's name.
+fn published_ports(instance: &TestInstance) -> Vec<String> {
+    instance
+        .containers("{{.Label \"com.docker.compose.service\"}} {{.Ports}}")
+        .iter()
+        .filter_map(|line| line.split_once(' '))
+        .flat_map(|(service, ports)| {
+            ports
+                .split(", ")
+                .filter(|port| port.contains("->"))
+                .map(move |port| format!("{service} {port}"))
+        })
+        .collect()
 }
 
 fn text(out: &Output) -> String {
@@ -279,19 +295,8 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
         "Rakazo's compose file must be written byte for byte"
     );
 
-    let published: Vec<String> = instance
-        .containers("{{.Label \"com.docker.compose.service\"}} {{.Ports}}")
-        .iter()
-        .filter_map(|line| line.split_once(' '))
-        .flat_map(|(service, ports)| {
-            ports
-                .split(", ")
-                .filter(|port| port.contains("->"))
-                .map(move |port| format!("{service} {port}"))
-        })
-        .collect();
     assert_eq!(
-        published,
+        published_ports(&instance),
         [format!("web 127.0.0.1:{}->5173/tcp", instance.web_port)],
         "only the web port is published"
     );
@@ -354,6 +359,48 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
         .collect();
     assert!(made_in_wsl.is_empty(), "{made_in_wsl:?}");
 
+    let url = "https://rakazo.example.com";
+    let switched = instance.setup(
+        &["--no-questions"],
+        &[
+            ("RAKAZO_STACK_ACCESS", "bring-your-own"),
+            ("RAKAZO_STACK_INSTANCE_URL", url),
+        ],
+    );
+    let switched_text = text(&switched);
+    assert!(switched.status.success(), "{switched_text}");
+    assert!(
+        switched_text.contains("signs everyone out"),
+        "a scripted switch warns: {switched_text}"
+    );
+    let env = fs::read_to_string(folder.join(".env")).unwrap();
+    for line in [
+        format!("BETTER_AUTH_URL={url}"),
+        format!("WEB_ORIGIN={url}"),
+        format!("API_URL={url}"),
+        "RAKAZO_HOST=rakazo.example.com".to_string(),
+    ] {
+        assert!(env.lines().any(|l| l == line), "missing {line}:\n{env}");
+    }
+    assert_eq!(
+        published_ports(&instance),
+        [format!("web 127.0.0.1:{}->5173/tcp", instance.web_port)],
+        "web stays on loopback behind a bring-your-own URL"
+    );
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(folder.join("settings.json")).unwrap()).unwrap();
+    assert_eq!(settings["access"], "bring-your-own");
+    assert_eq!(settings["bring_your_own_url"], url);
+    // As the Self-hoster's proxy would forward a sign-in made at the Instance URL.
+    let response = agent
+        .post(format!("{origin}/api/auth/sign-in/email"))
+        .header("Host", "rakazo.example.com")
+        .header("Origin", url)
+        .content_type("application/json")
+        .send(serde_json::json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }).to_string())
+        .unwrap();
+    assert_eq!(response.status(), 200, "sign-in at the Instance URL");
+
     // A saved key with the provider out of reach: a proxy nothing listens on, which the
     // calls to the Instance bypass. No real key is needed to see it reach Rakazo.
     let mut secrets = fs::read_to_string(folder.join("secrets.env")).unwrap();
@@ -395,7 +442,7 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
     }
 
     for secret in secret_values(&folder) {
-        for output in [&first_text, &second_text, &third_text] {
+        for output in [&first_text, &second_text, &switched_text, &third_text] {
             assert!(!output.contains(&secret), "setup printed a secret");
         }
     }
@@ -431,7 +478,37 @@ fn invalid_input_stops_before_anything_changes() {
     type Env<'a> = &'a [(&'a str, &'a str)];
     // OpenRouter itself refuses this one.
     const REJECTED_KEY: &str = "sk-or-v1-placeholder";
-    let cases: [(&[&str], Env, &str); 7] = [
+    let owner = |extra: &[(&'static str, &'static str)]| {
+        let mut env = vec![
+            ("RAKAZO_STACK_OWNER_EMAIL", OWNER_EMAIL),
+            ("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD),
+        ];
+        env.extend_from_slice(extra);
+        env
+    };
+    let no_key = owner(&[("RAKAZO_STACK_ACCESS", "tailscale")]);
+    let ephemeral = owner(&[
+        ("RAKAZO_STACK_ACCESS", "tailscale"),
+        ("RAKAZO_STACK_TS_AUTHKEY", "tskey-client-kPLACEHOLDER"),
+    ]);
+    let bad_url = owner(&[
+        ("RAKAZO_STACK_ACCESS", "bring-your-own"),
+        ("RAKAZO_STACK_INSTANCE_URL", "http://rakazo.example.com"),
+    ]);
+    let both = owner(&[
+        ("RAKAZO_STACK_ACCESS", "tailscale"),
+        ("RAKAZO_STACK_TS_AUTHKEY", "tskey-auth-kPLACEHOLDER"),
+        ("RAKAZO_STACK_INSTANCE_URL", "https://rakazo.example.com"),
+    ]);
+    let cases: [(&[&str], Env, &str); 11] = [
+        (&["--no-questions"], &no_key, "RAKAZO_STACK_TS_AUTHKEY"),
+        (&["--no-questions"], &ephemeral, "ephemeral"),
+        (&["--no-questions"], &bad_url, "must look like"),
+        (
+            &["--no-questions"],
+            &both,
+            "can't be combined with Tailscale",
+        ),
         (
             &["--no-questions"],
             &[
@@ -486,6 +563,7 @@ fn invalid_input_stops_before_anything_changes() {
         assert!(out_text.contains(expected), "{expected}: {out_text}");
         assert!(!out_text.contains("fifteen-chars!!"), "{out_text}");
         assert!(!out_text.contains(REJECTED_KEY), "setup printed the key");
+        assert!(!out_text.contains("PLACEHOLDER"), "{out_text}");
         let left: Vec<_> = fs::read_dir(instance.folder())
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
