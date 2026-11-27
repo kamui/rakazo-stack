@@ -1,0 +1,90 @@
+name: Release
+
+# spec §18: a tag `vX.Y.Z` publishes a release, and `vX.Y.Z-suffix` a pre-release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Check the tag matches the program version
+        run: |
+          version=$(cargo metadata --no-deps --locked --format-version 1 | jq -r '.packages[0].version')
+          pattern="^v${version//./\\.}(-[0-9A-Za-z.-]+)?$"
+          if ! [[ $GITHUB_REF_NAME =~ $pattern ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match program version $version. Use v$version or v$version-<suffix>."
+            exit 1
+          fi
+
+  build:
+    needs: version
+    uses: ./.github/workflows/build.yml
+    with:
+      tag: ${{ github.ref_name }}
+
+  # Runs only when every build job passed, the macOS gate among them.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: release
+          path: release
+      - uses: actions/attest@v4.2.2
+        with:
+          subject-path: release/*
+      - name: Publish the release
+        run: |
+          flags=()
+          if [[ $GITHUB_REF_NAME == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes --title "$GITHUB_REF_NAME" "${flags[@]}"
+      # Immutability is a repository setting, which this token can't read beforehand.
+      - name: Check the release is immutable
+        run: |
+          if [ "$(gh release view "$GITHUB_REF_NAME" --json isImmutable --jq .isImmutable)" != true ]; then
+            echo "::error::$GITHUB_REF_NAME was published but isn't immutable. Turn on release immutability in the repository settings, delete this release and publish a new tag."
+            exit 1
+          fi
+
+  one-liner:
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - name: Install with the one-liner, build origin checked
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+          set -o pipefail
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/install.sh" |
+            sh -s -- --no-setup 2>&1 | tee "$RUNNER_TEMP/install.log"
+          if grep -q 'build origin not checked' "$RUNNER_TEMP/install.log"; then
+            echo "::error::install.sh didn't check the build origin."
+            exit 1
+          fi
+          "$HOME/.local/bin/rakazo-stack" --version
