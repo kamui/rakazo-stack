@@ -10,6 +10,7 @@ use serde::Deserialize;
 
 use crate::docker::Docker;
 use crate::lemond::Lemond;
+use crate::platform::Platform;
 use crate::voice::{Lemonade, Warmed};
 
 pub const LEMONADE_REPO: &str = "lemonade-sdk/lemonade";
@@ -20,10 +21,20 @@ pub const LEMONADE_IMAGE: &str = "lemonade-sdk/lemonade-server";
 pub const SPEECH_MODEL: &str = "kokoro-v1";
 /// The program is built per OS, and only macOS runs Whisper on Metal (spec §9).
 pub const TRANSCRIPTION_MODEL: &str = if cfg!(target_os = "macos") {
-    "Whisper-Large-v3-Turbo"
+    METAL_WHISPER
 } else {
-    "Whisper-Small"
+    CPU_WHISPER
 };
+const METAL_WHISPER: &str = "Whisper-Large-v3-Turbo";
+const CPU_WHISPER: &str = "Whisper-Small";
+
+/// The Whisper model setup connects voice to on `platform`, for a Backup made there.
+pub fn transcription_model(platform: Platform) -> &'static str {
+    match platform {
+        Platform::MacOs => METAL_WHISPER,
+        Platform::Linux | Platform::Wsl => CPU_WHISPER,
+    }
+}
 pub const RELAY_URL: &str = "http://lemonade-relay:13306/api/v1";
 /// How Rakazo names the relay when it asks for consent: its URL's origin.
 pub const RELAY_ORIGIN: &str = "http://lemonade-relay:13306";

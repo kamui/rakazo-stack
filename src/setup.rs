@@ -413,6 +413,7 @@ impl Setup<'_> {
             answers.owner_password,
             database_settings::Fillable {
                 voice: voice_ready,
+                voice_model_due: Some(&mut settings.voice_model_due),
                 memory: tenant_key,
                 model: owner_model.map(|model| database_settings::ModelFill {
                     model,

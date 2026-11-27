@@ -40,6 +40,10 @@ pub struct Settings {
     /// Set while the Owner's OpenAI or Gemini connection still has to take the saved key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_connection_due: Option<Due>,
+    /// After a restore from the other side of the macOS line: the Whisper model of the OS
+    /// the Backup was made on, until a run finds the Owner's voice connection off it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_model_due: Option<String>,
     /// OpenAI or Gemini after a switch away, until the Owner's old connection is gone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub model_providers_left: Vec<Choice>,
@@ -127,6 +131,7 @@ impl Settings {
             memory_model: None,
             filled_by_setup: Vec::new(),
             model_connection_due: None,
+            voice_model_due: None,
             model_providers_left: Vec::new(),
             access: AccessMode::default(),
             tailscale_device_name: None,
