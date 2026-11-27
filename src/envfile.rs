@@ -1,6 +1,7 @@
 //! Renders `.env`, the file Compose reads, from `settings.json` and `secrets.env`
 //! (spec §5, "Rakazo settings setup writes to `.env`").
 
+use crate::model_provider::ChatModel;
 use crate::resolve::RakazoRelease;
 use crate::secrets::Secrets;
 
@@ -9,6 +10,8 @@ pub struct EnvInputs<'a> {
     pub rakazo: &'a RakazoRelease,
     pub secrets: &'a Secrets,
     pub web_port: u16,
+    /// The Instance-wide chat model; without one, each person connects their own.
+    pub chat: Option<ChatModel<'a>>,
 }
 
 pub fn rakazo_compose_file(tag: &str) -> String {
@@ -47,6 +50,13 @@ pub fn render(inputs: &EnvInputs) -> String {
         format!("API_URL={origin}"),
         "RAKAZO_HOST=127.0.0.1".to_string(),
     ]);
+    if let Some(chat) = &inputs.chat {
+        lines.extend([
+            format!("PI_DEFAULT_PROVIDER={}", chat.provider.id()),
+            format!("{}={}", chat.provider.key_name(), chat.key.expose()),
+            format!("PI_DEFAULT_MODEL={}", chat.model),
+        ]);
+    }
     let mut text = lines.join("\n");
     text.push('\n');
     text
@@ -55,22 +65,30 @@ pub fn render(inputs: &EnvInputs) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model_provider::{self, Provider};
+    use crate::secrets::PastedKey;
+
+    fn release() -> RakazoRelease {
+        RakazoRelease {
+            tag: "v0.16.0".into(),
+            app_digest: "sha256:aaa".into(),
+            computer_digest: "sha256:ccc".into(),
+        }
+    }
 
     #[test]
     fn renders_the_localhost_slice() {
         let mut secrets = Secrets::default();
         secrets.fill_missing(|n| "ab".repeat(n));
-        let rakazo = RakazoRelease {
-            tag: "v0.16.0".into(),
-            app_digest: "sha256:aaa".into(),
-            computer_digest: "sha256:ccc".into(),
-        };
+        let rakazo = release();
         let text = render(&EnvInputs {
             project: "rakazo-stack",
             rakazo: &rakazo,
             secrets: &secrets,
             web_port: 5173,
+            chat: None,
         });
+        assert!(!text.contains("PI_DEFAULT") && !text.contains("_API_KEY"));
         for line in [
             "COMPOSE_PROJECT_NAME=rakazo-stack",
             "COMPOSE_FILE=rakazo.v0.16.0.images.yml:compose.stack.yaml",
@@ -92,5 +110,49 @@ mod tests {
             4
         );
         assert!(!text.contains("updater"));
+    }
+
+    #[test]
+    fn writes_the_chat_model_for_openrouter_and_anthropic_only() {
+        let key = PastedKey::new("placeholder-key").unwrap();
+        let rakazo = release();
+        for provider in Provider::ALL {
+            let mut secrets = Secrets::default();
+            secrets.fill_missing(|n| "ab".repeat(n));
+            model_provider::save_key(&mut secrets, Some((provider, &key)));
+            let text = render(&EnvInputs {
+                project: "rakazo-stack",
+                rakazo: &rakazo,
+                secrets: &secrets,
+                web_port: 5173,
+                chat: ChatModel::new(provider, &key, None).unwrap(),
+            });
+            let model: Vec<&str> = text
+                .lines()
+                .filter(|l| l.starts_with("PI_") || l.contains("_API_KEY="))
+                .collect();
+            let expected: &[&str] = match provider {
+                Provider::OpenRouter => &[
+                    "PI_DEFAULT_PROVIDER=openrouter",
+                    "OPENROUTER_API_KEY=placeholder-key",
+                    "PI_DEFAULT_MODEL=~z-ai/glm-flash-latest",
+                ],
+                Provider::Anthropic => &[
+                    "PI_DEFAULT_PROVIDER=anthropic",
+                    "ANTHROPIC_API_KEY=placeholder-key",
+                    "PI_DEFAULT_MODEL=claude-haiku-5-5",
+                ],
+                Provider::OpenAi | Provider::Gemini => &[],
+            };
+            assert!(model == expected, "{provider:?}");
+            for never in [
+                "OPENAI_API_KEY",
+                "GEMINI_API_KEY",
+                "RAKAZO_MIN_CLIENT_BUILD",
+                "EXPO_ACCESS_TOKEN",
+            ] {
+                assert!(!text.contains(never), "{provider:?} writes {never}");
+            }
+        }
     }
 }

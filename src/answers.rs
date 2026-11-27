@@ -5,6 +5,9 @@
 use std::fmt;
 use std::io::{BufRead, IsTerminal, Write};
 
+use crate::model_provider::{Choice, PROVIDER_VAR, Provider};
+use crate::secrets::{PastedKey, Secrets};
+
 pub const NO_QUESTIONS_OPTION: &str = "--no-questions";
 pub const OWNER_EMAIL_VAR: &str = "RAKAZO_STACK_OWNER_EMAIL";
 pub const OWNER_PASSWORD_VAR: &str = "RAKAZO_STACK_OWNER_PASSWORD";
@@ -24,6 +27,9 @@ pub enum InputError {
     ShortPassword,
     LongPassword,
     PasswordsDiffer,
+    UnknownProvider,
+    InvalidKey(Provider),
+    InvalidSavedKey(Provider),
 }
 
 impl fmt::Display for InputError {
@@ -52,6 +58,20 @@ impl fmt::Display for InputError {
                 "the Owner password can have at most {PASSWORD_MAX} characters."
             ),
             Self::PasswordsDiffer => f.write_str("the two Owner passwords don't match."),
+            Self::UnknownProvider => write!(
+                f,
+                "the Model provider is openrouter, openai, gemini, anthropic or none (set {PROVIDER_VAR} with {NO_QUESTIONS_OPTION})."
+            ),
+            Self::InvalidKey(provider) => write!(
+                f,
+                "the {} key has a space, quote or other character no key has.",
+                provider.name()
+            ),
+            Self::InvalidSavedKey(provider) => write!(
+                f,
+                "the {} line in secrets.env isn't a usable key. Correct or remove it.",
+                provider.key_name()
+            ),
         }
     }
 }
@@ -108,6 +128,10 @@ pub struct Answers {
     /// Given at step 2: always on a first run, and in no-questions mode whenever its
     /// variable is set. A wizard re-run asks later, only if something will be filled in.
     pub owner_password: Option<Password>,
+    pub model_provider: Choice,
+    /// The chosen provider's key: a new one, or else the saved one. `None` when it was
+    /// left blank, or the choice is "none".
+    pub model_key: Option<PastedKey>,
 }
 
 /// One of setup's two front ends. Both produce the same [`Answers`].
@@ -117,6 +141,15 @@ pub trait FrontEnd {
     fn password_now(&mut self, first_run: bool) -> Result<Option<Password>, InputError>;
     /// The password when a database-only setting will be filled in and none was given.
     fn password_for_fill_in(&mut self) -> Result<Option<Password>, InputError>;
+    fn model_provider(&mut self, recorded: Option<Choice>) -> Result<Choice, InputError>;
+    /// A new key for `provider`; `None` keeps the saved one, if there is one.
+    fn model_key(
+        &mut self,
+        provider: Provider,
+        saved: bool,
+    ) -> Result<Option<PastedKey>, InputError>;
+    /// "Check again" (true) or "Continue without it", when ZDR only is off.
+    fn check_zdr_again(&mut self) -> bool;
     /// "… was removed in Rakazo. Add it back? [y/N]"
     fn add_back(&mut self, question: &str) -> bool;
 }
@@ -125,6 +158,8 @@ pub trait FrontEnd {
 pub fn collect(
     front: &mut dyn FrontEnd,
     recorded_email: Option<&str>,
+    recorded_provider: Option<Choice>,
+    secrets: &Secrets,
     first_run: bool,
 ) -> Result<Answers, InputError> {
     let owner_email = normalize_email(&front.owner_email(recorded_email)?)?;
@@ -132,10 +167,33 @@ pub fn collect(
     if first_run && owner_password.is_none() {
         return Err(InputError::MissingPassword);
     }
+    let model_provider = front.model_provider(recorded_provider)?;
+    let model_key = match model_provider.0 {
+        Some(provider) => model_key(front, provider, secrets)?,
+        None => None,
+    };
     Ok(Answers {
         owner_email,
         owner_password,
+        model_provider,
+        model_key,
     })
+}
+
+fn model_key(
+    front: &mut dyn FrontEnd,
+    provider: Provider,
+    secrets: &Secrets,
+) -> Result<Option<PastedKey>, InputError> {
+    let saved = secrets
+        .get(provider.key_name())
+        .filter(|key| !key.is_empty());
+    if let Some(key) = front.model_key(provider, saved.is_some())? {
+        return Ok(Some(key));
+    }
+    saved
+        .map(|key| PastedKey::new(key).ok_or(InputError::InvalidSavedKey(provider)))
+        .transpose()
 }
 
 /// Each answer comes from its environment variable, then `settings.json`, then the
@@ -163,6 +221,27 @@ impl<F: Fn(&str) -> Option<String>> FrontEnd for NoQuestions<F> {
 
     fn password_for_fill_in(&mut self) -> Result<Option<Password>, InputError> {
         Ok(None)
+    }
+
+    fn model_provider(&mut self, recorded: Option<Choice>) -> Result<Choice, InputError> {
+        match self.var(PROVIDER_VAR) {
+            Some(text) => Choice::parse(&text).ok_or(InputError::UnknownProvider),
+            None => Ok(recorded.unwrap_or_default()),
+        }
+    }
+
+    fn model_key(
+        &mut self,
+        provider: Provider,
+        _saved: bool,
+    ) -> Result<Option<PastedKey>, InputError> {
+        self.var(&format!("RAKAZO_STACK_{}", provider.key_name()))
+            .map(|text| PastedKey::new(&text).ok_or(InputError::InvalidKey(provider)))
+            .transpose()
+    }
+
+    fn check_zdr_again(&mut self) -> bool {
+        false
     }
 
     fn add_back(&mut self, _question: &str) -> bool {
@@ -220,6 +299,50 @@ impl<P: Prompt> FrontEnd for Wizard<P> {
 
     fn password_for_fill_in(&mut self) -> Result<Option<Password>, InputError> {
         self.new_password().map(Some)
+    }
+
+    fn model_provider(&mut self, recorded: Option<Choice>) -> Result<Choice, InputError> {
+        let default = recorded.unwrap_or_default();
+        let question = format!(
+            "Model provider (openrouter, openai, gemini, anthropic or none) [{}]: ",
+            default.id()
+        );
+        let answer = self.prompt.line(&question).ok_or(InputError::NoAnswer)?;
+        match answer.trim() {
+            "" => Ok(default),
+            answer => Choice::parse(answer).ok_or(InputError::UnknownProvider),
+        }
+    }
+
+    fn model_key(
+        &mut self,
+        provider: Provider,
+        saved: bool,
+    ) -> Result<Option<PastedKey>, InputError> {
+        let name = provider.name();
+        let billing = if provider == Provider::Gemini {
+            ", which must be billing-enabled"
+        } else {
+            ""
+        };
+        let question = if saved {
+            format!("{name} API key{billing}: set, press Enter to keep, or paste a new one: ")
+        } else {
+            format!("{name} API key{billing} (blank for none): ")
+        };
+        let answer = self.prompt.secret(&question).ok_or(InputError::NoAnswer)?;
+        if answer.trim().is_empty() {
+            return Ok(None);
+        }
+        PastedKey::new(&answer)
+            .map(Some)
+            .ok_or(InputError::InvalidKey(provider))
+    }
+
+    fn check_zdr_again(&mut self) -> bool {
+        self.prompt
+            .line("Check again (c), or continue without it (Enter)? ")
+            .is_some_and(|answer| matches!(answer.trim(), "c" | "C"))
     }
 
     fn add_back(&mut self, question: &str) -> bool {
@@ -354,6 +477,15 @@ mod tests {
         }
     }
 
+    /// `collect` with nothing recorded about the Model provider.
+    fn collect_owner(
+        front: &mut dyn FrontEnd,
+        recorded_email: Option<&str>,
+        first_run: bool,
+    ) -> Result<Answers, InputError> {
+        collect(front, recorded_email, None, &Secrets::default(), first_run)
+    }
+
     struct Scripted {
         lines: VecDeque<&'static str>,
         asked: Vec<String>,
@@ -427,7 +559,7 @@ mod tests {
                 (OWNER_PASSWORD_VAR, GOOD),
             ]),
         };
-        let answers = collect(&mut front, None, true).unwrap();
+        let answers = collect_owner(&mut front, None, true).unwrap();
         assert_eq!(answers.owner_email, "owner@example.com");
         assert_eq!(answers.owner_password.unwrap().expose(), GOOD);
     }
@@ -438,14 +570,14 @@ mod tests {
             env: env(&[(OWNER_PASSWORD_VAR, GOOD)]),
         };
         assert_eq!(
-            collect(&mut no_email, None, true).unwrap_err(),
+            collect_owner(&mut no_email, None, true).unwrap_err(),
             InputError::MissingEmail
         );
         let mut no_password = NoQuestions {
             env: env(&[(OWNER_EMAIL_VAR, "owner@example.com")]),
         };
         assert_eq!(
-            collect(&mut no_password, None, true).unwrap_err(),
+            collect_owner(&mut no_password, None, true).unwrap_err(),
             InputError::MissingPassword
         );
         let mut short = NoQuestions {
@@ -455,7 +587,7 @@ mod tests {
             ]),
         };
         assert_eq!(
-            collect(&mut short, None, true).unwrap_err(),
+            collect_owner(&mut short, None, true).unwrap_err(),
             InputError::ShortPassword
         );
     }
@@ -463,7 +595,7 @@ mod tests {
     #[test]
     fn a_scripted_rerun_uses_settings_and_needs_no_password() {
         let mut front = NoQuestions { env: env(&[]) };
-        let answers = collect(&mut front, Some("owner@example.com"), false).unwrap();
+        let answers = collect_owner(&mut front, Some("owner@example.com"), false).unwrap();
         assert_eq!(answers.owner_email, "owner@example.com");
         assert!(answers.owner_password.is_none());
         assert!(front.password_for_fill_in().unwrap().is_none());
@@ -472,31 +604,31 @@ mod tests {
         let mut changed = NoQuestions {
             env: env(&[(OWNER_EMAIL_VAR, "new@example.com")]),
         };
-        let answers = collect(&mut changed, Some("owner@example.com"), false).unwrap();
+        let answers = collect_owner(&mut changed, Some("owner@example.com"), false).unwrap();
         assert_eq!(answers.owner_email, "new@example.com");
     }
 
     #[test]
     fn the_wizard_asks_twice_on_a_first_run() {
         let mut wizard = Wizard {
-            prompt: Scripted::new(&["owner@example.com", GOOD, GOOD]),
+            prompt: Scripted::new(&["owner@example.com", GOOD, GOOD, "", ""]),
         };
-        let answers = collect(&mut wizard, None, true).unwrap();
+        let answers = collect_owner(&mut wizard, None, true).unwrap();
         assert_eq!(answers.owner_password.unwrap().expose(), GOOD);
-        assert_eq!(wizard.prompt.asked.len(), 3);
+        assert_eq!(wizard.prompt.asked.len(), 5);
 
         let mut differ = Wizard {
             prompt: Scripted::new(&["owner@example.com", GOOD, "correct-horse-battery-staple"]),
         };
         assert_eq!(
-            collect(&mut differ, None, true).unwrap_err(),
+            collect_owner(&mut differ, None, true).unwrap_err(),
             InputError::PasswordsDiffer
         );
         let mut short = Wizard {
             prompt: Scripted::new(&["owner@example.com", "fifteen-chars!!"]),
         };
         assert_eq!(
-            collect(&mut short, None, true).unwrap_err(),
+            collect_owner(&mut short, None, true).unwrap_err(),
             InputError::ShortPassword
         );
     }
@@ -504,12 +636,19 @@ mod tests {
     #[test]
     fn a_wizard_rerun_prefills_the_email_and_asks_no_password() {
         let mut wizard = Wizard {
-            prompt: Scripted::new(&[""]),
+            prompt: Scripted::new(&["", "", ""]),
         };
-        let answers = collect(&mut wizard, Some("owner@example.com"), false).unwrap();
+        let answers = collect_owner(&mut wizard, Some("owner@example.com"), false).unwrap();
         assert_eq!(answers.owner_email, "owner@example.com");
         assert!(answers.owner_password.is_none());
-        assert_eq!(wizard.prompt.asked, ["Owner email [owner@example.com]: "]);
+        assert_eq!(
+            wizard.prompt.asked,
+            [
+                "Owner email [owner@example.com]: ",
+                "Model provider (openrouter, openai, gemini, anthropic or none) [openrouter]: ",
+                "OpenRouter API key (blank for none): ",
+            ]
+        );
     }
 
     #[test]
@@ -520,5 +659,125 @@ mod tests {
         assert!(!wizard.add_back("Add it back?"));
         assert!(wizard.add_back("Add it back?"));
         assert_eq!(wizard.prompt.asked[0], "Add it back? [y/N] ");
+    }
+
+    const SAVED: &str = "ANTHROPIC_API_KEY=placeholder-saved\n";
+
+    fn anthropic() -> Choice {
+        Choice(Some(Provider::Anthropic))
+    }
+
+    fn model(
+        front: &mut dyn FrontEnd,
+        recorded: Option<Choice>,
+        secrets: &str,
+    ) -> Result<(Choice, Option<String>), InputError> {
+        let answers = collect(
+            front,
+            Some("owner@example.com"),
+            recorded,
+            &Secrets::parse(secrets),
+            false,
+        )?;
+        let key = answers.model_key.map(|key| key.expose().to_string());
+        Ok((answers.model_provider, key))
+    }
+
+    #[test]
+    fn a_scripted_run_takes_the_provider_and_its_key_from_the_environment_first() {
+        let mut nothing = NoQuestions { env: env(&[]) };
+        assert_eq!(
+            model(&mut nothing, None, ""),
+            Ok((Choice::default(), None)),
+            "OpenRouter is the default, and a blank key is allowed"
+        );
+        assert_eq!(
+            model(&mut nothing, Some(anthropic()), SAVED),
+            Ok((anthropic(), Some("placeholder-saved".into())))
+        );
+
+        let mut given = NoQuestions {
+            env: env(&[
+                (PROVIDER_VAR, "anthropic"),
+                ("RAKAZO_STACK_ANTHROPIC_API_KEY", "placeholder-new"),
+                ("RAKAZO_STACK_OPENROUTER_API_KEY", "placeholder-other"),
+            ]),
+        };
+        assert_eq!(
+            model(&mut given, Some(Choice(None)), SAVED),
+            Ok((anthropic(), Some("placeholder-new".into())))
+        );
+
+        let mut none = NoQuestions {
+            env: env(&[(PROVIDER_VAR, "none")]),
+        };
+        assert_eq!(
+            model(&mut none, Some(anthropic()), SAVED),
+            Ok((Choice(None), None))
+        );
+    }
+
+    #[test]
+    fn a_bad_provider_or_key_is_invalid_input_that_is_never_quoted() {
+        let mut unknown = NoQuestions {
+            env: env(&[(PROVIDER_VAR, "placeholder-pasted-here")]),
+        };
+        let err = model(&mut unknown, None, "").unwrap_err();
+        assert_eq!(err, InputError::UnknownProvider);
+        assert!(!err.to_string().contains("placeholder-pasted-here"));
+
+        let mut spaced = NoQuestions {
+            env: env(&[("RAKAZO_STACK_OPENROUTER_API_KEY", "placeholder with spaces")]),
+        };
+        let err = model(&mut spaced, None, "").unwrap_err();
+        assert_eq!(err, InputError::InvalidKey(Provider::OpenRouter));
+        assert!(!err.to_string().contains("placeholder"));
+
+        let mut nothing = NoQuestions { env: env(&[]) };
+        assert_eq!(
+            model(&mut nothing, None, "OPENROUTER_API_KEY=\"quoted\"\n"),
+            Err(InputError::InvalidSavedKey(Provider::OpenRouter))
+        );
+    }
+
+    #[test]
+    fn the_wizard_keeps_a_saved_key_on_enter_and_takes_a_pasted_one() {
+        let mut keep = Wizard {
+            prompt: Scripted::new(&["", "", ""]),
+        };
+        assert_eq!(
+            model(&mut keep, Some(anthropic()), SAVED),
+            Ok((anthropic(), Some("placeholder-saved".into())))
+        );
+        assert_eq!(
+            keep.prompt.asked[2],
+            "Anthropic API key: set, press Enter to keep, or paste a new one: "
+        );
+
+        let mut paste = Wizard {
+            prompt: Scripted::new(&["", "gemini", " placeholder-new "]),
+        };
+        assert_eq!(
+            model(&mut paste, Some(anthropic()), SAVED),
+            Ok((
+                Choice(Some(Provider::Gemini)),
+                Some("placeholder-new".into())
+            ))
+        );
+        assert!(paste.prompt.asked[2].contains("billing-enabled"));
+
+        let mut none = Wizard {
+            prompt: Scripted::new(&["", "none"]),
+        };
+        assert_eq!(
+            model(&mut none, Some(anthropic()), SAVED),
+            Ok((Choice(None), None))
+        );
+        assert_eq!(none.prompt.asked.len(), 2, "no key question");
+
+        let mut typo = Wizard {
+            prompt: Scripted::new(&["", "open router"]),
+        };
+        assert_eq!(model(&mut typo, None, ""), Err(InputError::UnknownProvider));
     }
 }

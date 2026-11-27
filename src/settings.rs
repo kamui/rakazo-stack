@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::database_settings::DatabaseSetting;
+use crate::model_provider::Choice;
 use crate::resolve::RakazoRelease;
 
 pub const SCHEMA: u32 = 1;
@@ -15,6 +16,11 @@ pub struct Settings {
     pub program_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner_email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<Choice>,
+    /// Overrides the program's default chat model (spec §8). Only the Self-hoster writes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rakazo_model: Option<String>,
     /// The database-only settings setup has filled in, so a re-run can tell "removed in
     /// Rakazo" from "never set" (spec §7).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -45,6 +51,8 @@ impl Settings {
             schema: SCHEMA,
             program_version: env!("CARGO_PKG_VERSION").to_string(),
             owner_email: None,
+            model_provider: None,
+            rakazo_model: None,
             filled_by_setup: Vec::new(),
             components: Components {
                 rakazo: RecordedRakazo {
@@ -104,10 +112,17 @@ mod tests {
             computer_digest: "sha256:ccc".into(),
         });
         settings.owner_email = Some("owner@example.com".into());
+        settings.model_provider = Some(Choice(None));
+        settings.rakazo_model = Some("z-ai/glm-5.3-flash".into());
         settings.filled_by_setup = vec![DatabaseSetting::Owner];
         let text = settings.to_json();
         assert!(
             text.contains("\"filled_by_setup\": [\n    \"owner\"\n  ]"),
+            "{text}"
+        );
+        assert!(text.contains("\"model_provider\": \"none\""), "{text}");
+        assert!(
+            text.contains("\"rakazo_model\": \"z-ai/glm-5.3-flash\""),
             "{text}"
         );
         assert_eq!(Settings::parse(&text).unwrap(), settings);

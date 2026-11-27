@@ -1,5 +1,6 @@
-//! `rakazo-stack setup` (spec §7), so far: the Owner questions, Rakazo on localhost, the
-//! Owner filled in through Rakazo's own code path, and the Checklist.
+//! `rakazo-stack setup` (spec §7), so far: the Owner and Model provider questions, the key
+//! check, Rakazo on localhost, the Owner filled in through Rakazo's own code path, and the
+//! Checklist.
 
 use std::time::Duration;
 
@@ -11,6 +12,7 @@ use crate::envfile::{self, EnvInputs, STACK_COMPOSE_FILE};
 use crate::github::{self, RAKAZO_REPO};
 use crate::http;
 use crate::instance::InstanceFolder;
+use crate::model_provider::{self, ChatModel, Provider};
 use crate::overrides;
 use crate::platform::Platform;
 use crate::rakazo::LocalRakazo;
@@ -44,14 +46,46 @@ impl Setup<'_> {
     pub fn run(&self) -> Result<(), SetupError> {
         let agent = http::agent();
         let recorded = self.load_settings()?;
+        let mut secrets = Secrets::parse(&self.read_text("secrets.env")?.unwrap_or_default());
         let mut front = self.front_end()?;
         let answers = answers::collect(
             front.as_mut(),
             recorded.as_ref().and_then(|s| s.owner_email.as_deref()),
+            recorded.as_ref().and_then(|s| s.model_provider),
+            &secrets,
             recorded.is_none(),
         )?;
+        let model = answers.model_provider.0.zip(answers.model_key.as_ref());
+        let rakazo_model = recorded.as_ref().and_then(|s| s.rakazo_model.clone());
+        let chat = match model {
+            Some((provider, key)) => {
+                ChatModel::new(provider, key, rakazo_model.as_deref()).map_err(SetupError)?
+            }
+            None => None,
+        };
+        let key_warning = match model {
+            Some((provider, key)) => {
+                let saved = secrets.get(provider.key_name()) == Some(key.expose());
+                let check = model_provider::check_key(&agent, provider.api_base(), provider, key);
+                model_provider::require_key(provider, check, saved).map_err(SetupError)?
+            }
+            None => None,
+        };
         let log = RunLog::create(self.folder.path())?;
-
+        if let Some(warning) = key_warning {
+            log.say(&warning);
+        }
+        if let Some((Provider::Gemini, _)) = model {
+            log.say(model_provider::GEMINI_BILLING);
+        }
+        let zdr_item = match model {
+            Some((provider @ Provider::OpenRouter, key)) => model_provider::ensure_zdr(
+                || model_provider::probe_zdr(&agent, provider.api_base(), key),
+                front.as_mut(),
+                |line| log.say(line),
+            ),
+            _ => None,
+        };
         let release = match &recorded {
             Some(settings) => settings.rakazo_release(),
             None => resolve_rakazo(&agent, &log)?,
@@ -64,9 +98,10 @@ impl Setup<'_> {
                 .retain(|filled| *filled != DatabaseSetting::Owner);
             settings.owner_email = Some(answers.owner_email.clone());
         }
+        settings.model_provider = Some(answers.model_provider);
 
-        let mut secrets = Secrets::parse(&self.read_text("secrets.env")?.unwrap_or_default());
         secrets.fill_missing(secrets::random_hex);
+        model_provider::save_key(&mut secrets, model);
 
         let rakazo_file = envfile::rakazo_compose_file(&release.tag);
         if self.folder.read(&rakazo_file)?.is_none() {
@@ -87,6 +122,7 @@ impl Setup<'_> {
             rakazo: &release,
             secrets: &secrets,
             web_port,
+            chat,
         });
         self.folder.write(".env", env.as_bytes())?;
         self.folder.reapply_modes()?;
@@ -117,6 +153,12 @@ impl Setup<'_> {
             &mut settings.filled_by_setup,
             &mut checklist,
         );
+        if let Some(item) = zdr_item {
+            checklist.add(item);
+        }
+        if let Some(item) = model_provider::key_item(model.map(|(provider, _)| provider)) {
+            checklist.add(item);
+        }
         self.folder
             .write("settings.json", settings.to_json().as_bytes())?;
         log.say(checklist.render().trim_end());
