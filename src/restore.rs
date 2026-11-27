@@ -293,6 +293,7 @@ impl Restore<'_> {
             folder: self.folder,
             no_questions: true,
             nftables: self.nftables,
+            switch: None,
         }
         .run()
         .map_err(|err| err.0)
@@ -737,7 +738,7 @@ impl VersionPlan {
             notes.push(format!(
                 "This Backup runs Rakazo {}, below the {} this rakazo-stack drives, so it is restored onto the latest Rakazo, which migrates its data forward.",
                 settings.components.rakazo.version,
-                resolve::RAKAZO_FLOOR
+                resolve::rakazo_floor()
             ));
         }
         if let Some(hindsight) = settings.components.hindsight.as_ref()

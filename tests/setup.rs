@@ -87,6 +87,7 @@ impl TestInstance {
             .arg("setup")
             .args(args)
             .env("HOME", self.home.path())
+            .env("RAKAZO_STACK_NO_UPDATE_CHECK", "1")
             .env("RAKAZO_STACK_TEST_PROJECT", &self.project)
             .env("RAKAZO_STACK_TEST_WEB_PORT", self.web_port.to_string())
             .envs(env.iter().copied())
@@ -1763,6 +1764,7 @@ impl TestInstance {
         command
             .arg("backup")
             .env("HOME", self.home.path())
+            .env("RAKAZO_STACK_NO_UPDATE_CHECK", "1")
             .stdin(Stdio::null())
             .output()
             .expect("run rakazo-stack")
@@ -2439,5 +2441,382 @@ fn restore_brings_the_instance_back_on_its_recorded_versions() {
     assert_eq!(
         fs::read(folder.join("secrets.env")).unwrap(),
         secrets_before
+    );
+}
+
+impl TestInstance {
+    /// Runs `update` with stdin closed, so only `--yes` lets it go ahead.
+    fn update(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rakazo-stack"));
+        for (name, _) in std::env::vars_os() {
+            if name.as_encoded_bytes().starts_with(b"RAKAZO_STACK_") {
+                command.env_remove(name);
+            }
+        }
+        command
+            .arg("update")
+            .args(args)
+            .env("HOME", self.home.path())
+            .env("RAKAZO_STACK_TEST_PROJECT", &self.project)
+            .env("RAKAZO_STACK_TEST_WEB_PORT", self.web_port.to_string())
+            .envs(env.iter().copied())
+            .stdin(Stdio::null())
+            .output()
+            .expect("run rakazo-stack")
+    }
+
+    fn settings(&self) -> serde_json::Value {
+        serde_json::from_slice(&fs::read(self.folder().join("settings.json")).unwrap()).unwrap()
+    }
+
+    fn hindsight_sql(&self, query: &str) -> String {
+        let out = self.compose(&[
+            "exec",
+            "-T",
+            "hindsight-db",
+            "psql",
+            "-X",
+            "-tA",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            "hindsight",
+            "-d",
+            "hindsight",
+            "-c",
+            query,
+        ]);
+        assert!(out.status.success(), "{}", text(&out));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+}
+
+/// The digest a registry's `repository:tag` points to, read without pulling it.
+fn registry_digest(registry: &str, repository: &str, tag: &str) -> String {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let (token_url, manifest_url) = match registry {
+        "ghcr.io" => (
+            format!("https://ghcr.io/token?scope=repository:{repository}:pull"),
+            format!("https://ghcr.io/v2/{repository}/manifests/{tag}"),
+        ),
+        _ => (
+            format!(
+                "https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repository}:pull"
+            ),
+            format!("https://registry-1.docker.io/v2/{repository}/manifests/{tag}"),
+        ),
+    };
+    let body = agent
+        .get(&token_url)
+        .call()
+        .unwrap()
+        .body_mut()
+        .read_to_string()
+        .unwrap();
+    let token: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let response = agent
+        .head(&manifest_url)
+        .header(
+            "Authorization",
+            &format!("Bearer {}", token["token"].as_str().unwrap()),
+        )
+        .header(
+            "Accept",
+            "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json",
+        )
+        .call()
+        .unwrap();
+    assert_eq!(response.status(), 200, "{manifest_url}");
+    response
+        .headers()
+        .get("docker-content-digest")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+/// An image an Update replaced is gone, unless something else also tagged it, as the
+/// dev machine's own Rakazo has.
+fn gone_unless_tagged_elsewhere(id: &str) -> bool {
+    let out = docker()
+        .args(["image", "inspect", "--format", "{{json .RepoTags}}", id])
+        .output()
+        .unwrap();
+    if !out.status.success() {
+        return true;
+    }
+    let names: Vec<String> = serde_json::from_slice(&out.stdout).unwrap();
+    names.iter().any(|name| !name.contains('@'))
+}
+
+const OLD_RAKAZO: &str = "v0.15.0";
+const OLD_LEMONADE: &str = "v2026.47.1";
+
+/// §19's "Update across Rakazo releases": an Instance installed on Rakazo v0.15.0 (below
+/// the floor, so with the test floor) and an older Lemonade updates with the layer file,
+/// keeping its Owner, behind one Backup; Holds keep and release Lemonade; a Lemonade-only
+/// Update takes no Backup; a second Update finds nothing newer.
+#[test]
+#[ignore = "needs Docker and pulls two Rakazo releases; CI and the dev machine run it with --include-ignored"]
+fn update_moves_rakazo_across_releases_behind_a_backup_and_honours_holds() {
+    let instance = TestInstance::new();
+    let folder = instance.folder();
+    let origin = instance.origin();
+    fs::create_dir_all(&folder).unwrap();
+    let seeded = serde_json::json!({
+        "schema": 1,
+        "program_version": "0.1.0",
+        "owner_email": OWNER_EMAIL,
+        "model_provider": "none",
+        "components": {
+            "rakazo": {
+                "version": OLD_RAKAZO,
+                "images": {
+                    "app": registry_digest("ghcr.io", "elie222/rakazo/app", OLD_RAKAZO),
+                    "computer": registry_digest("ghcr.io", "elie222/rakazo/computer", OLD_RAKAZO),
+                },
+            },
+            "lemonade": {
+                "version": OLD_LEMONADE,
+                "digest": registry_digest("ghcr.io", "lemonade-sdk/lemonade-server", OLD_LEMONADE),
+            },
+        },
+    });
+    fs::write(folder.join("settings.json"), seeded.to_string()).unwrap();
+    let installed = instance.setup(
+        &["--no-questions"],
+        &[
+            ("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD),
+            ("RAKAZO_STACK_TEST_RAKAZO_FLOOR", OLD_RAKAZO),
+        ],
+    );
+    assert!(installed.status.success(), "{}", text(&installed));
+    let old_api = instance.image_of("api");
+    let old_lemonade = instance.image_of("lemonade");
+    let sign_in = || {
+        post_json(
+            &format!("{origin}/api/auth/sign-in/email"),
+            &serde_json::json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }),
+        )
+    };
+    assert_eq!(sign_in().0, 200);
+    let unchanged = fs::read(folder.join("settings.json")).unwrap();
+    let passphrase = [("RAKAZO_STACK_BACKUP_PASSPHRASE", BACKUP_PASSPHRASE)];
+
+    let below_floor = instance.update(&["--yes", "--hold", "rakazo=v0.15.0"], &passphrase);
+    assert!(!below_floor.status.success());
+    assert!(
+        text(&below_floor).contains("below the v0.16.0 this rakazo-stack needs"),
+        "{}",
+        text(&below_floor)
+    );
+    let no_passphrase = instance.update(&["--yes"], &[]);
+    assert!(!no_passphrase.status.success());
+    assert!(
+        text(&no_passphrase).contains("RAKAZO_STACK_BACKUP_PASSPHRASE, which isn't set"),
+        "{}",
+        text(&no_passphrase)
+    );
+    let unreachable = instance.update(
+        &["--yes"],
+        &[
+            passphrase[0],
+            ("ALL_PROXY", "http://127.0.0.1:9"),
+            ("HTTPS_PROXY", "http://127.0.0.1:9"),
+            ("NO_PROXY", "127.0.0.1"),
+        ],
+    );
+    assert!(!unreachable.status.success(), "{}", text(&unreachable));
+    assert!(
+        text(&unreachable).contains("GitHub can't be reached"),
+        "{}",
+        text(&unreachable)
+    );
+    assert_eq!(fs::read(folder.join("settings.json")).unwrap(), unchanged);
+    assert!(instance.backups().is_empty());
+    for left in [
+        ".update.env".to_string(),
+        "rakazo.v0.16.0.images.yml".to_string(),
+    ] {
+        assert!(!folder.join(&left).exists(), "{left}");
+    }
+    assert_eq!(instance.image_of("api"), old_api, "still the old version");
+
+    let held = instance.update(&["--yes", "--hold", "lemonade=v2026.47.1"], &passphrase);
+    let held_text = text(&held);
+    assert!(held.status.success(), "{held_text}");
+    let settings = instance.settings();
+    let new_rakazo = settings["components"]["rakazo"]["version"]
+        .as_str()
+        .unwrap();
+    assert_ne!(new_rakazo, OLD_RAKAZO, "{settings}");
+    assert!(
+        held_text.contains(&format!("Rakazo {OLD_RAKAZO} → {new_rakazo}")),
+        "{held_text}"
+    );
+    assert!(
+        held_text.contains(&format!(
+            "Lemonade is held at {OLD_LEMONADE}; the latest is"
+        )),
+        "{held_text}"
+    );
+    assert!(
+        held_text.contains(&format!(
+            "https://github.com/elie222/rakazo/releases/tag/{new_rakazo}"
+        )),
+        "{held_text}"
+    );
+    assert!(
+        !held_text.contains("Bot computers are off"),
+        "the new egress script is verified: {held_text}"
+    );
+    assert_eq!(
+        settings["holds"],
+        serde_json::json!({ "lemonade": OLD_LEMONADE })
+    );
+    assert_eq!(settings["components"]["lemonade"]["version"], OLD_LEMONADE);
+    assert_eq!(instance.backups().len(), 1, "{held_text}");
+    assert_eq!(sign_in().0, 200, "the Owner is still there");
+    assert_ne!(instance.image_of("api"), old_api);
+    assert!(gone_unless_tagged_elsewhere(&old_api), "{held_text}");
+    assert!(!folder.join(".update.env").exists());
+    assert!(
+        folder
+            .join(format!("rakazo.{new_rakazo}.images.yml"))
+            .exists()
+    );
+    assert_eq!(instance.image_of("lemonade"), old_lemonade);
+
+    let lemonade_only = instance.update(&["--yes", "--unhold", "lemonade"], &[]);
+    let lemonade_text = text(&lemonade_only);
+    assert!(lemonade_only.status.success(), "{lemonade_text}");
+    assert!(
+        lemonade_text.contains(&format!("Lemonade {OLD_LEMONADE} → ")),
+        "{lemonade_text}"
+    );
+    assert_eq!(instance.backups().len(), 1, "no Backup: {lemonade_text}");
+    let settings = instance.settings();
+    assert!(settings["holds"].is_null(), "{settings}");
+    assert_ne!(settings["components"]["lemonade"]["version"], OLD_LEMONADE);
+    assert!(
+        gone_unless_tagged_elsewhere(&old_lemonade),
+        "{lemonade_text}"
+    );
+
+    let updated = fs::read(folder.join("settings.json")).unwrap();
+    let again = instance.update(&["--yes"], &[]);
+    assert!(again.status.success(), "{}", text(&again));
+    assert!(
+        text(&again).contains("Everything is up to date."),
+        "{}",
+        text(&again)
+    );
+    assert_eq!(fs::read(folder.join("settings.json")).unwrap(), updated);
+}
+
+/// A Hindsight Update keeps memories, and `ALTER EXTENSION vector UPDATE` brings the
+/// extension up to the new image's pgvector: `hindsight-db` starts on pgvector 0.8.1's pg18
+/// build and moves to the current `pg18`.
+#[test]
+#[ignore = "needs Docker and pulls Rakazo's and Hindsight's images; CI and the dev machine run it with --include-ignored"]
+fn a_hindsight_update_keeps_memories_and_updates_pgvector() {
+    let instance = TestInstance::new();
+    let folder = instance.folder();
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(
+        folder.join("secrets.env"),
+        format!("OPENROUTER_API_KEY={MODEL_KEY}\n"),
+    )
+    .unwrap();
+    let old_db = registry_digest("docker.io", "pgvector/pgvector", "0.8.1-pg18");
+    let seeded = serde_json::json!({
+        "schema": 1,
+        "program_version": "0.1.0",
+        "owner_email": OWNER_EMAIL,
+        "model_provider": "openrouter",
+        "memory": "on",
+        "components": {
+            "rakazo": {
+                "version": "v0.16.0",
+                "images": {
+                    "app": registry_digest("ghcr.io", "elie222/rakazo/app", "v0.16.0"),
+                    "computer": registry_digest("ghcr.io", "elie222/rakazo/computer", "v0.16.0"),
+                },
+            },
+            "hindsight": {
+                "version": "1.3.0",
+                "images": {
+                    "hindsight": registry_digest("ghcr.io", "vectorize-io/hindsight-api", "1.3.0"),
+                    "hindsight-db": old_db,
+                },
+            },
+        },
+    });
+    fs::write(folder.join("settings.json"), seeded.to_string()).unwrap();
+    let mut env = vec![("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD)];
+    env.extend(UNREACHABLE);
+    let installed = instance.setup(&["--no-questions"], &env);
+    assert!(installed.status.success(), "{}", text(&installed));
+    let extension = "SELECT extversion FROM pg_extension WHERE extname = 'vector'";
+    assert_eq!(instance.hindsight_sql(extension), "0.8.1");
+
+    let tenant_key = instance.secret("HINDSIGHT_API_TENANT_API_KEY");
+    let seeded_bank = instance.compose_with_stdin(
+        &[
+            "exec",
+            "-T",
+            "hindsight",
+            "python",
+            "-I",
+            "-c",
+            NEW_BANKS,
+            "kept",
+        ],
+        &format!("{tenant_key}\n"),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&seeded_bank.stdout).trim(),
+        r#"{"kept": [200, 200]}"#,
+        "{}",
+        text(&seeded_bank)
+    );
+    let memories = "SELECT count(*) FROM memory_units";
+    let before = instance.hindsight_sql(memories);
+    assert_ne!(before, "0");
+    let old_db_image = instance.image_of("hindsight-db");
+
+    env.push(("RAKAZO_STACK_BACKUP_PASSPHRASE", BACKUP_PASSPHRASE));
+    let updated = instance.update(&["--yes"], &env);
+    let updated_text = text(&updated);
+    assert!(updated.status.success(), "{updated_text}");
+    assert!(updated_text.contains("Hindsight 1.3.0"), "{updated_text}");
+    assert!(
+        updated_text.contains("Updating pgvector's extension in Hindsight's database"),
+        "{updated_text}"
+    );
+    assert_eq!(instance.backups().len(), 1, "{updated_text}");
+    let settings = instance.settings();
+    assert_ne!(
+        settings["components"]["hindsight"]["images"]["hindsight-db"], old_db,
+        "{settings}"
+    );
+    let version = instance.hindsight_sql(extension);
+    assert_ne!(version, "0.8.1", "the extension moved with the image");
+    assert_eq!(instance.hindsight_sql(memories), before, "memories kept");
+    assert!(
+        gone_unless_tagged_elsewhere(&old_db_image),
+        "{updated_text}"
+    );
+    let ps = instance.compose(&["ps", "--format", "{{.Service}} {{.Health}}"]);
+    assert!(
+        String::from_utf8_lossy(&ps.stdout)
+            .lines()
+            .any(|line| line == "hindsight healthy"),
+        "{}",
+        text(&ps)
     );
 }

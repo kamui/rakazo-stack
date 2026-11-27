@@ -132,7 +132,7 @@ Every `setup`, `update` and `restore` run starts with preflight; `backup` takes 
 | Recorded Component versions are below the program's floor | stop: "run `rakazo-stack update`" (`setup` only) | [#32](https://github.com/kamui/rakazo-stack/issues/32) |
 | GitHub unreachable | stop on a first `setup`, on `update` and on `restore`, which fetches the compose file of the Backup's Rakazo release; re-runs of `setup` don't need GitHub | [#32](https://github.com/kamui/rakazo-stack/issues/32), [#72](https://github.com/kamui/rakazo-stack/issues/72) |
 
-`update` adds a free-disk check sized to the images it will pull ([#32](https://github.com/kamui/rakazo-stack/issues/32)). Setup checks free disk again before it pulls voice models, and only when a model is still missing: below 3 GB free, it skips voice and adds a checklist item ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#64](https://github.com/kamui/rakazo-stack/issues/64)).
+`update` adds a free-disk check sized to the images it will pull, once it knows which: each new image not on the machine counts as big as the image of the same repository the Instance runs now, plus 2 GB left for the running Instance. Too little stops the run ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#73](https://github.com/kamui/rakazo-stack/issues/73)). Setup checks free disk again before it pulls voice models, and only when a model is still missing: below 3 GB free, it skips voice and adds a checklist item ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#64](https://github.com/kamui/rakazo-stack/issues/64)).
 
 On Windows every Docker check runs against `docker.exe` (see [Windows](#windows-docker-through-dockerexe)).
 
@@ -178,7 +178,10 @@ rakazo-stack installs the latest stable release of each Component, best effort, 
 
 - Each program release knows the lowest version of each Component it can drive. "Latest" has no ceiling ([#32](https://github.com/kamui/rakazo-stack/issues/32)). v1's floors are **Rakazo v0.16.0**, where setup's memory connect call was proven ([#45](https://github.com/kamui/rakazo-stack/issues/45)), and **Hindsight 1.3.0**, the version tested ([#1](https://github.com/kamui/rakazo-stack/issues/1)). If no release at or above the floor has published images, setup stops and says so.
 - `rakazo-stack update --hold <component>=<version>` keeps a Component at that version; `--unhold <component>` releases it. Holds live in `settings.json` ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
-- A Hold below the floor is refused. If a newer program raises the floor above an existing Hold, `update` moves that Component to latest and says so in its confirmation; with `--yes` it stops instead, so a Hold is never dropped silently ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
+  - The components are `rakazo`, `hindsight`, `lemonade` and `tailscale`, and a version is `X.Y.Z`, with or without its `v` ([#73](https://github.com/kamui/rakazo-stack/issues/73)).
+  - A Hold at a newer version than the recorded one moves the Component there and keeps it there. That version must be a stable release with its images published, checked as in [How versions are resolved](#how-versions-are-resolved) ([#73](https://github.com/kamui/rakazo-stack/issues/73)).
+  - A Hold below the recorded version is refused: `update` never moves a Component back, because its data has already migrated forward. An older Backup is the way back ([#73](https://github.com/kamui/rakazo-stack/issues/73)).
+- A Hold below the floor is refused. If a newer program raises the floor above an existing Hold, `update` moves that Component to latest, removes the Hold and says so in its confirmation; with `--yes` it stops instead, so a Hold is never dropped silently ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 
 ## 5. Compose layout
 
@@ -296,6 +299,8 @@ Fixed at `~/rakazo-stack` on every OS, with no option to move it. On Windows tha
   lemonade/                        macOS only: lemond's working folder (config.json, backends), versions/<v>/, models/ (HF_HOME)
   logs/                            setup run logs, one `setup-<UTC time>.log` per run (no secrets); `lemond.log` on macOS
   .lock                            the lock setup, update, backup and restore take (an OS file lock, released if the program dies)
+  .update-check                    when setup or backup last checked for updates, in Unix seconds
+  .update.env                      only while update fetches: the new versions' image lines
 ```
 
 - Setup re-applies the modes on every run ([#29](https://github.com/kamui/rakazo-stack/issues/29)).
@@ -303,7 +308,7 @@ Fixed at `~/rakazo-stack` on every OS, with no option to move it. On Windows tha
 - Compose files sit beside `.env` because Compose reads `.env` and resolves relative paths from the project folder ([#29](https://github.com/kamui/rakazo-stack/issues/29)).
 - The only data inside the folder is native lemond's files on macOS (about 2 GB of models) ([#29](https://github.com/kamui/rakazo-stack/issues/29)).
 - Outside the folder: the macOS LaunchAgent plist, `~/Library/LaunchAgents/com.github.kamui.rakazo-stack.lemond.plist` (mode 600) ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#70](https://github.com/kamui/rakazo-stack/issues/70)), Backups in `~/rakazo-stack-backups/` ([#30](https://github.com/kamui/rakazo-stack/issues/30)), and the program in `~/.local/bin/rakazo-stack` ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
-- The lock that `setup`, `update`, `backup` and `restore` take, and the timestamp of the last update check, also live in the Instance folder ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
+- The lock that `setup`, `update`, `backup` and `restore` take, and the timestamp of the last update check (`.update-check`), also live in the Instance folder ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#73](https://github.com/kamui/rakazo-stack/issues/73)).
 
 ### `settings.json`
 
@@ -313,7 +318,7 @@ JSON, rewritten by setup on every run ([#29](https://github.com/kamui/rakazo-sta
 - Optional overrides: one Rakazo model and one memory model. Only overrides are stored; defaults belong to the program version ([#36](https://github.com/kamui/rakazo-stack/issues/36), [#51](https://github.com/kamui/rakazo-stack/issues/51)).
 - Recorded versions and image digests for each Component, and the program version that wrote it ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 - Once the Instance has joined a tailnet, the `ts.net` name Tailscale assigned (`tailscale_dns_name`). Without it, joining needs an auth key ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
-- Holds ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
+- Holds, as `holds`: each held component's version, for example `"holds": { "lemonade": "v2026.48.3" }`, absent when there are none ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#73](https://github.com/kamui/rakazo-stack/issues/73)).
 - Which database-only settings setup filled in (the Owner's voice, the Owner's model connection, the default Space's memory), so a re-run can tell "removed in Rakazo" from "never set" ([#23](https://github.com/kamui/rakazo-stack/issues/23), [#36](https://github.com/kamui/rakazo-stack/issues/36)).
 - A failed Update, if the last one was rolled back ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 
@@ -496,6 +501,9 @@ Every run ends with a checklist of what is left to do by hand ([#9](https://gith
 ### The update nudge
 
 `setup` and `backup` check GitHub at most once a day. When the program or any un-held Component has a newer version, they print one line: "Updates available: run `rakazo-stack update`". A failed check is silent. `RAKAZO_STACK_NO_UPDATE_CHECK=1` turns it off. `restore` doesn't check ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
+
+- The check runs at the end of a successful run. It writes the time to `.update-check` before it looks, so a failed check also waits a day, and the line prints only on the run that checks ([#73](https://github.com/kamui/rakazo-stack/issues/73)).
+- "Newer" is what `update` would move to: the program's latest release on GitHub, and each running Component's newest release with published images. A Hold, or a release without images, doesn't count ([#73](https://github.com/kamui/rakazo-stack/issues/73)).
 
 ### Per-OS differences
 
@@ -785,22 +793,26 @@ The only command that moves recorded versions ([#32](https://github.com/kamui/ra
 
 1. **Lock.**
 2. **Program first.** If a newer rakazo-stack exists, ask "rakazo-stack vX is available (you have vY). Install it? [Y/n]", run the latest `install.sh --no-setup` (same SHA-256 and attestation checks as a fresh install), and hand over to the new program, which keeps the lock. Newer Components may need a newer layer file or floor.
-3. **Preflight**, plus a free-disk check sized to the images to pull.
-4. **Resolve** the latest versions (skipping Rakazo releases without images) and fetch the new Rakazo tag's compose file and egress script. Detect any Postgres major move.
-5. **Confirm.** List each Component's old → new version, held Components ("held at v0.5.1, latest is v0.5.3"), skipped releases, any Postgres move ("Postgres 16 → 18: a Backup is required"), any failed earlier Update, and links to each release's notes (Rakazo's "Self-host upgrade notes" can need manual steps). Ask "Update? [Y/n]". With nothing newer: "Everything is up to date".
-6. **Fetch while running:** pull every image, build the relay and sidecar, and on macOS download and verify `lemond`.
-7. **Backup**, if anything it holds changes (Rakazo, Hindsight, either Postgres image, Tailscale). A Lemonade-only Update skips it. Rakazo's `api`, `worker`, `supervisor` and bot computers stay stopped afterwards, so the Backup holds every write.
+3. **Preflight**, plus a free-disk check sized to the images to pull ([§3](#preflight)), made once step 4 knows them.
+4. **Resolve** the latest versions of the Components that run (skipping Rakazo releases without images) and fetch the new Rakazo tag's compose file and egress script. Detect any Postgres major move. The new compose file is written beside the old one, which nothing reads yet, and the new versions' image lines go into `.update.env`, which Compose reads over `.env` (`--env-file .env --env-file .update.env`) until the switch. The egress script replaces the old one only for step 6's build. A No, or a failure before the switch, deletes both files and puts the old script back ([#73](https://github.com/kamui/rakazo-stack/issues/73)).
+5. **Confirm.** List each Component's old → new version, held Components ("held at v0.5.1, latest is v0.5.3"), skipped releases, any Postgres move ("Postgres 16 → 18: a Backup is required"), any failed earlier Update, and links to each release's notes (Rakazo's "Self-host upgrade notes" can need manual steps). Ask "Update? [Y/n]"; without a terminal, and without `--yes`, `update` stops. With nothing newer: "Everything is up to date", and nothing changes beyond a Hold given in the same command.
+6. **Fetch while running:** pull every image, build the relay and sidecar, and on macOS download and verify `lemond`. A failed pull or build here, Lemonade's included, is a failure before the switch.
+7. **Backup**, if anything it holds changes (Rakazo, Hindsight, either Postgres image, Tailscale). A Lemonade-only Update skips it. Rakazo's `api`, `worker`, `supervisor` and bot computers stay stopped afterwards, so the Backup holds every write. A failed Backup starts them again. The switch starts the services; bot computers stay stopped until Rakazo starts them.
 8. **Postgres major move**, if needed (below).
 9. **Switch:** rewrite the stack files and `.env`, swap `lemond` on macOS, `docker compose up -d --wait`. Rakazo's `migrate` and Hindsight's startup migrations run. As soon as the new containers start, record the new versions in `settings.json`: the data now belongs to them.
+   - The switch is setup's no-questions run on the new versions, so a `RAKAZO_STACK_*` answer in the environment applies as it does there. It records the new versions and the Holds when it rewrites the stack files, just before `up`, and setup's own steps that follow are steps 10 and 11 ([#73](https://github.com/kamui/rakazo-stack/issues/73)).
+   - If the run stops before that write, nothing is recorded and anything the Backup stopped starts again on the old versions.
 10. `ALTER EXTENSION vector UPDATE` in Hindsight's database (every Update; cheap and safe to repeat) ([#31](https://github.com/kamui/rakazo-stack/issues/31)).
 11. **Health checks**, then the database-only fill-ins as in setup. Voice comes back last, because Lemonade re-downloads its backends.
 12. **Clean up:** remove the images of replaced versions. A rollback or an older restore pulls them again by digest ([#42](https://github.com/kamui/rakazo-stack/issues/42)).
+    - Replaced means an image one of the Instance's containers ran before the switch and none runs after it. The program pulls by digest, so an image that also has a `name:tag` belongs to something else as well and stays. Docker's containerd image store lists a pull by digest as `name@sha256:…`, which isn't such a tag ([#73](https://github.com/kamui/rakazo-stack/issues/73)).
+    - On macOS the replaced `lemonade/versions/<ver>/` folder is deleted.
 
 Sources: ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#42](https://github.com/kamui/rakazo-stack/issues/42), [#44](https://github.com/kamui/rakazo-stack/issues/44), [#45](https://github.com/kamui/rakazo-stack/issues/45)).
 
 ### Options
 
-- `--yes` skips both questions. With `--yes` and no Backup passphrase in the environment (`RAKAZO_STACK_BACKUP_PASSPHRASE`, [§15](#file-and-encryption)), `update` stops before changing anything.
+- `--yes` skips both questions. With `--yes` and no Backup passphrase in the environment (`RAKAZO_STACK_BACKUP_PASSPHRASE`, [§15](#file-and-encryption)), an Update that takes a Backup stops before changing anything. Without `--yes`, the passphrase is asked after "Update?" unless that variable is set.
 - `--no-backup` skips the Backup; refused when Postgres moves.
 - `--hold <component>=<version>`, `--unhold <component>` ([§4](#floors-and-holds)).
 - If GitHub can't be reached, `update` stops with nothing changed.
@@ -964,7 +976,7 @@ It opens an issue when any part fails. macOS isn't covered (GitHub's Mac runners
 
 ### Test Instances
 
-Tests on a machine that also runs a real Instance need their own. The Instance folder already follows `$HOME`, and two environment variables, for tests only and not documented for Self-hosters, change what the spec otherwise fixes: `RAKAZO_STACK_TEST_PROJECT` (the Compose project name) and `RAKAZO_STACK_TEST_WEB_PORT` (the web port). The integration tests run `setup` with a temporary `$HOME`, their own project and a free port, then remove the project with its volumes and networks. CI runs them on `ubuntu-latest`; the dev machine runs them on WSL.
+Tests on a machine that also runs a real Instance need their own. The Instance folder already follows `$HOME`, and three environment variables, for tests only and not documented for Self-hosters, change what the spec otherwise fixes: `RAKAZO_STACK_TEST_PROJECT` (the Compose project name), `RAKAZO_STACK_TEST_WEB_PORT` (the web port) and `RAKAZO_STACK_TEST_RAKAZO_FLOOR` (a lower Rakazo floor, so that a test can install a release below it and update it, [#73](https://github.com/kamui/rakazo-stack/issues/73)). The integration tests run `setup` with a temporary `$HOME`, their own project and a free port, then remove the project with its volumes and networks. CI runs them on `ubuntu-latest`; the dev machine runs them on WSL.
 
 Every test Instance's sidecar applies the engine-wide rules ([§12](#the-computer-egress-sidecar)), so each test also removes them when it ends, even after a failed assertion, before `compose down`. Before its first `setup`, a test reads the `rakazo-c` rules in the engine's `DOCKER-USER` chain, on both iptables backends, and checks for other running `computer-egress` sidecars. If rules were there with no sidecar keeping them, they belong to someone else, such as a stopped Instance or upstream's own install, and the test leaves them. Otherwise, when the test ends, it stops its own sidecar, looks again for other running sidecars, and runs `--remove` only if there are none. Stopping first means that when two test Instances end together, the last one to stop still removes the rules. The egress test removes the rules part-way through, so it fails at the start on an engine where another Instance has rules.
 
@@ -984,7 +996,7 @@ Each of these was decided from source, docs or a partial run and must pass durin
 - **macOS:** a real LaunchAgent (mode-600 plist, `KeepAlive`, start at login, the name shown in Login Items for an ad-hoc-signed binary, logging) ([#16](https://github.com/kamui/rakazo-stack/issues/16), [#17](https://github.com/kamui/rakazo-stack/issues/17)).
 - **macOS:** the Tailscale container ([#24](https://github.com/kamui/rakazo-stack/issues/24)); real lemond children behind the sidecar's rules ([#25](https://github.com/kamui/rakazo-stack/issues/25)); whether Docker Desktop for Mac's default `/dev/shm` is also 64 MB ([#48](https://github.com/kamui/rakazo-stack/issues/48)).
 - **Linux:** a real reboot with the sidecar; a home LAN, tailnet and global IPv6; the legacy-iptables wrapper on a real legacy host (it passed in Docker-in-Docker on both backends, `computer-egress/test/image.sh`) ([#27](https://github.com/kamui/rakazo-stack/issues/27), [#40](https://github.com/kamui/rakazo-stack/issues/40)).
-- **Updates:** an Update across Rakazo releases with the layer file; a Postgres 16 → 18 move on Rakazo's images compose layout; the rollback path; `install.sh --no-setup` driven from the running program ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
+- **Updates:** a Postgres 16 → 18 move on Rakazo's images compose layout; the rollback path; `install.sh --no-setup` driven from the running program ([#32](https://github.com/kamui/rakazo-stack/issues/32)). An Update across Rakazo releases with the layer file passed on WSL 2 with Docker Desktop: v0.15.0, installed with the test floor, moved to v0.16.0 behind a Backup with the Owner kept, and its egress check passed on the new tag's script (`update_moves_rakazo_across_releases_behind_a_backup_and_honours_holds`, [#73](https://github.com/kamui/rakazo-stack/issues/73)).
 - **Backup and restore:** a Linux-to-macOS round trip, which must also check voice: the restored voice connection names the Whisper model of the OS it came from, and setup leaves a present connection alone ([#30](https://github.com/kamui/rakazo-stack/issues/30)). Restoring `tailscale-state` on a real tailnet: the same device when the old machine is off, and a `-1` name and new Instance URL when it isn't; the integration test only shows the volume restored or left out, since no test joins a tailnet ([#72](https://github.com/kamui/rakazo-stack/issues/72)). The `rakazo_app` role step against Rakazo's images compose file is proven by the integration test `restore_brings_the_instance_back_on_its_recorded_versions`, a backup-then-restore round trip into a fresh HOME and project ([#72](https://github.com/kamui/rakazo-stack/issues/72)).
 - **Hardware:** a real slow 4-thread x86-64 CPU; Linux on bare metal (Linux figures are derived from Docker Desktop's VM) ([#42](https://github.com/kamui/rakazo-stack/issues/42), [#46](https://github.com/kamui/rakazo-stack/issues/46), [#47](https://github.com/kamui/rakazo-stack/issues/47)).
 - **Rakazo calls:** a voice call with a bot through Lemonade in a browser, which needs a Model provider key; speech and transcription through the browser's own `/api/voice/*` routes passed without one ([#64](https://github.com/kamui/rakazo-stack/issues/64)). With a real OpenAI or Gemini key: `models.connect` accepting it, and the Owner's new bot replying on the model with no step in Rakazo's UI. The call's route, body, detection query, new-key update and refusal of a bad key passed on v0.16.0, the floor and the latest release then, with placeholder keys; the saving runs had the providers made unreachable from `api` ([#67](https://github.com/kamui/rakazo-stack/issues/67)).
@@ -1016,5 +1028,4 @@ Collected from the decisions above, for the README and docs:
 
 No ticket fixes these names. The implementation picks them, and the docs then state them:
 
-- the update-check timestamp file;
 - the rest of `settings.json`'s schema (its start is in [§6](#settingsjson)).

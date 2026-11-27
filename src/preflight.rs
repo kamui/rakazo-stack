@@ -187,7 +187,7 @@ pub fn evaluate(facts: &Facts) -> Vec<Finding> {
     {
         findings.push(Finding::stop(format!(
             "This Instance runs Rakazo {tag}, below the {} this rakazo-stack needs. Run `rakazo-stack update`.",
-            resolve::RAKAZO_FLOOR
+            resolve::rakazo_floor()
         )));
     }
     if needs_github(facts.command, facts.first_setup) && facts.github_reachable == Some(false) {

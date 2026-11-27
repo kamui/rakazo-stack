@@ -26,8 +26,8 @@ use crate::preflight;
 use crate::rakazo::LocalRakazo;
 use crate::registry::{self, Ghcr};
 use crate::resolve::{
-    self, HINDSIGHT_DB_IMAGE, HINDSIGHT_DB_TAG, HINDSIGHT_FLOOR, HindsightRelease, RAKAZO_FLOOR,
-    RakazoRelease, Resolution, ResolveError,
+    self, HINDSIGHT_DB_IMAGE, HINDSIGHT_DB_TAG, HINDSIGHT_FLOOR, HindsightRelease, RakazoRelease,
+    Resolution, ResolveError,
 };
 use crate::runlog::RunLog;
 use crate::secrets::{self, HINDSIGHT_TENANT_KEY, LEMONADE_API_KEY, Secrets};
@@ -36,7 +36,7 @@ use crate::tailscale::{self, Joined};
 use crate::voice;
 
 const STACK_LAYER: &str = include_str!("../stack/compose.stack.yaml");
-const RAKAZO_COMPOSE_PATH: &str = "infra/compose/docker-compose.images.yml";
+pub const RAKAZO_COMPOSE_PATH: &str = "infra/compose/docker-compose.images.yml";
 const WAIT_TIMEOUT_SECONDS: &str = "900";
 const VOICE_SERVICES: [&str; 2] = ["lemonade", "lemonade-relay"];
 
@@ -105,12 +105,18 @@ pub struct Setup<'a> {
     pub no_questions: bool,
     /// From preflight: `docker info` reports the `nftables` firewall backend.
     pub nftables: bool,
+    /// `update`'s switch: the settings to run and record in place of `settings.json`'s,
+    /// with the new versions (spec §14, step 9).
+    pub switch: Option<&'a Settings>,
 }
 
 impl Setup<'_> {
     pub fn run(&self) -> Result<(), SetupError> {
         let agent = http::agent();
-        let recorded = self.load_settings()?;
+        let recorded = match self.switch {
+            Some(settings) => Some(settings.clone()),
+            None => self.load_settings()?,
+        };
         let mut secrets = Secrets::parse(&self.read_text("secrets.env")?.unwrap_or_default());
         let mut front = self.front_end()?;
         let answers = answers::collect(
@@ -337,6 +343,10 @@ impl Setup<'_> {
             "Starting Rakazo…"
         });
         self.start(&stack, &rakazo_services)?;
+        if self.switch.is_some() && stack.hindsight.is_some() {
+            log.say("Updating pgvector's extension in Hindsight's database…");
+            memory::update_vector(self.docker, self.folder.path()).map_err(SetupError)?;
+        }
         let origin = stack.local_origin();
         log.say(&format!(
             "Rakazo {} is running at {origin}",
@@ -466,15 +476,7 @@ impl Setup<'_> {
     }
 
     fn lemond(&self, project: &str, release: LemonadeRelease, secrets: &Secrets) -> Lemond {
-        let instance = self.folder.path();
-        let layout = lemond::Layout {
-            home: instance
-                .parent()
-                .expect("the Instance folder is in HOME")
-                .into(),
-            instance: instance.into(),
-            label: lemond::label(project),
-        };
+        let layout = lemond::Layout::new(self.folder.path(), project);
         let key = secrets
             .get(LEMONADE_API_KEY.0)
             .expect("setup generated the key");
@@ -742,7 +744,12 @@ pub fn resolve_rakazo(
     let resolution = resolve::choose_rakazo(&tags, |image, tag| {
         ghcr.digest(image, tag).map_err(|err| err.to_string())
     });
-    report(resolution, "Rakazo", RAKAZO_FLOOR, say)
+    report(
+        resolution,
+        "Rakazo",
+        &resolve::rakazo_floor(),
+        &mut |line| say(line),
+    )
 }
 
 pub fn resolve_hindsight(
@@ -759,14 +766,17 @@ pub fn resolve_hindsight(
                 .map_err(|err| err.to_string())
         },
     );
-    report(resolution, "Hindsight", HINDSIGHT_FLOOR, say)
+    report(resolution, "Hindsight", HINDSIGHT_FLOOR, &mut |line| {
+        say(line)
+    })
 }
 
-fn report<R>(
+/// The chosen release, after `say` has the releases skipped on the way to it.
+pub fn report<R>(
     resolution: Result<Resolution<R>, ResolveError>,
     component: &str,
     floor: &str,
-    say: &dyn Fn(&str),
+    say: &mut dyn FnMut(&str),
 ) -> Result<R, SetupError> {
     match resolution {
         Ok(resolution) => {
@@ -822,6 +832,7 @@ fn wait_for_web(agent: &ureq::Agent, origin: &str) -> Result<(), SetupError> {
 mod tests {
     use super::*;
     use crate::access::{AccessMode, AuthKey, DeviceName};
+    use crate::resolve::RAKAZO_FLOOR;
     use crate::secrets::PastedKey;
     use crate::settings::RecordedImage;
 

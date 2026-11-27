@@ -1,8 +1,11 @@
 //! Memory: Hindsight (spec §10). It runs only when the Memory answer is `on` and a Model
 //! provider key is set, on that key, with one memory model for all of Hindsight's work.
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 
+use crate::docker::Docker;
 use crate::model_provider::{self, Provider};
 use crate::resolve::{HINDSIGHT_DB_TAG, HindsightRelease};
 use crate::secrets::{PastedKey, Secrets};
@@ -80,6 +83,16 @@ fn default_model(provider: Provider) -> &'static str {
     }
 }
 
+pub fn image_lines(release: &HindsightRelease) -> [String; 2] {
+    [
+        format!("HINDSIGHT_IMAGE_TAG={}@{}", release.version, release.digest),
+        format!(
+            "HINDSIGHT_DB_IMAGE_TAG={HINDSIGHT_DB_TAG}@{}",
+            release.db_digest
+        ),
+    ]
+}
+
 /// What `.env` holds for memory when it's on. `compose.stack.yaml` passes the LLM lines
 /// through to `hindsight` only, so Rakazo's services never see them.
 pub struct MemoryEnv<'a> {
@@ -90,14 +103,7 @@ pub struct MemoryEnv<'a> {
 
 impl MemoryEnv<'_> {
     pub fn lines(&self) -> Vec<String> {
-        let release = self.release;
-        let mut lines = vec![
-            format!("HINDSIGHT_IMAGE_TAG={}@{}", release.version, release.digest),
-            format!(
-                "HINDSIGHT_DB_IMAGE_TAG={HINDSIGHT_DB_TAG}@{}",
-                release.db_digest
-            ),
-        ];
+        let mut lines = image_lines(self.release).to_vec();
         lines.extend(
             self.secrets
                 .hindsight()
@@ -119,6 +125,42 @@ impl MemoryEnv<'_> {
             ]);
         }
         lines
+    }
+}
+
+/// Step 10 of every Update: pgvector's `.so` comes with the image, its SQL objects with
+/// this. Cheap, and safe to repeat (spec §14).
+pub fn update_vector(docker: &Docker, folder: &Path) -> Result<(), String> {
+    let out = docker
+        .compose(
+            folder,
+            [
+                "exec",
+                "-T",
+                "hindsight-db",
+                "psql",
+                "-X",
+                "-q",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "hindsight",
+                "-d",
+                "hindsight",
+                "-c",
+                "ALTER EXTENSION vector UPDATE",
+            ],
+        )
+        .output()
+        .map_err(|err| err.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "`ALTER EXTENSION vector UPDATE` in hindsight-db failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
     }
 }
 
