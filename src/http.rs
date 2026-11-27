@@ -37,3 +37,59 @@ pub fn get_bytes(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, HttpError> {
         .read_to_vec()
         .map_err(|err| HttpError(format!("{url}: {err}")))
 }
+
+#[cfg(test)]
+pub mod testing {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::thread::JoinHandle;
+
+    pub struct Request {
+        pub line: String,
+        pub headers: Vec<String>,
+        pub body: String,
+    }
+
+    /// Serves one canned reply and hands back the request it answered.
+    pub fn stub(status: u16, reply: &'static str) -> (String, JoinHandle<Request>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let served = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut lines = Vec::new();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line.trim_end().is_empty() {
+                    break;
+                }
+                lines.push(line.trim_end().to_string());
+            }
+            let length = lines
+                .iter()
+                .filter_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .map(str::trim)
+                        .map(str::to_string)
+                })
+                .find_map(|length| length.parse().ok())
+                .unwrap_or(0);
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            write!(
+                reader.into_inner(),
+                "HTTP/1.1 {status} Reply\r\ncontent-type: application/json\r\nlocation: http://127.0.0.1:9/elsewhere\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}",
+                reply.len()
+            )
+            .unwrap();
+            Request {
+                line: lines.remove(0),
+                headers: lines,
+                body: String::from_utf8(body).unwrap(),
+            }
+        });
+        (base, served)
+    }
+}

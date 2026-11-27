@@ -6,6 +6,7 @@ use std::fmt;
 use std::io::{BufRead, IsTerminal, Write};
 
 use crate::access::{AccessError, AccessMode, AuthKey, AuthKeyState};
+use crate::composio;
 use crate::model_provider::{Choice, PROVIDER_VAR, Provider};
 use crate::secrets::{PastedKey, Secrets};
 
@@ -33,8 +34,10 @@ pub enum InputError {
     LongPassword,
     PasswordsDiffer,
     UnknownProvider,
-    InvalidKey(Provider),
-    InvalidSavedKey(Provider),
+    /// Names the service whose key it is.
+    InvalidKey(&'static str),
+    /// Names the key's line in `secrets.env`.
+    InvalidSavedKey(&'static str),
     Access(AccessError),
 }
 
@@ -74,15 +77,13 @@ impl fmt::Display for InputError {
                 f,
                 "the Model provider is openrouter, openai, gemini, anthropic or none (set {PROVIDER_VAR} with {NO_QUESTIONS_OPTION})."
             ),
-            Self::InvalidKey(provider) => write!(
+            Self::InvalidKey(service) => write!(
                 f,
-                "the {} key has a space, quote or other character no key has.",
-                provider.name()
+                "the {service} key has a space, quote or other character no key has."
             ),
-            Self::InvalidSavedKey(provider) => write!(
+            Self::InvalidSavedKey(key_name) => write!(
                 f,
-                "the {} line in secrets.env isn't a usable key. Correct or remove it.",
-                provider.key_name()
+                "the {key_name} line in secrets.env isn't a usable key. Correct or remove it."
             ),
             Self::Access(err) => err.fmt(f),
         }
@@ -145,6 +146,8 @@ pub struct Answers {
     /// The chosen provider's key: a new one, or else the saved one. `None` when it was
     /// left blank, or the choice is "none".
     pub model_key: Option<PastedKey>,
+    /// A new key, or else the saved one. `None` leaves integrations off.
+    pub composio_key: Option<PastedKey>,
 }
 
 /// One of setup's two front ends. Both produce the same [`Answers`].
@@ -161,6 +164,8 @@ pub trait FrontEnd {
         provider: Provider,
         saved: bool,
     ) -> Result<Option<PastedKey>, InputError>;
+    /// A new Composio key; `None` keeps the saved one, if there is one.
+    fn composio_key(&mut self, saved: bool) -> Result<Option<PastedKey>, InputError>;
     /// "Check again" (true) or "Continue without it", when ZDR only is off.
     fn check_zdr_again(&mut self) -> bool;
     /// "… was removed in Rakazo. Add it back? [y/N]"
@@ -192,30 +197,35 @@ pub fn collect(
     }
     let model_provider = front.model_provider(recorded_provider)?;
     let model_key = match model_provider.0 {
-        Some(provider) => model_key(front, provider, secrets)?,
+        Some(provider) => pasted_key(secrets, provider.key_name(), |saved| {
+            front.model_key(provider, saved)
+        })?,
         None => None,
     };
+    let composio_key = pasted_key(secrets, composio::KEY_NAME, |saved| {
+        front.composio_key(saved)
+    })?;
     Ok(Answers {
         owner_email,
         owner_password,
         model_provider,
         model_key,
+        composio_key,
     })
 }
 
-fn model_key(
-    front: &mut dyn FrontEnd,
-    provider: Provider,
+/// The key `ask` gives, or else the saved one. `ask` is told whether there is one.
+fn pasted_key(
     secrets: &Secrets,
+    key_name: &'static str,
+    ask: impl FnOnce(bool) -> Result<Option<PastedKey>, InputError>,
 ) -> Result<Option<PastedKey>, InputError> {
-    let saved = secrets
-        .get(provider.key_name())
-        .filter(|key| !key.is_empty());
-    if let Some(key) = front.model_key(provider, saved.is_some())? {
+    let saved = secrets.get(key_name).filter(|key| !key.is_empty());
+    if let Some(key) = ask(saved.is_some())? {
         return Ok(Some(key));
     }
     saved
-        .map(|key| PastedKey::new(key).ok_or(InputError::InvalidSavedKey(provider)))
+        .map(|key| PastedKey::new(key).ok_or(InputError::InvalidSavedKey(key_name)))
         .transpose()
 }
 
@@ -228,6 +238,16 @@ pub struct NoQuestions<F: Fn(&str) -> Option<String>> {
 impl<F: Fn(&str) -> Option<String>> NoQuestions<F> {
     fn var(&self, name: &str) -> Option<String> {
         (self.env)(name).filter(|value| !value.is_empty())
+    }
+
+    fn pasted(
+        &self,
+        key_name: &str,
+        service: &'static str,
+    ) -> Result<Option<PastedKey>, InputError> {
+        self.var(&format!("RAKAZO_STACK_{key_name}"))
+            .map(|text| PastedKey::new(&text).ok_or(InputError::InvalidKey(service)))
+            .transpose()
     }
 }
 
@@ -258,9 +278,11 @@ impl<F: Fn(&str) -> Option<String>> FrontEnd for NoQuestions<F> {
         provider: Provider,
         _saved: bool,
     ) -> Result<Option<PastedKey>, InputError> {
-        self.var(&format!("RAKAZO_STACK_{}", provider.key_name()))
-            .map(|text| PastedKey::new(&text).ok_or(InputError::InvalidKey(provider)))
-            .transpose()
+        self.pasted(provider.key_name(), provider.name())
+    }
+
+    fn composio_key(&mut self, _saved: bool) -> Result<Option<PastedKey>, InputError> {
+        self.pasted(composio::KEY_NAME, "Composio")
     }
 
     fn check_zdr_again(&mut self) -> bool {
@@ -334,6 +356,27 @@ impl<P: Prompt> Wizard<P> {
             .is_some_and(|answer| matches!(answer.trim(), "y" | "Y" | "yes" | "Yes"))
     }
 
+    /// A key typed without echo. `None` on Enter, which keeps a saved one.
+    fn pasted(
+        &mut self,
+        label: &str,
+        saved: bool,
+        service: &'static str,
+    ) -> Result<Option<PastedKey>, InputError> {
+        let question = if saved {
+            format!("{label}: set, press Enter to keep, or paste a new one: ")
+        } else {
+            format!("{label} (blank for none): ")
+        };
+        let answer = self.prompt.secret(&question).ok_or(InputError::NoAnswer)?;
+        if answer.trim().is_empty() {
+            return Ok(None);
+        }
+        PastedKey::new(&answer)
+            .map(Some)
+            .ok_or(InputError::InvalidKey(service))
+    }
+
     fn new_password(&mut self) -> Result<Password, InputError> {
         let question = format!("Owner password (at least {PASSWORD_MIN} characters): ");
         let first = self.prompt.secret(&question).ok_or(InputError::NoAnswer)?;
@@ -399,18 +442,11 @@ impl<P: Prompt> FrontEnd for Wizard<P> {
         } else {
             ""
         };
-        let question = if saved {
-            format!("{name} API key{billing}: set, press Enter to keep, or paste a new one: ")
-        } else {
-            format!("{name} API key{billing} (blank for none): ")
-        };
-        let answer = self.prompt.secret(&question).ok_or(InputError::NoAnswer)?;
-        if answer.trim().is_empty() {
-            return Ok(None);
-        }
-        PastedKey::new(&answer)
-            .map(Some)
-            .ok_or(InputError::InvalidKey(provider))
+        self.pasted(&format!("{name} API key{billing}"), saved, name)
+    }
+
+    fn composio_key(&mut self, saved: bool) -> Result<Option<PastedKey>, InputError> {
+        self.pasted("Composio project API key", saved, "Composio")
     }
 
     fn check_zdr_again(&mut self) -> bool {
@@ -729,11 +765,11 @@ mod tests {
     #[test]
     fn the_wizard_asks_twice_on_a_first_run() {
         let mut wizard = Wizard {
-            prompt: Scripted::new(&["owner@example.com", GOOD, GOOD, "", ""]),
+            prompt: Scripted::new(&["owner@example.com", GOOD, GOOD, "", "", ""]),
         };
         let answers = collect_owner(&mut wizard, None, true).unwrap();
         assert_eq!(answers.owner_password.unwrap().expose(), GOOD);
-        assert_eq!(wizard.prompt.asked.len(), 5);
+        assert_eq!(wizard.prompt.asked.len(), 6);
 
         let mut differ = Wizard {
             prompt: Scripted::new(&["owner@example.com", GOOD, "correct-horse-battery-staple"]),
@@ -754,7 +790,7 @@ mod tests {
     #[test]
     fn a_wizard_rerun_prefills_the_email_and_asks_no_password() {
         let mut wizard = Wizard {
-            prompt: Scripted::new(&["", "", ""]),
+            prompt: Scripted::new(&["", "", "", ""]),
         };
         let answers = collect_owner(&mut wizard, Some("owner@example.com"), false).unwrap();
         assert_eq!(answers.owner_email, "owner@example.com");
@@ -765,6 +801,7 @@ mod tests {
                 "Owner email [owner@example.com]: ",
                 "Model provider (openrouter, openai, gemini, anthropic or none) [openrouter]: ",
                 "OpenRouter API key (blank for none): ",
+                "Composio project API key (blank for none): ",
             ]
         );
     }
@@ -848,20 +885,20 @@ mod tests {
             env: env(&[("RAKAZO_STACK_OPENROUTER_API_KEY", "placeholder with spaces")]),
         };
         let err = model(&mut spaced, None, "").unwrap_err();
-        assert_eq!(err, InputError::InvalidKey(Provider::OpenRouter));
+        assert_eq!(err, InputError::InvalidKey("OpenRouter"));
         assert!(!err.to_string().contains("placeholder"));
 
         let mut nothing = NoQuestions { env: env(&[]) };
         assert_eq!(
             model(&mut nothing, None, "OPENROUTER_API_KEY=\"quoted\"\n"),
-            Err(InputError::InvalidSavedKey(Provider::OpenRouter))
+            Err(InputError::InvalidSavedKey("OPENROUTER_API_KEY"))
         );
     }
 
     #[test]
     fn the_wizard_keeps_a_saved_key_on_enter_and_takes_a_pasted_one() {
         let mut keep = Wizard {
-            prompt: Scripted::new(&["", "", ""]),
+            prompt: Scripted::new(&["", "", "", ""]),
         };
         assert_eq!(
             model(&mut keep, Some(anthropic()), SAVED),
@@ -873,7 +910,7 @@ mod tests {
         );
 
         let mut paste = Wizard {
-            prompt: Scripted::new(&["", "gemini", " placeholder-new "]),
+            prompt: Scripted::new(&["", "gemini", " placeholder-new ", ""]),
         };
         assert_eq!(
             model(&mut paste, Some(anthropic()), SAVED),
@@ -885,17 +922,102 @@ mod tests {
         assert!(paste.prompt.asked[2].contains("billing-enabled"));
 
         let mut none = Wizard {
-            prompt: Scripted::new(&["", "none"]),
+            prompt: Scripted::new(&["", "none", ""]),
         };
         assert_eq!(
             model(&mut none, Some(anthropic()), SAVED),
             Ok((Choice(None), None))
         );
-        assert_eq!(none.prompt.asked.len(), 2, "no key question");
+        assert_eq!(none.prompt.asked.len(), 3, "no Model provider key question");
 
         let mut typo = Wizard {
             prompt: Scripted::new(&["", "open router"]),
         };
         assert_eq!(model(&mut typo, None, ""), Err(InputError::UnknownProvider));
+    }
+
+    const SAVED_COMPOSIO: &str = "COMPOSIO_API_KEY=placeholder-saved\n";
+
+    fn composio_answer(
+        front: &mut dyn FrontEnd,
+        secrets: &str,
+    ) -> Result<Option<String>, InputError> {
+        let answers = collect(
+            front,
+            Some("owner@example.com"),
+            Some(Choice(None)),
+            &Secrets::parse(secrets),
+            false,
+        )?;
+        Ok(answers.composio_key.map(|key| key.expose().to_string()))
+    }
+
+    #[test]
+    fn a_scripted_run_takes_the_composio_key_from_the_environment_first() {
+        let mut nothing = NoQuestions { env: env(&[]) };
+        assert_eq!(composio_answer(&mut nothing, ""), Ok(None));
+        assert_eq!(
+            composio_answer(&mut nothing, "COMPOSIO_API_KEY=\n"),
+            Ok(None)
+        );
+        assert_eq!(
+            composio_answer(&mut nothing, SAVED_COMPOSIO),
+            Ok(Some("placeholder-saved".into()))
+        );
+
+        let mut given = NoQuestions {
+            env: env(&[("RAKAZO_STACK_COMPOSIO_API_KEY", "placeholder-new")]),
+        };
+        assert_eq!(
+            composio_answer(&mut given, SAVED_COMPOSIO),
+            Ok(Some("placeholder-new".into()))
+        );
+
+        let mut spaced = NoQuestions {
+            env: env(&[("RAKAZO_STACK_COMPOSIO_API_KEY", "placeholder with spaces")]),
+        };
+        let err = composio_answer(&mut spaced, "").unwrap_err();
+        assert_eq!(err, InputError::InvalidKey("Composio"));
+        assert!(!err.to_string().contains("placeholder"));
+
+        let err = composio_answer(&mut nothing, "COMPOSIO_API_KEY=$placeholder\n").unwrap_err();
+        assert_eq!(err, InputError::InvalidSavedKey("COMPOSIO_API_KEY"));
+        assert!(!err.to_string().contains("placeholder"));
+    }
+
+    #[test]
+    fn the_wizard_keeps_a_saved_composio_key_on_enter_and_takes_a_pasted_one() {
+        let mut keep = Wizard {
+            prompt: Scripted::new(&["", "", ""]),
+        };
+        assert_eq!(
+            composio_answer(&mut keep, SAVED_COMPOSIO),
+            Ok(Some("placeholder-saved".into()))
+        );
+        assert_eq!(
+            keep.prompt.asked[2],
+            "Composio project API key: set, press Enter to keep, or paste a new one: "
+        );
+
+        let mut paste = Wizard {
+            prompt: Scripted::new(&["", "", " placeholder-new "]),
+        };
+        assert_eq!(
+            composio_answer(&mut paste, SAVED_COMPOSIO),
+            Ok(Some("placeholder-new".into()))
+        );
+
+        let mut blank = Wizard {
+            prompt: Scripted::new(&["", "", ""]),
+        };
+        assert_eq!(composio_answer(&mut blank, ""), Ok(None));
+
+        let mut quoted = Wizard {
+            prompt: Scripted::new(&["", "", "\"placeholder\""]),
+        };
+        assert_eq!(
+            composio_answer(&mut quoted, ""),
+            Err(InputError::InvalidKey("Composio"))
+        );
     }
 }

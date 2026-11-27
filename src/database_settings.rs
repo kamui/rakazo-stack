@@ -297,6 +297,9 @@ mod tests {
         fn model_key(&mut self, _: Provider, _: bool) -> Result<Option<PastedKey>, InputError> {
             panic!("asked for a key")
         }
+        fn composio_key(&mut self, _: bool) -> Result<Option<PastedKey>, InputError> {
+            panic!("asked for the Composio key")
+        }
         fn check_zdr_again(&mut self) -> bool {
             panic!("asked about ZDR only")
         }

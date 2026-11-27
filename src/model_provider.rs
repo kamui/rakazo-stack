@@ -234,16 +234,15 @@ pub fn check_key(agent: &ureq::Agent, base: &str, provider: Provider, key: &Past
 /// stops it. A new key is saved only once accepted; a saved one was accepted before, so
 /// a provider that can't be reached doesn't stop a re-run.
 pub fn require_key(
-    provider: Provider,
+    name: &str,
+    key_name: &str,
     check: KeyCheck,
     saved: bool,
 ) -> Result<Option<String>, String> {
-    let name = provider.name();
     match check {
         KeyCheck::Accepted => Ok(None),
         KeyCheck::Rejected(status) if saved => Err(format!(
-            "{name} rejected the saved key (HTTP {status}), so nothing was changed. Run `rakazo-stack setup` and paste a new one, or set RAKAZO_STACK_{}.",
-            provider.key_name()
+            "{name} rejected the saved key (HTTP {status}), so nothing was changed. Run `rakazo-stack setup` and paste a new one, or set RAKAZO_STACK_{key_name}."
         )),
         KeyCheck::Rejected(status) => Err(format!(
             "{name} rejected the key (HTTP {status}), so it wasn't saved and nothing was changed."
@@ -324,9 +323,8 @@ pub fn ensure_zdr(
 mod tests {
     use super::*;
     use crate::answers::{NoQuestions, Prompt, Wizard};
-    use std::io::{BufRead, BufReader, Read, Write};
+    use crate::http::testing::{Request, stub};
     use std::net::TcpListener;
-    use std::thread::JoinHandle;
 
     const KEY: &str = "placeholder-key";
 
@@ -351,55 +349,6 @@ mod tests {
     // account without it gets an ordinary embeddings reply.
     const ZDR_ACCOUNT: &str = r#"{"error":{"message":"No endpoints available matching your guardrail restrictions and data policy. ZDR violation (guardrail): 1 endpoint excluded","code":404,"metadata":{"reasons":["zdr-violation-by-guardrail"]}}}"#;
     const NON_ZDR_ACCOUNT: &str = r#"{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.0023,-0.0093]}],"model":"openai/text-embedding-3-small","usage":{"prompt_tokens":2,"total_tokens":2}}"#;
-
-    struct Request {
-        line: String,
-        headers: Vec<String>,
-        body: String,
-    }
-
-    /// Serves one canned reply and hands back the request it answered.
-    fn stub(status: u16, reply: &'static str) -> (String, JoinHandle<Request>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let served = std::thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            let mut reader = BufReader::new(stream);
-            let mut lines = Vec::new();
-            loop {
-                let mut line = String::new();
-                reader.read_line(&mut line).unwrap();
-                if line.trim_end().is_empty() {
-                    break;
-                }
-                lines.push(line.trim_end().to_string());
-            }
-            let length = lines
-                .iter()
-                .filter_map(|line| {
-                    line.to_ascii_lowercase()
-                        .strip_prefix("content-length:")
-                        .map(str::trim)
-                        .map(str::to_string)
-                })
-                .find_map(|length| length.parse().ok())
-                .unwrap_or(0);
-            let mut body = vec![0; length];
-            reader.read_exact(&mut body).unwrap();
-            write!(
-                reader.into_inner(),
-                "HTTP/1.1 {status} Reply\r\ncontent-type: application/json\r\nlocation: http://127.0.0.1:9/elsewhere\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}",
-                reply.len()
-            )
-            .unwrap();
-            Request {
-                line: lines.remove(0),
-                headers: lines,
-                body: String::from_utf8(body).unwrap(),
-            }
-        });
-        (base, served)
-    }
 
     fn key() -> PastedKey {
         PastedKey::new(KEY).unwrap()
@@ -518,20 +467,16 @@ mod tests {
 
     #[test]
     fn only_an_accepted_key_or_an_unreachable_saved_one_carries_on() {
+        let require = |check, saved| require_key("OpenRouter", "OPENROUTER_API_KEY", check, saved);
         let rejected = KeyCheck::Rejected(401);
         let unchecked = KeyCheck::Unchecked("HTTP 503".into());
         for saved in [false, true] {
-            assert_eq!(
-                require_key(Provider::OpenRouter, KeyCheck::Accepted, saved),
-                Ok(None)
-            );
-            let err = require_key(Provider::OpenRouter, rejected.clone(), saved).unwrap_err();
+            assert_eq!(require(KeyCheck::Accepted, saved), Ok(None));
+            let err = require(rejected.clone(), saved).unwrap_err();
             assert!(err.contains("rejected"), "{err}");
         }
-        assert!(require_key(Provider::OpenRouter, unchecked.clone(), false).is_err());
-        let warning = require_key(Provider::OpenRouter, unchecked, true)
-            .unwrap()
-            .unwrap();
+        assert!(require(unchecked.clone(), false).is_err());
+        let warning = require(unchecked, true).unwrap().unwrap();
         assert!(warning.contains("HTTP 503"), "{warning}");
     }
 
