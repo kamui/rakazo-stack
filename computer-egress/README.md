@@ -4,6 +4,8 @@ The sidecar that keeps bot computers off the host, the LAN and the tailnet ([spe
 
 `computer-egress.sh` picks the iptables backend that holds `DOCKER-USER` and applies the rules every 60 seconds. With arguments it runs the script once with them, for example `--print` or `--remove`.
 
+Stopping or removing the sidecar leaves its rules in place. `--remove` deletes them for every Instance on the Docker engine, because they match every `rakazo-c+` bridge ([spec §12](../docs/spec.md#the-computer-egress-sidecar)).
+
 ## Tests
 
 `test/image.sh` fetches the script, builds the image and tests it inside a throwaway Docker-in-Docker engine, on the nftables-backed and the legacy iptables, so its rules never reach the engine that runs the test. In WSL: `DOCKER=docker.exe test/image.sh`. `RAKAZO_TAG` picks the Rakazo tag (default `v0.16.0`).
