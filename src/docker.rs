@@ -48,13 +48,20 @@ impl Docker {
     }
 
     /// A command with the context flag already set. Environment variables don't reach
-    /// `docker.exe`, so callers pass everything as arguments or files.
+    /// `docker.exe`, so callers pass everything as arguments, files or stdin. The
+    /// program's own `RAKAZO_STACK_*` variables, which can hold the Owner password and
+    /// pasted keys, are kept out of Docker's environment.
     pub fn command<I, S>(&self, args: I) -> Command
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
         let mut command = Command::new(&self.program);
+        for (name, _) in std::env::vars_os() {
+            if name.as_encoded_bytes().starts_with(b"RAKAZO_STACK_") {
+                command.env_remove(name);
+            }
+        }
         if let Some(context) = self.context {
             command.args(["--context", context]);
         }
