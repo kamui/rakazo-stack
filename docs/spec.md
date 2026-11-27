@@ -820,10 +820,11 @@ On macOS, the voice engine runs outside Docker as the LaunchAgent, so `docker co
 
 v1 installs only through a `curl … | sh` one-liner that runs `install.sh` from the GitHub release ([#35](https://github.com/kamui/rakazo-stack/issues/35)):
 
-- `https://github.com/kamui/rakazo-stack/releases/latest/download/install.sh` installs the newest program; `https://github.com/kamui/rakazo-stack/releases/download/vX.Y.Z/install.sh` installs an exact version, which is also how to go back a version ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
+- `https://github.com/kamui/rakazo-stack/releases/latest/download/install.sh` installs the newest program; `https://github.com/kamui/rakazo-stack/releases/download/vX.Y.Z/install.sh` installs an exact version, which is also how to go back a version ([#35](https://github.com/kamui/rakazo-stack/issues/35)). v1 has no shorter address for the one-liner ([#75](https://github.com/kamui/rakazo-stack/issues/75)).
 - Detects with `uname -s` / `uname -m`. Supports exactly `Linux x86_64` and `Darwin arm64`, handles Rosetta, and refuses everything else. Detects musl/Alpine and stops, because v1 ships only the glibc executable: "Alpine/musl Linux isn't supported; use a glibc distro such as Ubuntu or Debian" ([#22](https://github.com/kamui/rakazo-stack/issues/22), [#35](https://github.com/kamui/rakazo-stack/issues/35)).
 - Downloads the matching program to a temp file, checks it against SHA-256 digests baked into `install.sh`, then renames it into place at `~/.local/bin/rakazo-stack`. No `sudo` ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
-- If `gh` is installed and signed in, runs `gh attestation verify`; a failure stops the install and installs nothing. Without `gh`, prints one line ("build origin not checked; to check it yourself: …") and continues ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
+- The release workflow fills the release tag and the digests into `install.sh`, and the script downloads from that tag. A copy without them, such as the one in the repo, installs nothing. The shell reads the whole script before running any of it, so a download of `install.sh` cut off part way does nothing ([#75](https://github.com/kamui/rakazo-stack/issues/75)).
+- If `gh` is installed and signed in, runs `gh attestation verify`; a failure stops the install and installs nothing. Without `gh`, prints one line ("build origin not checked; to check it yourself: …") and continues ([#35](https://github.com/kamui/rakazo-stack/issues/35)). The check is `gh attestation verify <download> --repo kamui/rakazo-stack`, run before anything is installed. A `gh` too old to have `gh attestation verify` counts as no `gh` ([#75](https://github.com/kamui/rakazo-stack/issues/75)).
 - If `~/.local/bin` isn't on `PATH`, prints the exact line to add. Never edits shell profiles ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
 - When a terminal is available, ends by running `~/.local/bin/rakazo-stack setup` with input from `/dev/tty`. With no terminal, or `sh -s -- --no-setup`, it only installs and prints the next command ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
 - Installing a newer program changes nothing in the running Instance until setup or update runs ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
@@ -831,8 +832,10 @@ v1 installs only through a `curl … | sh` one-liner that runs `install.sh` from
 
 ### Releases
 
-- Immutable GitHub releases holding the two binaries and `install.sh` (with their digests baked in), plus build attestations ([#22](https://github.com/kamui/rakazo-stack/issues/22), [#35](https://github.com/kamui/rakazo-stack/issues/35)).
+- Immutable GitHub releases holding the two binaries, named `rakazo-stack-x86_64-unknown-linux-gnu` and `rakazo-stack-aarch64-apple-darwin`, and `install.sh` (with their digests baked in), plus build attestations for all three ([#22](https://github.com/kamui/rakazo-stack/issues/22), [#35](https://github.com/kamui/rakazo-stack/issues/35), [#75](https://github.com/kamui/rakazo-stack/issues/75)). Immutability is a repository setting that must be on; the release workflow fails if what it published isn't immutable.
+- Pushing a tag publishes: `vX.Y.Z` a release, `vX.Y.Z-<suffix>` a pre-release, which `releases/latest` never serves. `X.Y.Z` must be the program's version in `Cargo.toml`, so a pre-release's program reports `X.Y.Z` ([#75](https://github.com/kamui/rakazo-stack/issues/75)).
 - Each release is gated on a `macos-latest` (arm64) smoke test: `codesign --verify --strict`, then `rakazo-stack --version`. Apple silicon kills an executable whose signature is invalid, so a broken build must not reach a release ([#22](https://github.com/kamui/rakazo-stack/issues/22)).
+- Before publishing, the baked `install.sh` also installs the built programs on Linux and macOS, including from a shell under Rosetta. After publishing, the workflow runs the release's one-liner on Linux and macOS with the build origin checked ([#75](https://github.com/kamui/rakazo-stack/issues/75)).
 - No Homebrew, `.pkg`, `.exe`, zip or `git clone` path in v1 ([#35](https://github.com/kamui/rakazo-stack/issues/35)).
 - No self-update command beyond `rakazo-stack update`, which updates the program first ([§14](#14-rakazo-stack-update)). A periodic self-offer like `omz update` is for after v1 ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#35](https://github.com/kamui/rakazo-stack/issues/35)).
 
@@ -853,9 +856,11 @@ It opens an issue when any part fails. macOS isn't covered (GitHub's Mac runners
 
 Tests on a machine that also runs a real Instance need their own. The Instance folder already follows `$HOME`, and two environment variables, for tests only and not documented for Self-hosters, change what the spec otherwise fixes: `RAKAZO_STACK_TEST_PROJECT` (the Compose project name) and `RAKAZO_STACK_TEST_WEB_PORT` (the web port). The integration tests run `setup` with a temporary `$HOME`, their own project and a free port, then remove the project with its volumes and networks. CI runs them on `ubuntu-latest`; the dev machine runs them on WSL.
 
+`install.sh` has one such variable too: `RAKAZO_STACK_TEST_DOWNLOAD_BASE` replaces `https://github.com/kamui/rakazo-stack/releases/download` with a fake release, over `http` or `file`. The SHA-256 and build origin checks still apply ([#75](https://github.com/kamui/rakazo-stack/issues/75)). Its tests run with a temporary `$HOME` and never start the real program's `setup`.
+
 ### Release gate
 
-The `macos-latest` smoke test in [§18](#releases) ([#22](https://github.com/kamui/rakazo-stack/issues/22)).
+The `macos-latest` smoke test and the `install.sh` runs in [§18](#releases) ([#22](https://github.com/kamui/rakazo-stack/issues/22), [#75](https://github.com/kamui/rakazo-stack/issues/75)). CI runs the same builds and checks on every pull request, and `shellcheck` on the shell scripts.
 
 ### Acceptance checks not yet run
 
@@ -899,7 +904,6 @@ No ticket fixes these names. The implementation picks them, and the docs then st
 
 - the no-questions option (the README says "not decided yet");
 - the environment variables for keys, the Owner password and the Backup passphrase in no-questions use;
-- a shorter address for the one-liner, if any (the README says "not decided yet"; the GitHub release URLs above work);
 - macOS lemond's port and the LaunchAgent label;
 - the variable name for Hindsight's database password in `secrets.env`;
 - the names of the locally built relay and sidecar images;

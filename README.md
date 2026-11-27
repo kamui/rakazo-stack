@@ -64,7 +64,7 @@ None of these exist yet. This is the plan.
 
 | Command | What it will do |
 |---|---|
-| An install script you run with `curl … \| sh` | Downloads the `rakazo-stack` program for Linux (including WSL 2) or an Apple-silicon Mac, and checks the download hasn't been tampered with. The address is _not decided yet_. |
+| `curl -fsSL https://github.com/kamui/rakazo-stack/releases/latest/download/install.sh \| sh` | Downloads the `rakazo-stack` program for Linux (including WSL 2) or an Apple-silicon Mac, checks the download hasn't been tampered with, and starts `rakazo-stack setup`. To read the script before you run it, download it with `curl -fsSLO` and the same address, read `install.sh`, then run `sh install.sh`. |
 | `rakazo-stack setup` | Asks you questions, then sets everything up and starts it. You can run it again any time: it remembers your answers, never shows your saved keys, never changes the passwords it created, and never changes versions. |
 | `rakazo-stack setup`, with a no-questions option | Does the same without asking, for scripts. The option's name is _not decided yet_. |
 | `docker compose up -d` | Starts it. Run it from `~/rakazo-stack`. |

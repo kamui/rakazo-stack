@@ -1,30 +1,12 @@
 //! `setup` against real Docker: starts Rakazo on localhost and tears it down afterwards.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-fn is_wsl() -> bool {
-    fs::read_to_string("/proc/sys/kernel/osrelease")
-        .is_ok_and(|release| release.to_lowercase().contains("microsoft"))
-}
-
-/// The same Docker CLI the program drives: Docker Desktop's `docker.exe` on WSL.
-fn docker() -> Command {
-    if !is_wsl() {
-        return Command::new("docker");
-    }
-    let program = [
-        "/Docker/host/bin/docker.exe",
-        "/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe",
-    ]
-    .into_iter()
-    .find(|path| Path::new(path).exists())
-    .unwrap_or("docker.exe");
-    let mut command = Command::new(program);
-    command.args(["--context", "desktop-linux"]);
-    command
-}
+use common::{docker, is_wsl};
 
 /// One test Instance: its own HOME, Compose project and web port, removed on drop with
 /// its volumes and networks.
