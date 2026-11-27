@@ -22,10 +22,18 @@ impl std::fmt::Display for HttpError {
 
 /// GETs `url` and returns its body, treating any non-200 reply as an error.
 pub fn get_bytes(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, HttpError> {
-    let mut response = agent
+    let response = agent
         .get(url)
         .call()
         .map_err(|err| HttpError(format!("{url}: {err}")))?;
+    body_if_ok(response, url)
+}
+
+/// The body of a 200 reply; any other status is an error.
+pub fn body_if_ok(
+    mut response: ureq::http::Response<ureq::Body>,
+    url: &str,
+) -> Result<Vec<u8>, HttpError> {
     let status = response.status();
     if status != 200 {
         return Err(HttpError(format!("{url}: HTTP {status}")));

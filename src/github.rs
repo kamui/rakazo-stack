@@ -35,9 +35,54 @@ fn is_release_tag(tag: &str) -> bool {
     })
 }
 
+/// The first of these that is set is sent to GitHub's API. Without one, GitHub allows
+/// 60 requests an hour per address (spec §4).
+const TOKEN_VARS: [&str; 2] = ["GITHUB_TOKEN", "GH_TOKEN"];
+
+fn token() -> Option<(&'static str, String)> {
+    token_from(|name| std::env::var(name).ok())
+}
+
+fn token_from(var: impl Fn(&str) -> Option<String>) -> Option<(&'static str, String)> {
+    TOKEN_VARS.into_iter().find_map(|name| {
+        let value = var(name)?;
+        let value = value.trim();
+        (!value.is_empty()).then(|| (name, value.to_string()))
+    })
+}
+
+/// A GET to GitHub's API, with the token when one is set. Only `api.github.com` gets it.
+pub fn api_get(
+    agent: &ureq::Agent,
+    url: &str,
+) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
+    debug_assert!(url.starts_with("https://api.github.com/"));
+    let request = agent
+        .get(url)
+        .header("accept", "application/vnd.github+json");
+    match token() {
+        Some((_, token)) => request.header("authorization", format!("Bearer {token}")),
+        None => request,
+    }
+}
+
+fn api_bytes(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, HttpError> {
+    let response = api_get(agent, url)
+        .call()
+        .map_err(|err| HttpError(format!("{url}: {err}")))?;
+    if response.status() == 401
+        && let Some((name, _)) = token()
+    {
+        return Err(HttpError(format!(
+            "GitHub refused the token in {name}. Fix or unset it, then run this again."
+        )));
+    }
+    http::body_if_ok(response, url)
+}
+
 pub fn fetch_stable_tags(agent: &ureq::Agent, repo: &str) -> Result<Vec<String>, HttpError> {
     let url = format!("https://api.github.com/repos/{repo}/releases?per_page=30");
-    let body = http::get_bytes(agent, &url)?;
+    let body = api_bytes(agent, &url)?;
     stable_tags(&String::from_utf8_lossy(&body))
         .map_err(|err| HttpError(format!("{url}: unexpected reply: {err}")))
 }
@@ -57,7 +102,28 @@ pub fn fetch_file(
 
 #[cfg(test)]
 mod tests {
-    use super::stable_tags;
+    use super::{stable_tags, token_from};
+
+    #[test]
+    fn prefers_github_token_and_skips_blank_values() {
+        let vars = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        assert_eq!(
+            token_from(vars(&[("GH_TOKEN", "b"), ("GITHUB_TOKEN", " a\n")])),
+            Some(("GITHUB_TOKEN", "a".to_string()))
+        );
+        assert_eq!(
+            token_from(vars(&[("GITHUB_TOKEN", "  "), ("GH_TOKEN", "b")])),
+            Some(("GH_TOKEN", "b".to_string()))
+        );
+        assert_eq!(token_from(vars(&[])), None);
+    }
 
     #[test]
     fn keeps_stable_releases_in_order() {

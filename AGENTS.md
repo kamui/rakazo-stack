@@ -25,6 +25,7 @@ The dev machine also runs the owner's own containers, so an agent works only on 
 - Scope every Docker command to that project (`-p <name>`, or a `com.docker.compose.project=<name>` filter). Unscoped `prune`, `down`, `rm` and `stop` belong to the owner.
 - Restarting Docker Desktop, `wsl --shutdown` and reboots are the owner's to run.
 - In WSL, call `docker.exe`, as the program does. Docker installed inside WSL is unsupported.
+- Agents running Docker tests at the same time use up GitHub's anonymous API limit. Run them with `GH_TOKEN="$(gh auth token)"`, which the program sends only to `api.github.com`.
 
 ## Rust
 

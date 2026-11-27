@@ -6,6 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::docker::{ContainerSummary, Docker, Info, server_api_version};
+use crate::github;
 use crate::overrides;
 use crate::platform::{self, Platform};
 use crate::resolve;
@@ -478,7 +479,11 @@ fn github_reachable() -> bool {
         .build()
         .into();
     // A second try, because one slow DNS answer on WSL has timed the first out.
-    (0..2).any(|_| agent.get("https://api.github.com/").call().is_ok())
+    (0..2).any(|_| {
+        github::api_get(&agent, "https://api.github.com/")
+            .call()
+            .is_ok()
+    })
 }
 
 #[cfg(test)]

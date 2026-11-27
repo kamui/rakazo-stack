@@ -164,6 +164,7 @@ rakazo-stack installs the latest stable release of each Component, best effort, 
 - **Relay and sidecar bases:** fixed in each program release (for example `oven/bun:1.4.4-alpine`). The relay's ffmpeg comes from Alpine and is pinned loosely (`~=8.1`), because Alpine deletes old package versions ([#31](https://github.com/kamui/rakazo-stack/issues/31), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
 - **Recording.** `settings.json` records each Component's running version and image digest ([#32](https://github.com/kamui/rakazo-stack/issues/32)). Because no upstream tag stays put, the stack runs images by recorded digest (for example `RAKAZO_IMAGE_TAG=v0.15.0@sha256:…`), never by a moving tag ([#31](https://github.com/kamui/rakazo-stack/issues/31)).
 - **Lemonade models** change only with Lemonade's version: Lemonade runs with `auto_check_model_updates: false` ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
+- **GitHub's API limit.** Without a token GitHub allows 60 API requests an hour per address. When `GITHUB_TOKEN`, or else `GH_TOKEN`, is set, its value is sent with every request to `api.github.com` and nowhere else, and is never printed. A refused token stops the run and names the variable.
 - **Never enabled:** Rakazo's `updater` sidecar. Nothing updates on its own ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
 
 ### Who moves versions
