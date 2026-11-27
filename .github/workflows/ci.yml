@@ -79,13 +79,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - id: present
-        run: |
-          if [ -f relay/package.json ]; then echo "yes=true" >> "$GITHUB_OUTPUT"; else echo "No relay yet (#63)."; fi
-      - if: steps.present.outputs.yes == 'true'
-        uses: oven-sh/setup-bun@v2.2.0
+      - uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version: 1.4.4
-      - if: steps.present.outputs.yes == 'true'
-        working-directory: relay
+      # The tests generate their audio with ffmpeg.
+      - run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ffmpeg
+      - working-directory: relay
         run: bun test
+      - run: relay/test/image.sh
