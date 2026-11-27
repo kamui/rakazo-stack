@@ -605,15 +605,18 @@ impl OwnerSession {
     }
 
     fn post(&self, path: &str, body: &serde_json::Value) -> (u16, String) {
+        self.try_post(path, body).unwrap()
+    }
+
+    fn try_post(&self, path: &str, body: &serde_json::Value) -> Result<(u16, String), ureq::Error> {
         let mut response = self
             .agent
             .post(format!("{}{path}", self.origin))
             .header("authorization", &self.bearer)
             .content_type("application/json")
-            .send(body.to_string())
-            .unwrap();
+            .send(body.to_string())?;
         let status = response.status().as_u16();
-        (status, response.body_mut().read_to_string().unwrap())
+        Ok((status, response.body_mut().read_to_string()?))
     }
 
     /// A procedure that must succeed, with its input and output.
@@ -661,21 +664,146 @@ impl OwnerSession {
             .join("\n")
     }
 
+    /// `active` also lists runs paused on a question or approval card, which only the Owner
+    /// ends, so one of those fails at once.
     fn wait_until_idle(&self, bot: &str) {
         for _ in 0..150 {
             let active = self.rpc("runs/list", serde_json::json!({ "filter": "active" }));
-            if active["runs"]
+            let runs: Vec<_> = active["runs"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|run| run["botId"] != bot)
-            {
+                .filter(|run| run["botId"] == bot)
+                .collect();
+            if runs.is_empty() {
                 return;
+            }
+            if let Some(waiting) = runs
+                .iter()
+                .find(|run| run["status"] == "waiting_input" || run["status"] == "waiting_takeover")
+            {
+                panic!("a bot's run is waiting on the Owner: {waiting}");
             }
             std::thread::sleep(std::time::Duration::from_secs(2));
         }
         panic!("a bot's run didn't finish within 5 minutes");
     }
+}
+
+/// On a failed end-to-end check, prints what Rakazo and Hindsight did, with the key and any
+/// piece of it taken out.
+struct EndToEndDiagnosis<'a> {
+    instance: &'a TestInstance,
+    owner: &'a OwnerSession,
+    bots: Vec<String>,
+    key: &'a str,
+}
+
+impl Drop for EndToEndDiagnosis<'_> {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
+        let mut report = String::new();
+        let runs = self.instance.compose(&[
+            "exec",
+            "-T",
+            "postgres",
+            "psql",
+            "-X",
+            "-U",
+            "rakazo",
+            "-d",
+            "rakazo",
+            "-c",
+            r#"SELECT r.id, b.name AS bot, r.trigger, r.status, r."modelProvider", r."modelId", left(r.error, 400) AS error, r."createdAt", r."completedAt" FROM runs r JOIN bots b ON b.id = r."botId" ORDER BY r."createdAt""#,
+        ]);
+        report += &format!("--- runs\n{}\n", text(&runs));
+        for bot in &self.bots {
+            let (status, reply) = self
+                .owner
+                .try_post(
+                    "/rpc/threads/messages",
+                    &serde_json::json!({ "json": { "botId": bot } }),
+                )
+                .unwrap_or_else(|error| (0, error.to_string()));
+            let page: serde_json::Value = serde_json::from_str(&reply).unwrap_or_default();
+            let messages = page["json"]["messages"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let last = &messages[messages.len().saturating_sub(6)..];
+            report += &format!("--- threads/messages {bot}: {status}\n");
+            if status != 200 {
+                report += &format!("{}\n", tail(&reply, 2000));
+            }
+            for message in last {
+                report += &format!("{}\n", tail(&message.to_string(), 2000));
+            }
+        }
+        let units = self.instance.compose(&[
+            "exec",
+            "-T",
+            "hindsight-db",
+            "psql",
+            "-X",
+            "-U",
+            "hindsight",
+            "-d",
+            "hindsight",
+            "-c",
+            "SELECT bank_id, fact_type, count(*) FROM memory_units GROUP BY 1, 2 ORDER BY 1, 2",
+        ]);
+        report += &format!("--- memory_units\n{}\n", text(&units));
+        for service in ["api", "worker", "supervisor", "hindsight"] {
+            let logs = self
+                .instance
+                .compose(&["logs", "--no-log-prefix", "--tail", "80", service]);
+            report += &format!("--- {service} logs\n{}\n", tail(&text(&logs), 12_000));
+        }
+        eprintln!("{}", redact(&report, self.key));
+    }
+}
+
+/// The last `max` bytes of `text`, cut at a character boundary.
+fn tail(text: &str, max: usize) -> &str {
+    let mut start = text.len().saturating_sub(max);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    &text[start..]
+}
+
+/// Takes out `key`, any eight characters of it in a row, and anything shaped like an
+/// OpenRouter key, since provider errors can quote part of one.
+fn redact(text: &str, key: &str) -> String {
+    let text = text.replace(key, "<key>");
+    let mut out = String::new();
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find("sk-or-") {
+        out.push_str(&rest[..at]);
+        out.push_str("<key>");
+        rest = rest[at..]
+            .trim_start_matches(|c: char| c.is_ascii_alphanumeric() || "-_*.".contains(c));
+    }
+    out.push_str(rest);
+    let chars: Vec<char> = key.chars().collect();
+    for piece in chars.windows(8) {
+        out = out.replace(&piece.iter().collect::<String>(), "<key>");
+    }
+    out
+}
+
+#[test]
+fn redact_takes_out_the_key_and_pieces_of_it() {
+    let key = "sk-or-v1-0123456789abcdef0123456789abcdef";
+    let text = format!(
+        "{key} | Incorrect API key provided: sk-or-v1-0123****cdef | ending in 89abcdef. | ok"
+    );
+    assert_eq!(
+        redact(&text, key),
+        "<key> | Incorrect API key provided: <key> | ending in <key>. | ok"
+    );
 }
 
 fn rpc_as_owner(origin: &str, path: &str, body: &serde_json::Value) -> (u16, String) {
@@ -3116,8 +3244,17 @@ fn canary_a_real_key_learns_and_recalls_through_rakazo() {
             "bots/update",
             serde_json::json!({ "botId": id, "memoryScope": "shared" }),
         );
+        // A new bot's hidden intro run asks the Owner what it is for and waits on that card.
+        // Stopping it, as the chat's Stop button does, leaves every turn the Owner's own.
+        owner.rpc("threads/stop", serde_json::json!({ "botId": id }));
         id
     });
+    let _diagnosis = EndToEndDiagnosis {
+        instance: &instance,
+        owner: &owner,
+        bots: vec![teller.clone(), asker.clone()],
+        key: &key,
+    };
     for turn in [
         "My dog is a beagle called Quillon.",
         "Quillon goes to the vet for vaccinations every May.",
