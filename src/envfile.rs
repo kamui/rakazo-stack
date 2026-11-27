@@ -2,6 +2,7 @@
 //! (spec §5, "Rakazo settings setup writes to `.env`").
 
 use crate::access::{AUTH_KEY_NAME, Addresses};
+use crate::composio;
 use crate::lemonade::LemonadeRelease;
 use crate::model_provider::ChatModel;
 use crate::resolve::RakazoRelease;
@@ -93,6 +94,9 @@ pub fn render(inputs: &EnvInputs) -> String {
             format!("PI_DEFAULT_MODEL={}", chat.model),
         ]);
     }
+    // Blank turns integrations off.
+    let composio_key = inputs.secrets.get(composio::KEY_NAME).unwrap_or_default();
+    lines.push(format!("{}={composio_key}", composio::KEY_NAME));
     if let Some(tailscale) = &inputs.tailscale {
         let image = tailscale.image;
         lines.push(format!(
@@ -167,8 +171,8 @@ mod tests {
         assert!(
             text.lines()
                 .filter(|l| l.contains("_API_KEY"))
-                .all(|l| l.starts_with("LEMONADE_API_KEY=")),
-            "only Lemonade's key without a Model provider"
+                .all(|l| l.starts_with("LEMONADE_API_KEY=") || l == "COMPOSIO_API_KEY="),
+            "only Lemonade's key without a Model provider or integrations"
         );
         assert!(!text.contains("TS_") && !text.contains("TAILSCALE"));
         assert!(!text.contains("tskey"));
@@ -186,6 +190,7 @@ mod tests {
                 "RAKAZO_COMPUTER_IMAGE_TAG=v0.16.0@sha256:ccc",
                 "SIGNUPS_ENABLED=false",
                 "SANDBOX_COMPUTER_EGRESS=restricted",
+                "COMPOSIO_API_KEY=",
                 "BETTER_AUTH_URL=http://127.0.0.1:5173",
                 "WEB_ORIGIN=http://127.0.0.1:5173",
                 "API_URL=http://127.0.0.1:5173",
@@ -268,6 +273,26 @@ mod tests {
     }
 
     #[test]
+    fn writes_the_saved_composio_key() {
+        let mut secrets = Secrets::default();
+        secrets.set_pasted(
+            composio::KEY_NAME,
+            PastedKey::new("placeholder-key").as_ref(),
+        );
+        let text = render(&EnvInputs {
+            project: "rakazo-stack",
+            rakazo: &release(),
+            lemonade: None,
+            secrets: &secrets,
+            web_port: 5173,
+            chat: None,
+            addresses: &Access::Localhost.addresses(None, 5173),
+            tailscale: None,
+        });
+        assert_lines(&text, &["COMPOSIO_API_KEY=placeholder-key"]);
+    }
+
+    #[test]
     fn writes_the_chat_model_for_openrouter_and_anthropic_only() {
         let key = PastedKey::new("placeholder-key").unwrap();
         let rakazo = release();
@@ -289,6 +314,7 @@ mod tests {
                 .lines()
                 .filter(|l| l.starts_with("PI_") || l.contains("_API_KEY="))
                 .filter(|l| !l.starts_with("LEMONADE_API_KEY="))
+                .filter(|l| *l != "COMPOSIO_API_KEY=")
                 .collect();
             let expected: &[&str] = match provider {
                 Provider::OpenRouter => &[

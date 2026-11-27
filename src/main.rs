@@ -2,6 +2,7 @@ mod access;
 mod answers;
 mod checklist;
 mod compose_env;
+mod composio;
 mod database_settings;
 mod docker;
 mod envfile;

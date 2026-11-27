@@ -218,6 +218,7 @@ fn text(out: &Output) -> String {
 const OWNER_EMAIL: &str = "owner@example.com";
 const OWNER_PASSWORD: &str = "placeholder-owner-password";
 const MODEL_KEY: &str = "placeholder-model-key";
+const COMPOSIO_KEY: &str = "placeholder-composio-key";
 const DICTATION_ITEM: &str = "For private dictation, use Firefox or the Rakazo desktop app.";
 const NO_KEY_ITEM: &str = "No Model provider key: each person connects a provider in Settings → Models. Connect one as the Owner before creating a bot, because Rakazo's onboarding stops at \"Connect a model\".";
 
@@ -384,6 +385,9 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
     assert_eq!(settings["program_version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(settings["owner_email"], OWNER_EMAIL);
     assert_eq!(settings["model_provider"], "openrouter");
+    for service in ["api", "worker"] {
+        assert_eq!(instance.service_env(service, "COMPOSIO_API_KEY"), "");
+    }
     assert_eq!(
         settings["filled_by_setup"],
         serde_json::json!(["owner", "voice"])
@@ -581,10 +585,12 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
         .unwrap();
     assert_eq!(response.status(), 200, "sign-in at the Instance URL");
 
-    // A saved key with the provider out of reach: a proxy nothing listens on, which the
-    // calls to the Instance bypass. No real key is needed to see it reach Rakazo.
+    // Saved keys with their services out of reach: a proxy nothing listens on, which the
+    // calls to the Instance bypass. No real key is needed to see one reach Rakazo.
     let mut secrets = fs::read_to_string(folder.join("secrets.env")).unwrap();
-    secrets.push_str(&format!("OPENROUTER_API_KEY={MODEL_KEY}\n"));
+    secrets.push_str(&format!(
+        "OPENROUTER_API_KEY={MODEL_KEY}\nCOMPOSIO_API_KEY={COMPOSIO_KEY}\n"
+    ));
     fs::write(folder.join("secrets.env"), secrets).unwrap();
     let third = instance.setup(
         &["--no-questions"],
@@ -596,9 +602,14 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
     );
     let third_text = text(&third);
     assert!(!third_text.contains(MODEL_KEY), "setup printed the key");
+    assert!(!third_text.contains(COMPOSIO_KEY), "setup printed the key");
     assert!(third.status.success(), "{third_text}");
     assert!(
         third_text.contains("couldn't check the saved OpenRouter key"),
+        "{third_text}"
+    );
+    assert!(
+        third_text.contains("couldn't check the saved Composio key"),
         "{third_text}"
     );
     let items = checklist(&third);
@@ -618,6 +629,10 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
         assert!(
             instance.service_env(service, "OPENROUTER_API_KEY") == MODEL_KEY,
             "{service} doesn't have the key"
+        );
+        assert!(
+            instance.service_env(service, "COMPOSIO_API_KEY") == COMPOSIO_KEY,
+            "{service} doesn't have the Composio key"
         );
     }
 
@@ -662,8 +677,9 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
 fn invalid_input_stops_before_anything_changes() {
     let instance = TestInstance::new();
     type Env<'a> = &'a [(&'a str, &'a str)];
-    // OpenRouter itself refuses this one.
+    // OpenRouter and Composio themselves refuse these.
     const REJECTED_KEY: &str = "sk-or-v1-placeholder";
+    const REJECTED_COMPOSIO_KEY: &str = "ak_placeholder";
     let owner = |extra: &[(&'static str, &'static str)]| {
         let mut env = vec![
             ("RAKAZO_STACK_OWNER_EMAIL", OWNER_EMAIL),
@@ -686,7 +702,7 @@ fn invalid_input_stops_before_anything_changes() {
         ("RAKAZO_STACK_TS_AUTHKEY", "tskey-auth-kPLACEHOLDER"),
         ("RAKAZO_STACK_INSTANCE_URL", "https://rakazo.example.com"),
     ]);
-    let cases: [(&[&str], Env, &str); 11] = [
+    let cases: [(&[&str], Env, &str); 12] = [
         (&["--no-questions"], &no_key, "RAKAZO_STACK_TS_AUTHKEY"),
         (&["--no-questions"], &ephemeral, "ephemeral"),
         (&["--no-questions"], &bad_url, "must look like"),
@@ -741,6 +757,15 @@ fn invalid_input_stops_before_anything_changes() {
             ],
             "OpenRouter rejected the key (HTTP 401)",
         ),
+        (
+            &["--no-questions"],
+            &[
+                ("RAKAZO_STACK_OWNER_EMAIL", OWNER_EMAIL),
+                ("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD),
+                ("RAKAZO_STACK_COMPOSIO_API_KEY", REJECTED_COMPOSIO_KEY),
+            ],
+            "Composio rejected the key (HTTP 401)",
+        ),
     ];
     for (args, env, expected) in cases {
         let out = instance.setup(args, env);
@@ -748,7 +773,9 @@ fn invalid_input_stops_before_anything_changes() {
         assert!(!out.status.success(), "{out_text}");
         assert!(out_text.contains(expected), "{expected}: {out_text}");
         assert!(!out_text.contains("fifteen-chars!!"), "{out_text}");
-        assert!(!out_text.contains(REJECTED_KEY), "setup printed the key");
+        for key in [REJECTED_KEY, REJECTED_COMPOSIO_KEY] {
+            assert!(!out_text.contains(key), "setup printed the key");
+        }
         assert!(!out_text.contains("PLACEHOLDER"), "{out_text}");
         let left: Vec<_> = fs::read_dir(instance.folder())
             .unwrap()

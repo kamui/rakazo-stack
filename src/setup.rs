@@ -1,12 +1,14 @@
-//! `rakazo-stack setup` (spec §7), so far: the Owner, Model provider and access questions,
-//! the key check, Rakazo, the stack's Tailscale device, voice through Lemonade, the Owner
-//! and their voice filled in through Rakazo's own code paths, and the Checklist.
+//! `rakazo-stack setup` (spec §7), so far: the Owner, Model provider, Composio and access
+//! questions, the key checks, Rakazo, the stack's Tailscale device, voice through
+//! Lemonade, the Owner and their voice filled in through Rakazo's own code paths, and the
+//! Checklist.
 
 use std::time::Duration;
 
 use crate::access::{self, AUTH_KEY_NAME, Access};
 use crate::answers::{self, FrontEnd, NoQuestions, Terminal, Wizard};
 use crate::checklist::Checklist;
+use crate::composio;
 use crate::database_settings;
 use crate::docker::{ContainerSummary, Docker};
 use crate::envfile::{self, EnvInputs, STACK_COMPOSE_FILE, TailscaleEnv};
@@ -121,7 +123,17 @@ impl Setup<'_> {
             Some((provider, key)) => {
                 let saved = secrets.get(provider.key_name()) == Some(key.expose());
                 let check = model_provider::check_key(&agent, provider.api_base(), provider, key);
-                model_provider::require_key(provider, check, saved).map_err(SetupError)?
+                model_provider::require_key(provider.name(), provider.key_name(), check, saved)
+                    .map_err(SetupError)?
+            }
+            None => None,
+        };
+        let composio_warning = match &answers.composio_key {
+            Some(key) => {
+                let saved = secrets.get(composio::KEY_NAME) == Some(key.expose());
+                let check = composio::check_key(&agent, composio::API_BASE, key);
+                model_provider::require_key("Composio", composio::KEY_NAME, check, saved)
+                    .map_err(SetupError)?
             }
             None => None,
         };
@@ -129,7 +141,7 @@ impl Setup<'_> {
         if let Some(note) = dropped_override {
             log.say(&note);
         }
-        if let Some(warning) = key_warning {
+        for warning in [key_warning, composio_warning].into_iter().flatten() {
             log.say(&warning);
         }
         if let Some((Provider::Gemini, _)) = model {
@@ -169,6 +181,7 @@ impl Setup<'_> {
         access.record(&mut settings);
         secrets.fill_missing(secrets::random_hex);
         model_provider::save_key(&mut secrets, model);
+        secrets.set_pasted(composio::KEY_NAME, answers.composio_key.as_ref());
         if let Access::Tailscale {
             auth_key: Some(key),
             ..
