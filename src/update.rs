@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::access::AccessMode;
 use crate::answers::{Prompt, Terminal};
 use crate::backup::{self, Backup, PASSPHRASE_VAR, Taken};
+use crate::backup_file::{self, Part, Passphrase};
 use crate::computer_egress;
 use crate::docker::Docker;
 use crate::envfile::{self, Images};
@@ -25,11 +26,13 @@ use crate::platform::Platform;
 use crate::preflight;
 use crate::registry::{self, Ghcr};
 use crate::resolve::{self, HINDSIGHT_DB_IMAGE, HINDSIGHT_DB_TAG, HINDSIGHT_FLOOR, ResolveError};
+use crate::restore::{self, Database, Replace, Restore};
+use crate::runlog::utc_stamp;
 use crate::secrets::{LEMONADE_API_KEY, Secrets};
 use crate::self_update;
 use crate::settings::{
-    Components, HindsightImages, RakazoImages, RecordedHindsight, RecordedImage, RecordedRakazo,
-    Settings,
+    Components, FailedUpdate, HindsightImages, RakazoImages, RecordedHindsight, RecordedImage,
+    RecordedRakazo, Settings,
 };
 use crate::setup::{self, RAKAZO_COMPOSE_PATH, Setup};
 
@@ -42,6 +45,7 @@ const DAY: u64 = 86_400;
 /// Left free after the pull, for what the running Instance writes meanwhile.
 const DISK_HEADROOM: u64 = 2_000_000_000;
 const TAILSCALE_IMAGE: &str = "tailscale/tailscale";
+const WAIT_TIMEOUT_SECONDS: &str = "900";
 
 #[derive(Debug)]
 pub struct UpdateError(pub String);
@@ -360,9 +364,12 @@ impl Lookup<'_> {
                 let tags = self.tags(component)?;
                 let resolution =
                     resolve::choose_rakazo(&tags, |image, tag| self.ghcr_digest(image, tag));
-                let release =
+                let mut release =
                     setup::report(resolution, "Rakazo", &resolve::rakazo_floor(), &mut say)
                         .map_err(|err| err.0)?;
+                if let Some((tag, _)) = overrides::next_rakazo() {
+                    release.tag = tag;
+                }
                 (Record::rakazo(release), tags)
             }
             Component::Hindsight => {
@@ -540,6 +547,83 @@ pub fn confirmed(answer: Option<&str>) -> bool {
     answer.is_some_and(|a| matches!(a.trim(), "" | "y" | "Y" | "yes" | "Yes"))
 }
 
+/// A database whose cluster is on another Postgres major version than its new image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PostgresMove {
+    database: Database,
+    from: u32,
+    to: u32,
+}
+
+impl PostgresMove {
+    fn describe(&self) -> String {
+        let owner = match self.database {
+            Database::Rakazo => "Rakazo",
+            Database::Hindsight => "Hindsight",
+        };
+        format!(
+            "{owner}'s Postgres {} → {}: a Backup is required",
+            self.from, self.to
+        )
+    }
+}
+
+/// What a rolled-back Update moved: each Component whose record the switch changed.
+fn moved(before: &Components, after: &Components) -> BTreeMap<Component, String> {
+    [
+        Component::Rakazo,
+        Component::Hindsight,
+        Component::Lemonade,
+        Component::Tailscale,
+    ]
+    .into_iter()
+    .filter_map(|component| {
+        let after = Record::of(component, after)?;
+        (Record::of(component, before).as_ref() != Some(&after))
+            .then(|| (component, after.version().to_string()))
+    })
+    .collect()
+}
+
+/// "The last update to Rakazo v0.17.0 failed on 2026-11-27 and was rolled back."
+fn describe_failed(failed: &FailedUpdate) -> String {
+    let versions: Vec<String> = failed
+        .to
+        .iter()
+        .map(|(component, version)| format!("{} {version}", component.name()))
+        .collect();
+    let versions = match versions.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => versions.join(""),
+    };
+    format!(
+        "The last update to {versions} failed on {} and was rolled back.",
+        failed.on
+    )
+}
+
+/// `YYYYMMDDTHHMMSSZ` as `2026-11-27 12:01 UTC`.
+fn readable_time(stamp: &str) -> String {
+    match (stamp.get(0..4), stamp.get(4..6), stamp.get(6..8)) {
+        (Some(year), Some(month), Some(day)) => {
+            let time = match (stamp.get(9..11), stamp.get(11..13)) {
+                (Some(hour), Some(minute)) => format!(" {hour}:{minute} UTC"),
+                _ => String::new(),
+            };
+            format!("{year}-{month}-{day}{time}")
+        }
+        _ => stamp.to_string(),
+    }
+}
+
+fn today() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let stamp = utc_stamp(now);
+    format!("{}-{}-{}", &stamp[0..4], &stamp[4..6], &stamp[6..8])
+}
+
 /// What the Update wrote before the switch, so a failure or a No can take it back.
 struct Staged {
     /// The new tag's compose file, when this run wrote it.
@@ -595,6 +679,9 @@ impl Update<'_> {
         let plan = lookup
             .plan(&settings, &running(&settings, &secrets), &holds)
             .map_err(|err| UpdateError(format!("{err} Nothing was changed.")))?;
+        if let Some(failed) = &settings.failed_update {
+            println!("{}", describe_failed(failed));
+        }
         print!("{}", plan.render());
         if !plan.moves() {
             if plan.holds != settings.holds {
@@ -617,15 +704,27 @@ impl Update<'_> {
         let mut next = settings.clone();
         next.components = plan.after.clone();
         next.holds = plan.holds.clone();
+        next.failed_update = None;
 
         let staged = self.stage(&agent, &next, &plan)?;
-        let checked = self
-            .check_postgres(&next, &plan)
-            .and_then(|()| self.check_disk());
-        if let Err(err) = checked {
-            self.discard(&staged);
-            return Err(err);
-        }
+        let checked = self.check_postgres(&plan).and_then(|moves| {
+            for line in &moves {
+                println!("{}", line.describe());
+            }
+            if !moves.is_empty() && self.options.no_backup {
+                return Err(UpdateError(
+                    "--no-backup is refused when Postgres moves: the move restores the Backup's dump into a fresh database. Run it without --no-backup. Nothing was changed.".into(),
+                ));
+            }
+            self.check_disk().map(|()| moves)
+        });
+        let moves = match checked {
+            Ok(moves) => moves,
+            Err(err) => {
+                self.discard(&staged);
+                return Err(err);
+            }
+        };
 
         // Step 5.
         let mut terminal = Terminal::attached().ok();
@@ -677,7 +776,6 @@ impl Update<'_> {
                 }),
                 None => Ok(None),
             });
-        let _ = fs::remove_file(self.folder.file(UPDATE_ENV));
         let taken = match taken {
             Ok(taken) => taken,
             Err(err) => {
@@ -688,10 +786,29 @@ impl Update<'_> {
                 )));
             }
         };
-
-        // Steps 9–11.
+        let backup = taken.as_ref().zip(passphrase.as_ref());
         let project = overrides::compose_project();
         let images_before = self.image_ids(&project)?;
+
+        // Step 8.
+        if !moves.is_empty() {
+            let (taken, passphrase) =
+                backup.expect("a Postgres move is refused without its Backup");
+            if let Err(err) = self.move_postgres(&next, &moves, taken, passphrase) {
+                let _ = fs::remove_file(self.folder.file(UPDATE_ENV));
+                return Err(self.failed(
+                    "the Postgres major move",
+                    &err.0,
+                    &settings,
+                    &staged,
+                    backup,
+                    terminal.as_mut(),
+                ));
+            }
+        }
+        let _ = fs::remove_file(self.folder.file(UPDATE_ENV));
+
+        // Steps 9–11.
         let switch = Setup {
             platform: self.platform,
             docker: self.docker,
@@ -701,7 +818,14 @@ impl Update<'_> {
             switch: Some(&next),
         };
         if let Err(err) = switch.run() {
-            return Err(self.failed(&err.0, &settings, &staged, taken.as_ref()));
+            return Err(self.failed(
+                "the switch",
+                &err.0,
+                &settings,
+                &staged,
+                backup,
+                terminal.as_mut(),
+            ));
         }
 
         // Step 12.
@@ -728,14 +852,17 @@ impl Update<'_> {
         }
     }
 
-    /// A failure in the switch. Before it records anything the old versions start again;
-    /// after, the data belongs to the new versions, so they stay (spec §14, "Failures").
+    /// A failure from step 8 on. Before the new versions are recorded the old ones start
+    /// again. After, the data belongs to the new versions: that is a failed Update, which
+    /// the Backup taken before it can roll back (spec §14, "Failures").
     fn failed(
         &self,
+        step: &str,
         reason: &str,
         settings: &Settings,
         staged: &Staged,
-        taken: Option<&Taken>,
+        backup: Option<(&Taken, &Passphrase)>,
+        terminal: Option<&mut Terminal>,
     ) -> UpdateError {
         let recorded = self
             .folder
@@ -743,9 +870,10 @@ impl Update<'_> {
             .ok()
             .flatten()
             .and_then(|text| Settings::parse(&String::from_utf8_lossy(&text)).ok());
-        if recorded.is_some_and(|recorded| recorded.components == settings.components) {
+        let Some(recorded) = recorded.filter(|recorded| recorded.components != settings.components)
+        else {
             self.discard(staged);
-            let restarted = taken.map_or(Ok(()), |taken| self.backup().start_again(taken));
+            let restarted = backup.map_or(Ok(()), |(taken, _)| self.backup().start_again(taken));
             return UpdateError(match restarted {
                 Ok(()) => format!(
                     "{reason} Nothing was recorded, and the Instance runs the versions it ran before."
@@ -755,17 +883,75 @@ impl Update<'_> {
                     err.0
                 ),
             });
-        }
-        let backup = match taken {
-            Some(taken) => format!(
-                " The Backup taken before the Update is {}.",
-                taken.path.display()
-            ),
-            None => " No Backup was taken before it, so the data may already belong to the new versions: fix forward, or restore an older Backup.".into(),
         };
-        UpdateError(format!(
-            "the Update failed after the switch: {reason} The new versions are recorded and stay in place; re-running `rakazo-stack setup` retries starting them.{backup}"
-        ))
+        let reason = format!("the Update failed at {step}: {reason}");
+        let stay = "The new versions are recorded and stay in place; re-running `rakazo-stack setup` retries starting them.";
+        let Some((taken, passphrase)) = backup else {
+            return UpdateError(format!(
+                "{reason} {stay} No Backup was taken before it, so the data may already belong to the new versions and the old ones aren't brought back: fix forward, or restore an older Backup."
+            ));
+        };
+        let time = readable_time(&taken.created);
+        let command = format!("rakazo-stack restore --replace {}", taken.path.display());
+        let prompt = terminal.filter(|_| !self.options.yes);
+        let Some(prompt) = prompt else {
+            return UpdateError(format!(
+                "{reason} {stay} To roll back to the previous versions from the Backup taken at {time}, run:\n  {command}"
+            ));
+        };
+        println!("{reason}");
+        let question = format!(
+            "Update failed at {step}. Roll back to the previous versions from the Backup taken at {time}? [Y/n] "
+        );
+        if !confirmed(prompt.line(&question).as_deref()) {
+            return UpdateError(format!(
+                "{reason} {stay} To roll back later, run:\n  {command}"
+            ));
+        }
+        let to = moved(&settings.components, &recorded.components);
+        match self.roll_back(taken, passphrase, to, prompt) {
+            Ok(()) => UpdateError(format!(
+                "the Update failed at {step} and was rolled back: the Instance runs the versions it ran before, with its data from the Backup taken at {time}."
+            )),
+            Err(err) => UpdateError(format!(
+                "the Update failed at {step}, and so did the rollback: {err}"
+            )),
+        }
+    }
+
+    /// `restore --replace` on the Backup taken before the Update, inside update's lock and
+    /// without the typed name, then the record of the failed Update. No Hold is added.
+    fn roll_back(
+        &self,
+        taken: &Taken,
+        passphrase: &Passphrase,
+        to: BTreeMap<Component, String>,
+        terminal: &mut Terminal,
+    ) -> Result<(), String> {
+        println!("Rolling back from {}…", taken.path.display());
+        let restore = Restore {
+            platform: self.platform,
+            docker: self.docker,
+            folder: self.folder,
+            file: &taken.path,
+            replace: Replace::Confirmed,
+            nftables: self.nftables,
+        };
+        let env = |name: &str| std::env::var(name).ok();
+        restore
+            .run_with(passphrase, &env, Some(terminal as &mut dyn Prompt))
+            .map_err(|err| err.message)?;
+        let text = self
+            .folder
+            .read("settings.json")
+            .map_err(|err| err.to_string())?
+            .ok_or("the restored Instance has no settings.json.")?;
+        let mut restored = Settings::parse(&String::from_utf8_lossy(&text))
+            .map_err(|err| format!("the restored settings.json can't be read: {err}"))?;
+        restored.failed_update = Some(FailedUpdate { to, on: today() });
+        self.folder
+            .write("settings.json", restored.to_json().as_bytes())
+            .map_err(|err| err.to_string())
     }
 
     /// Step 4's files: the new tag's compose file, and the new image lines that Compose
@@ -783,9 +969,19 @@ impl Update<'_> {
         if plan.moves_component(Component::Rakazo) {
             let tag = &next.components.rakazo.version;
             let file = envfile::rakazo_compose_file(tag);
-            let compose = github::fetch_file(agent, RAKAZO_REPO, tag, RAKAZO_COMPOSE_PATH)?;
-            let script =
-                github::fetch_file(agent, RAKAZO_REPO, tag, computer_egress::UPSTREAM_SCRIPT)?;
+            let (compose, script) = match overrides::next_rakazo() {
+                // An unpublished release has nothing on GitHub; it keeps the current script.
+                Some((next_tag, path)) if next_tag == *tag => (
+                    fs::read(path)?,
+                    self.folder
+                        .read(computer_egress::SCRIPT)?
+                        .ok_or_else(|| UpdateError("the egress script is missing.".into()))?,
+                ),
+                _ => (
+                    github::fetch_file(agent, RAKAZO_REPO, tag, RAKAZO_COMPOSE_PATH)?,
+                    github::fetch_file(agent, RAKAZO_REPO, tag, computer_egress::UPSTREAM_SCRIPT)?,
+                ),
+            };
             if self.folder.read(&file)?.is_none() {
                 self.folder.write(&file, &compose)?;
                 staged.compose_file = Some(file);
@@ -872,9 +1068,9 @@ impl Update<'_> {
         })
     }
 
-    /// Step 4's Postgres check. Moving a major version is #74's; until then the Update
-    /// stops before anything changes.
-    fn check_postgres(&self, next: &Settings, plan: &Plan) -> Result<(), UpdateError> {
+    /// Step 4's Postgres check: each moving database's cluster major (`PG_VERSION`) against
+    /// its new image's.
+    fn check_postgres(&self, plan: &Plan) -> Result<Vec<PostgresMove>, UpdateError> {
         let mut moves = Vec::new();
         if plan.moves_component(Component::Rakazo) {
             let model: serde_json::Value =
@@ -883,38 +1079,98 @@ impl Update<'_> {
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
-            let new = postgres_major(&image).ok_or_else(|| {
+            let to = postgres_major(&image).ok_or_else(|| {
                 UpdateError(format!(
                     "Couldn't tell which Postgres major version `{image}` is. Nothing was changed."
                 ))
             })?;
-            let old = self.cluster_major("postgres")?;
-            if old != new {
-                moves.push(format!(
-                    "Rakazo {} moves its Postgres {old} → {new}",
-                    next.components.rakazo.version
-                ));
+            let from = self.cluster_major("postgres")?;
+            if from != to {
+                moves.push(PostgresMove {
+                    database: Database::Rakazo,
+                    from,
+                    to,
+                });
             }
         }
         if plan.moves_component(Component::Hindsight) {
-            let new = postgres_major(&format!("{HINDSIGHT_DB_IMAGE}:{HINDSIGHT_DB_TAG}"))
+            let to = postgres_major(&format!("{HINDSIGHT_DB_IMAGE}:{HINDSIGHT_DB_TAG}"))
                 .expect("the program's own tag has a major");
-            let old = self.cluster_major("hindsight-db")?;
-            if old != new {
-                moves.push(format!("hindsight-db moves Postgres {old} → {new}"));
+            let from = self.cluster_major("hindsight-db")?;
+            if from != to {
+                moves.push(PostgresMove {
+                    database: Database::Hindsight,
+                    from,
+                    to,
+                });
             }
         }
-        if moves.is_empty() {
-            return Ok(());
+        Ok(moves)
+    }
+
+    /// Step 8. The new versions are recorded first: once an old volume goes, the old
+    /// versions have no data to run on, and a missed move fails loudly instead of starting
+    /// on an empty database. Each moving database then starts under its new image on a
+    /// fresh volume and takes the Backup's dump, through restore's database step.
+    fn move_postgres(
+        &self,
+        next: &Settings,
+        moves: &[PostgresMove],
+        taken: &Taken,
+        passphrase: &Passphrase,
+    ) -> Result<(), UpdateError> {
+        let project = overrides::compose_project();
+        self.folder
+            .write("settings.json", next.to_json().as_bytes())?;
+        for line in moves {
+            let database = line.database;
+            println!(
+                "Moving {} from Postgres {} to {}…",
+                database.label(),
+                line.from,
+                line.to
+            );
+            let mut remove = database.prefix().to_vec();
+            remove.extend(["rm", "--stop", "--force", database.service()]);
+            if database == Database::Hindsight {
+                remove.push("hindsight");
+            }
+            self.compose(&remove)?;
+            self.docker_ok(&["volume", "rm", &backup::volume(&project, database.volume())])?;
+            let mut up = database.prefix().to_vec();
+            up.extend([
+                "up",
+                "-d",
+                "--no-deps",
+                "--wait",
+                "--wait-timeout",
+                WAIT_TIMEOUT_SECONDS,
+                database.service(),
+            ]);
+            self.compose_new(&up)?;
         }
-        Err(UpdateError(format!(
-            "{}, and this rakazo-stack can't move a Postgres major version yet. Nothing was changed. Hold the Component where it is (`--hold rakazo={}`) until a newer rakazo-stack can.",
-            moves.join("; "),
-            plan.lines
-                .iter()
-                .find(|line| line.component == Component::Rakazo)
-                .map_or("", |line| line.from.as_str())
-        )))
+        let mut restored = Vec::new();
+        backup_file::check(&taken.path, passphrase, |part, dump| {
+            let database = match part {
+                Part::RakazoDump => Database::Rakazo,
+                Part::HindsightDump => Database::Hindsight,
+                _ => return Ok(()),
+            };
+            if !moves.iter().any(|line| line.database == database) {
+                return Ok(());
+            }
+            println!("Restoring {}…", database.label());
+            restored.push(database);
+            restore::restore_database(self.docker, self.folder.path(), database, dump)
+        })
+        .map_err(UpdateError)?;
+        match moves.iter().find(|line| !restored.contains(&line.database)) {
+            Some(line) => Err(UpdateError(format!(
+                "the Backup holds no dump of {}.",
+                line.database.label()
+            ))),
+            None => Ok(()),
+        }
     }
 
     /// Step 3's free-disk check, sized to the new images not on the machine yet. Each is
@@ -1395,6 +1651,72 @@ mod tests {
         );
         assert_eq!(postgres_major("postgres@sha256:abc"), None);
         assert_eq!(postgres_major("registry.example:5000/postgres"), None);
+    }
+
+    #[test]
+    fn a_postgres_move_says_a_backup_is_required() {
+        let line = PostgresMove {
+            database: Database::Rakazo,
+            from: 16,
+            to: 18,
+        };
+        assert_eq!(
+            line.describe(),
+            "Rakazo's Postgres 16 → 18: a Backup is required"
+        );
+    }
+
+    #[test]
+    fn records_what_a_rolled_back_update_moved_and_shows_it_next_time() {
+        let before = components("v0.16.0", "v2026.48.3");
+        let mut after = before.clone();
+        rakazo("v0.17.0", "sha256:new").put(&mut after);
+        image(Component::Tailscale, "v1.106.0").put(&mut after);
+        let to = moved(&before, &after);
+        assert_eq!(
+            to,
+            BTreeMap::from([
+                (Component::Rakazo, "v0.17.0".to_string()),
+                (Component::Tailscale, "v1.106.0".to_string()),
+            ])
+        );
+        let failed = FailedUpdate {
+            to,
+            on: "2026-11-27".into(),
+        };
+        let mut settings = Settings::new(&resolve::RakazoRelease {
+            tag: "v0.16.0".into(),
+            app_digest: "sha256:aaa".into(),
+            computer_digest: "sha256:ccc".into(),
+        });
+        settings.failed_update = Some(failed.clone());
+        let json = settings.to_json();
+        assert!(
+            json.contains(
+                "\"failed_update\": {\n    \"to\": {\n      \"rakazo\": \"v0.17.0\",\n      \"tailscale\": \"v1.106.0\"\n    },\n    \"on\": \"2026-11-27\"\n  }"
+            ),
+            "{json}"
+        );
+        assert_eq!(Settings::parse(&json).unwrap(), settings);
+        assert_eq!(
+            describe_failed(&failed),
+            "The last update to Rakazo v0.17.0 and Tailscale v1.106.0 failed on 2026-11-27 and was rolled back."
+        );
+        let one = FailedUpdate {
+            to: BTreeMap::from([(Component::Rakazo, "v0.5.2".to_string())]),
+            on: "2026-11-27".into(),
+        };
+        assert_eq!(
+            describe_failed(&one),
+            "The last update to Rakazo v0.5.2 failed on 2026-11-27 and was rolled back."
+        );
+    }
+
+    #[test]
+    fn backup_times_read_as_utc() {
+        assert_eq!(readable_time("20261127T120101Z"), "2026-11-27 12:01 UTC");
+        assert_eq!(readable_time("odd"), "odd");
+        assert_eq!(today().len(), "2026-11-27".len());
     }
 
     #[test]

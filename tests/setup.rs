@@ -3143,3 +3143,286 @@ fn canary_a_real_key_learns_and_recalls_through_rakazo() {
         "the second bot didn't recall the name: {reply}"
     );
 }
+
+impl TestInstance {
+    /// Runs `update` on a terminal that `script` gives it. Each answer is typed only once
+    /// its question has been printed, so no child process that shares the terminal can
+    /// read it first.
+    fn update_answering(
+        &self,
+        args: &[&str],
+        env: &[(&str, &str)],
+        answers: &[(&str, &str)],
+    ) -> Output {
+        use std::io::Read;
+        use std::sync::Arc;
+
+        let mut line = format!("'{}' update", env!("CARGO_BIN_EXE_rakazo-stack"));
+        for arg in args {
+            line.push_str(&format!(" '{arg}'"));
+        }
+        let mut command = self.restore_command("script", env);
+        let mut child = command
+            .args(["-qec", &line, "/dev/null"])
+            .env("SHELL", "/bin/sh")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let printed = Arc::new(Mutex::new(Vec::new()));
+        let mut stdout = child.stdout.take().unwrap();
+        let reader = {
+            let printed = Arc::clone(&printed);
+            std::thread::spawn(move || {
+                let mut chunk = [0; 4096];
+                while let Ok(n @ 1..) = stdout.read(&mut chunk) {
+                    printed.lock().unwrap().extend_from_slice(&chunk[..n]);
+                }
+            })
+        };
+        let mut stdin = child.stdin.take().unwrap();
+        for (question, answer) in answers {
+            let asked = || String::from_utf8_lossy(&printed.lock().unwrap()).contains(question);
+            for _ in 0..1800 {
+                if asked() || child.try_wait().unwrap().is_some() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+            assert!(
+                asked(),
+                "never asked {question:?}: {}",
+                String::from_utf8_lossy(&printed.lock().unwrap())
+            );
+            stdin.write_all(answer.as_bytes()).unwrap();
+        }
+        let mut stderr = Vec::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_end(&mut stderr)
+            .unwrap();
+        let status = child.wait().unwrap();
+        drop(stdin);
+        reader.join().unwrap();
+        let stdout = printed.lock().unwrap().clone();
+        Output {
+            status,
+            stdout,
+            stderr,
+        }
+    }
+
+    fn postgres_major(&self) -> String {
+        self.sql("SHOW server_version")
+            .split('.')
+            .next()
+            .unwrap()
+            .to_string()
+    }
+}
+
+/// A test copy of Rakazo's compose file in which `from` must appear and becomes `to`.
+fn edited(compose: &str, from: &str, to: &str) -> String {
+    assert!(compose.contains(from), "{from}");
+    compose.replace(from, to)
+}
+
+/// §19's "Postgres 16 → 18 move" and "Rollback path", on Rakazo's images compose layout.
+/// Rakazo's file is never edited: each Update goes to a fake newer tag that runs the
+/// latest release's images, with a test copy of the installed compose file on
+/// `postgres:18`, and, for a failed Update, with a `migrate` that exits 3. A failed
+/// Update is rolled back on a terminal, then the move goes through; under `--yes` a
+/// failure prints the rollback command, and with `--no-backup` none is offered.
+#[test]
+#[ignore = "needs Docker and pulls Rakazo's images and Postgres 18; CI and the dev machine run it with --include-ignored"]
+fn update_moves_postgres_16_to_18_and_rolls_a_failed_update_back() {
+    const NEXT_VAR: &str = "RAKAZO_STACK_TEST_NEXT_RAKAZO";
+    const RAKAZO: &str = "v0.16.0";
+    let instance = TestInstance::new();
+    let folder = instance.folder();
+    let origin = instance.origin();
+    fs::create_dir_all(&folder).unwrap();
+    let seeded = serde_json::json!({
+        "schema": 1,
+        "program_version": "0.1.0",
+        "owner_email": OWNER_EMAIL,
+        "model_provider": "none",
+        "components": {
+            "rakazo": {
+                "version": RAKAZO,
+                "images": {
+                    "app": registry_digest("ghcr.io", "elie222/rakazo/app", RAKAZO),
+                    "computer": registry_digest("ghcr.io", "elie222/rakazo/computer", RAKAZO),
+                },
+            },
+        },
+    });
+    fs::write(folder.join("settings.json"), seeded.to_string()).unwrap();
+    let installed = instance.setup(
+        &["--no-questions"],
+        &[("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD)],
+    );
+    assert!(installed.status.success(), "{}", text(&installed));
+    let sign_in = || {
+        post_json(
+            &format!("{origin}/api/auth/sign-in/email"),
+            &serde_json::json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }),
+        )
+        .0
+    };
+    assert_eq!(sign_in(), 200);
+    instance.sql("CREATE TABLE rkst_kept AS SELECT g AS n FROM generate_series(1, 10000) g");
+    let kept = "SELECT count(*) || ' ' || sum(n) FROM rkst_kept";
+    assert_eq!(instance.sql(kept), "10000 50005000");
+    assert_eq!(instance.postgres_major(), "16");
+    let old_postgres = instance.image_of("postgres");
+
+    let upstream = fs::read_to_string(folder.join(format!("rakazo.{RAKAZO}.images.yml"))).unwrap();
+    let start = upstream.find("${POSTGRES_IMAGE:-").unwrap() + "${POSTGRES_IMAGE:-".len();
+    let end = start + upstream[start..].find('}').unwrap();
+    let pg18 = format!(
+        "postgres:18@{}",
+        registry_digest("docker.io", "library/postgres", "18")
+    );
+    let on_18 = edited(
+        &edited(&upstream, &upstream[start..end], &pg18),
+        "pgdata:/var/lib/postgresql/data",
+        "pgdata:/var/lib/postgresql",
+    );
+    let failing = edited(
+        &on_18,
+        r#"command: ["pnpm", "db:deploy"]"#,
+        r#"command: ["sh", "-c", "exit 3"]"#,
+    );
+    let copies = instance.home.path().join("next");
+    fs::create_dir(&copies).unwrap();
+    fs::write(copies.join("on-18.yml"), &on_18).unwrap();
+    fs::write(copies.join("failing.yml"), &failing).unwrap();
+    let next = |tag: &str, copy: &str| format!("{tag}={}", copies.join(copy).display());
+    let env = |next: &str| -> Vec<(&str, String)> {
+        vec![
+            ("RAKAZO_STACK_BACKUP_PASSPHRASE", BACKUP_PASSPHRASE.into()),
+            (NEXT_VAR, next.to_string()),
+        ]
+    };
+    let update = |args: &[&str], next: &str| {
+        let env = env(next);
+        let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        instance.update(args, &env)
+    };
+    let unchanged = fs::read(folder.join("settings.json")).unwrap();
+
+    let no_backup = update(&["--yes", "--no-backup"], &next("v0.16.1", "on-18.yml"));
+    let no_backup_text = text(&no_backup);
+    assert!(!no_backup.status.success(), "{no_backup_text}");
+    assert!(
+        no_backup_text.contains("Rakazo's Postgres 16 → 18: a Backup is required")
+            && no_backup_text.contains("--no-backup is refused when Postgres moves"),
+        "{no_backup_text}"
+    );
+    assert_eq!(fs::read(folder.join("settings.json")).unwrap(), unchanged);
+    assert!(instance.backups().is_empty());
+    assert!(!folder.join("rakazo.v0.16.1.images.yml").exists());
+
+    let failing_env = env(&next("v0.16.1", "failing.yml"));
+    let failing_env: Vec<(&str, &str)> =
+        failing_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let rolled_back = instance.update_answering(
+        &[],
+        &failing_env,
+        &[
+            ("Update? [Y/n]", "\n"),
+            (
+                "Roll back to the previous versions from the Backup taken at",
+                "y\n",
+            ),
+        ],
+    );
+    let rolled_back_text = text(&rolled_back);
+    assert!(!rolled_back.status.success(), "{rolled_back_text}");
+    for line in [
+        "Moving Rakazo's database from Postgres 16 to 18",
+        "Update failed at the switch. Roll back",
+        "the Update failed at the switch and was rolled back",
+    ] {
+        assert!(
+            rolled_back_text.contains(line),
+            "{line}: {rolled_back_text}"
+        );
+    }
+    let settings = instance.settings();
+    assert_eq!(settings["components"]["rakazo"]["version"], RAKAZO);
+    assert_eq!(
+        settings["failed_update"]["to"],
+        serde_json::json!({ "rakazo": "v0.16.1" })
+    );
+    assert!(settings["holds"].is_null(), "no Hold: {settings}");
+    assert_eq!(instance.postgres_major(), "16");
+    assert_eq!(instance.sql(kept), "10000 50005000");
+    assert_eq!(sign_in(), 200);
+    assert_eq!(instance.backups().len(), 1);
+    assert!(
+        fs::read_to_string(folder.join(".env"))
+            .unwrap()
+            .contains(&format!("COMPOSE_FILE=rakazo.{RAKAZO}.images.yml:"))
+    );
+
+    let moved = update(&["--yes"], &next("v0.16.1", "on-18.yml"));
+    let moved_text = text(&moved);
+    assert!(moved.status.success(), "{moved_text}");
+    let failed_on = settings["failed_update"]["on"].as_str().unwrap();
+    for line in [
+        format!("The last update to Rakazo v0.16.1 failed on {failed_on} and was rolled back."),
+        "Rakazo's Postgres 16 → 18: a Backup is required".to_string(),
+        "Restoring Rakazo's database".to_string(),
+    ] {
+        assert!(moved_text.contains(&line), "{line}: {moved_text}");
+    }
+    let settings = instance.settings();
+    assert_eq!(settings["components"]["rakazo"]["version"], "v0.16.1");
+    assert!(settings["failed_update"].is_null(), "{settings}");
+    assert!(settings["holds"].is_null(), "{settings}");
+    assert_eq!(instance.postgres_major(), "18");
+    assert_eq!(instance.sql(kept), "10000 50005000", "all data kept");
+    assert_eq!(sign_in(), 200, "the Owner is still there");
+    assert_eq!(instance.backups().len(), 2);
+    assert!(gone_unless_tagged_elsewhere(&old_postgres), "{moved_text}");
+
+    let failed = update(&["--yes"], &next("v0.16.2", "failing.yml"));
+    let failed_text = text(&failed);
+    assert!(!failed.status.success(), "{failed_text}");
+    let backups = instance.backups();
+    assert_eq!(backups.len(), 3, "{failed_text}");
+    assert!(
+        failed_text.contains(&format!(
+            "run:\n  rakazo-stack restore --replace {}",
+            backups[2].display()
+        )),
+        "{failed_text}"
+    );
+    assert!(!failed_text.contains("Roll back to"), "{failed_text}");
+    assert_eq!(
+        instance.settings()["components"]["rakazo"]["version"],
+        "v0.16.2",
+        "the new versions stay"
+    );
+
+    let unbacked = update(&["--yes", "--no-backup"], &next("v0.16.3", "failing.yml"));
+    let unbacked_text = text(&unbacked);
+    assert!(!unbacked.status.success(), "{unbacked_text}");
+    assert!(
+        unbacked_text.contains("No Backup was taken before it")
+            && !unbacked_text.contains("restore --replace"),
+        "{unbacked_text}"
+    );
+    assert_eq!(instance.backups().len(), 3);
+    assert_eq!(
+        instance.settings()["components"]["rakazo"]["version"],
+        "v0.16.3",
+        "never swapped back"
+    );
+    assert_eq!(instance.postgres_major(), "18");
+}
