@@ -274,6 +274,25 @@ impl Drop for TestInstance {
             down.current_dir(self.folder());
         }
         let _ = down.output();
+        self.remove_launch_agent();
+    }
+}
+
+impl TestInstance {
+    /// On a Mac, setup loads the project's own lemond LaunchAgent. `compose down` leaves
+    /// it, and `KeepAlive` would go on starting lemond from the deleted HOME.
+    fn remove_launch_agent(&self) {
+        if !cfg!(target_os = "macos") {
+            return;
+        }
+        let uid = rustix::process::getuid().as_raw();
+        let _ = Command::new("launchctl")
+            .arg("bootout")
+            .arg(format!(
+                "gui/{uid}/com.github.kamui.{}.lemond",
+                self.project
+            ))
+            .output();
     }
 }
 

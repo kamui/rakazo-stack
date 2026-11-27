@@ -64,7 +64,7 @@ Setup checks your computer first. A problem it can't work around stops it before
 
 | Question | Notes |
 |---|---|
-| Owner email and password | Your Owner account in Rakazo. The password is 16–128 characters, typed twice. Setup never saves it. |
+| Owner email and password | Your Owner account in Rakazo. The password is 16–128 characters, typed twice; if the two don't match, setup asks again, up to three times. Setup never saves it. |
 | Model provider | `openrouter` (the default), `openai`, `gemini`, `anthropic` or `none`. |
 | The Model provider's API key | Blank is allowed. Setup checks the key with the provider before saving it, and never saves a key the provider rejects. |
 | Composio project API key | Blank is allowed, and leaves integrations off. Checked with Composio the same way. |
@@ -75,7 +75,7 @@ Keys and passwords are typed without being shown. Setup then starts everything, 
 
 ### Running setup again
 
-Run `rakazo-stack setup` again whenever you want to change an answer. It shows your earlier answers as defaults, and a saved key as "set, press Enter to keep, or paste a new one". It never prints a saved key, never changes the passwords it created, and never changes Component versions: only `rakazo-stack update` does that. A Component you switch on later, such as memory or Tailscale, starts at its newest release.
+Run `rakazo-stack setup` again whenever you want to change an answer. It shows your earlier answers as defaults, and a saved key as "set, press Enter to keep, or paste a new one". It never prints a saved key, never changes the passwords it created, and never changes Component versions: only `rakazo-stack update` does that. When something in Rakazo still has to be set up, such as memory you turned on later, it asks once for the Owner password you already sign in with. If you mistype it, setup says so and asks again, up to three times. A Component you switch on later, such as memory or Tailscale, starts at its newest release.
 
 If you removed something in Rakazo that setup had set up, such as your voice settings, setup asks whether to add it back.
 
@@ -132,7 +132,7 @@ Setup runs its own Tailscale, which joins your tailnet as a device of its own. I
 
 1. In the Tailscale admin console, create an auth key that is **not ephemeral**: Tailscale deletes ephemeral devices after they go offline. Setup refuses OAuth client secrets and keys it can tell are ephemeral, but it can't tell from every ephemeral key, so check this yourself. Don't add tags.
 2. Run `rakazo-stack setup`, choose `tailscale`, paste the key and pick a device name (the default is `rakazo`).
-3. Do what the Checklist says, once: in the admin console, enable MagicDNS and HTTPS certificates, and turn off key expiry for the device. Device names then appear in public Certificate Transparency logs. If you enable them after setup, run `docker compose restart tailscale` from `~/rakazo-stack`.
+3. Do what the Checklist says, once: in the admin console, enable MagicDNS and HTTPS certificates, and turn off key expiry for the device: on the device's page (the Checklist links it), click **Machine settings** and choose **Disable key expiry**. That's the device's own key, not the auth key from step 1, whose expiration only limits how long it can add devices. Device names then appear in public Certificate Transparency logs. If you enable them after setup, run `docker compose restart tailscale` from `~/rakazo-stack`. Each later run lists only the steps still left, and drops the item when they're all done.
 
 Once the device has joined, setup deletes the auth key: the device keeps its identity, so later runs need no key. If the name is taken, Tailscale picks another, such as `rakazo-1`, and setup uses it.
 
@@ -168,7 +168,7 @@ From `~/rakazo-stack`:
 These work because setup writes the Compose settings to `~/rakazo-stack/.env`. Compose takes a variable from your shell over the same name in `.env`, so if your shell exports one of its names, such as `COMPOSE_FILE` or `COMPOSE_PROJECT_NAME`, your commands get the shell's value; setup's own commands never do.
 
 - **Windows:** always type `docker.exe`. Plain `docker` in WSL makes containers that can fail to start after a restart of your computer; the next `rakazo-stack setup` or `rakazo-stack update` fixes them.
-- **Mac:** voice runs outside Docker, as a background item of your account, so `docker compose down` doesn't stop it. The first time setup installs it, macOS 13 and later shows a "Background Items Added" notice. If you turn it off in **System Settings → General → Login Items**, voice stops working, and setup's Checklist says so.
+- **Mac:** voice runs outside Docker, as a background item of your account, so `docker compose down` doesn't stop it. The first time setup installs it, macOS 13 and later shows a "Background Items Added" notice. It's listed as `lemond` in **System Settings → General → Login Items & Extensions**, under **Background App Activity** (**Allow in the Background** on older macOS), not under Open at Login. If you turn it off there, voice stops working, and setup's Checklist says so.
 - **Windows and Mac:** the Instance runs only while you're signed in and Docker Desktop is running. Turn on **Start Docker Desktop when you sign in to your computer** in Docker Desktop's settings, or the Instance stays down after a restart until you open Docker Desktop.
 
 The bot-computer firewall can show the rules it keeps:

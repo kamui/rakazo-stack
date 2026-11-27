@@ -456,7 +456,7 @@ pub fn last_log_lines(log: &str, key: &str) -> Vec<String> {
 
 pub fn turned_off_item(label: &str) -> String {
     format!(
-        "Voice isn't set up: the Instance's lemond ({label}) is turned off in Login Items. Turn it on in System Settings → General → Login Items & Extensions, under Allow in the Background, then run `rakazo-stack setup` again."
+        "Voice isn't set up: the Instance's lemond ({label}) is turned off in Login Items. Turn `lemond` on in System Settings → General → Login Items & Extensions, under Background App Activity (Allow in the Background on older macOS), then run `rakazo-stack setup` again."
     )
 }
 
@@ -1121,6 +1121,7 @@ mod tests {
         assert!(item.contains("\n      key <LEMONADE_API_KEY>"));
         assert!(!item.contains(KEY));
         assert!(failing_item("x", "isn't loaded", &[]).contains("is empty"));
-        assert!(turned_off_item("x").contains("Allow in the Background"));
+        assert!(turned_off_item("x").contains("Turn `lemond` on"));
+        assert!(turned_off_item("x").contains("Background App Activity"));
     }
 }

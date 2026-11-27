@@ -374,7 +374,7 @@ impl Setup<'_> {
                 &mut |line| log.say(line),
                 &mut checklist,
             );
-        if tailnet {
+        let joined = if tailnet {
             self.join_tailnet(
                 &stack,
                 &rakazo_services,
@@ -382,10 +382,24 @@ impl Setup<'_> {
                 &mut secrets,
                 &mut checklist,
                 &log,
-            )?;
-        }
-        if tailscale_chosen {
-            checklist.add(tailscale::console_item(settings.device_name()));
+            )?
+        } else {
+            None
+        };
+        match &joined {
+            Some(joined) => {
+                if let Some(expires) = &joined.key_expires {
+                    checklist.add(tailscale::key_expiry_item(
+                        joined.device_name(),
+                        expires,
+                        joined.ipv4,
+                    ));
+                }
+            }
+            None if tailscale_chosen => {
+                checklist.add(tailscale::console_item(settings.device_name()));
+            }
+            None => {}
         }
 
         computer_egress::check(
@@ -564,7 +578,7 @@ impl Setup<'_> {
         secrets: &mut Secrets,
         checklist: &mut Checklist,
         log: &RunLog,
-    ) -> Result<(), SetupError> {
+    ) -> Result<Option<Joined>, SetupError> {
         log.say("Waiting for Tailscale…");
         let previous = settings
             .tailscale_dns_name
@@ -574,7 +588,7 @@ impl Setup<'_> {
             Ok(joined) => joined,
             Err(item) => {
                 checklist.add(item);
-                return Ok(());
+                return Ok(None);
             }
         };
         settings.tailscale_device_name = Some(joined.device_name().to_string());
@@ -599,7 +613,7 @@ impl Setup<'_> {
         if !joined.https_ready {
             checklist.add(tailscale::no_https_item(&url, self.compose_command()));
         }
-        Ok(())
+        Ok(Some(joined))
     }
 
     fn start_tailscale(&self, requested: &str, previous: Option<&str>) -> Result<Joined, String> {

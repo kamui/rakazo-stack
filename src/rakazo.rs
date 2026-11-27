@@ -8,7 +8,9 @@ use std::process::{Output, Stdio};
 use std::time::Duration;
 
 use crate::answers::Password;
-use crate::database_settings::{Connect, DefaultSpace, Rakazo, Session, VoiceConnection};
+use crate::database_settings::{
+    Connect, DefaultSpace, Rakazo, Session, SignInError, VoiceConnection,
+};
 use crate::docker::Docker;
 use crate::lemonade::{RELAY_URL, SPEECH_MODEL, TRANSCRIPTION_MODEL};
 use crate::memory::ConnectedSpace;
@@ -74,6 +76,22 @@ impl LocalRakazo<'_> {
         headers: &[(&str, &str)],
         body: &str,
     ) -> Result<String, String> {
+        let (status, text) = self.send(path, session, headers, body)?;
+        if (200..300).contains(&status) {
+            Ok(text)
+        } else {
+            Err(failure_message(status, &text))
+        }
+    }
+
+    /// The reply's status and body, whatever the status.
+    fn send(
+        &self,
+        path: &str,
+        session: Option<&Session>,
+        headers: &[(&str, &str)],
+        body: &str,
+    ) -> Result<(u16, String), String> {
         let url = format!("{}{path}", self.origin);
         let mut request = self
             .agent
@@ -94,11 +112,7 @@ impl LocalRakazo<'_> {
             .body_mut()
             .read_to_string()
             .map_err(|err| err.to_string())?;
-        if (200..300).contains(&status) {
-            Ok(text)
-        } else {
-            Err(failure_message(status, &text))
-        }
+        Ok((status, text))
     }
 }
 
@@ -174,12 +188,18 @@ impl Rakazo for LocalRakazo<'_> {
         .map(drop)
     }
 
-    fn sign_in(&self, email: &str, password: &Password) -> Result<Session, String> {
+    fn sign_in(&self, email: &str, password: &Password) -> Result<Session, SignInError> {
         let body = serde_json::json!({ "email": email, "password": password.expose() });
-        let reply = self.post("/api/auth/sign-in/email", None, &[], &body.to_string())?;
-        session_token(&reply)
-            .map(|token| Session { token })
-            .ok_or_else(|| "Rakazo's sign-in reply had no token".to_string())
+        let (status, reply) = self
+            .send("/api/auth/sign-in/email", None, &[], &body.to_string())
+            .map_err(SignInError::Failed)?;
+        match status {
+            200..300 => session_token(&reply)
+                .map(|token| Session { token })
+                .ok_or_else(|| SignInError::Failed("Rakazo's sign-in reply had no token".into())),
+            401 => Err(SignInError::Rejected(failure_message(status, &reply))),
+            _ => Err(SignInError::Failed(failure_message(status, &reply))),
+        }
     }
 
     fn connect_voice(&self, session: &Session, voice_id: Option<&str>) -> Result<(), String> {
@@ -440,12 +460,12 @@ mod tests {
         let body: serde_json::Value = serde_json::from_str(&voice_connect_body(None)).unwrap();
         assert_eq!(
             body,
-            serde_json::json!({"json":{"provider":"openai-compatible","baseUrl":"http://lemonade-relay:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"Whisper-Small"}})
+            serde_json::json!({"json":{"provider":"openai-compatible","baseUrl":"http://lemonade-relay:13306/api/v1","ttsModel":"kokoro-v1","sttModel":TRANSCRIPTION_MODEL}})
         );
         let kept: serde_json::Value =
             serde_json::from_str(&voice_connect_body(Some("af_bella"))).unwrap();
         assert_eq!(kept["json"]["voiceId"], "af_bella");
-        assert_eq!(kept["json"]["sttModel"], "Whisper-Small");
+        assert_eq!(kept["json"]["sttModel"], TRANSCRIPTION_MODEL);
     }
 
     #[test]
@@ -646,8 +666,11 @@ mod tests {
         fn bootstrap_owner(&self, _: &str, _: &Password) -> Result<(), String> {
             Ok(())
         }
-        fn sign_in(&self, _: &str, _: &Password) -> Result<Session, String> {
-            Err(failure_message(401, RECORDED_RPC_UNAUTHORIZED))
+        fn sign_in(&self, _: &str, _: &Password) -> Result<Session, SignInError> {
+            Err(SignInError::Rejected(failure_message(
+                401,
+                RECORDED_RPC_UNAUTHORIZED,
+            )))
         }
         fn voice_exists(&self, _: &str) -> Result<bool, String> {
             unreachable!()
