@@ -389,7 +389,11 @@ impl Setup<'_> {
         match &joined {
             Some(joined) => {
                 if let Some(expires) = &joined.key_expires {
-                    checklist.add(tailscale::key_expiry_item(joined.device_name(), expires));
+                    checklist.add(tailscale::key_expiry_item(
+                        joined.device_name(),
+                        expires,
+                        joined.ipv4,
+                    ));
                 }
             }
             None if tailscale_chosen => {
