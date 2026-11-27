@@ -276,6 +276,7 @@ pub fn fill_in(
     }
 
     let not_filled = |reason: &str, checklist: &mut Checklist| {
+        let reason = reason.trim_end_matches('.');
         if fill_owner {
             checklist.add(owner_not_created(reason));
         }
@@ -904,6 +905,26 @@ mod tests {
                 .unwrap()
                 .contains(OWNER_PASSWORD_VAR)
         );
+    }
+
+    #[test]
+    fn a_reason_ending_in_a_full_stop_reads_as_one_sentence() {
+        let rakazo = FakeRakazo {
+            bootstrap_error: Some("the two Owner passwords don't match.".into()),
+            ..Default::default()
+        };
+        let mut checklist = Checklist::default();
+        fill_in(
+            &rakazo,
+            &mut Silent,
+            EMAIL,
+            Some(password()),
+            Fillable::default(),
+            &mut Vec::new(),
+            &mut checklist,
+        );
+        let item = checklist.items().next().unwrap();
+        assert!(item.contains("don't match. Run"), "{item}");
     }
 
     #[test]
