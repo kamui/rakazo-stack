@@ -52,6 +52,22 @@ impl Provider {
         }
     }
 
+    /// Rakazo's id for the provider, from its model registry.
+    pub fn rakazo_id(self) -> &'static str {
+        match self {
+            Self::Gemini => "google",
+            _ => self.id(),
+        }
+    }
+
+    /// What Rakazo's Settings → Models calls the provider.
+    pub fn rakazo_name(self) -> &'static str {
+        match self {
+            Self::Gemini => "Google",
+            _ => self.name(),
+        }
+    }
+
     /// The key's name in `secrets.env`, and in Rakazo's env where Rakazo reads it.
     pub fn key_name(self) -> &'static str {
         match self {
@@ -71,6 +87,11 @@ impl Provider {
         }
     }
 
+    /// Whether Rakazo runs it on a connection each person has, not on a key from env.
+    pub fn is_per_user(self) -> bool {
+        self.owner_model().is_some()
+    }
+
     /// This program version's chat model for the whole Instance. OpenAI and Gemini have
     /// none: Rakazo connects them per user.
     fn instance_model(self) -> Option<&'static str> {
@@ -78,6 +99,15 @@ impl Provider {
             Self::OpenRouter => Some("~z-ai/glm-flash-latest"),
             Self::Anthropic => Some("claude-haiku-5-5"),
             Self::OpenAi | Self::Gemini => None,
+        }
+    }
+
+    /// This program version's chat model for the Owner's own connection.
+    fn owner_model(self) -> Option<&'static str> {
+        match self {
+            Self::OpenAi => Some("gpt-6-luna"),
+            Self::Gemini => Some("gemini-3.5-flash-lite"),
+            Self::OpenRouter | Self::Anthropic => None,
         }
     }
 }
@@ -151,15 +181,49 @@ impl<'a> ChatModel<'a> {
         let Some(default) = provider.instance_model() else {
             return Ok(None);
         };
-        let model = override_model.unwrap_or(default);
-        if !is_model_id(model) {
-            return Err("settings.json's rakazo_model isn't a model id.".to_string());
-        }
+        let model = rakazo_model(override_model.unwrap_or(default))?;
         Ok(Some(Self {
             provider,
             key,
             model,
         }))
+    }
+}
+
+/// The chat model on the Owner's own Rakazo connection, which setup fills in through
+/// `models.connect`.
+#[derive(Debug, Clone, Copy)]
+pub struct OwnerModel<'a> {
+    pub provider: Provider,
+    pub key: &'a PastedKey,
+    pub model: &'a str,
+}
+
+impl<'a> OwnerModel<'a> {
+    /// `None` for a provider Rakazo takes from env. `override_model` is `settings.json`'s,
+    /// which wins over the program's default.
+    pub fn new(
+        provider: Provider,
+        key: &'a PastedKey,
+        override_model: Option<&'a str>,
+    ) -> Result<Option<Self>, String> {
+        let Some(default) = provider.owner_model() else {
+            return Ok(None);
+        };
+        let model = rakazo_model(override_model.unwrap_or(default))?;
+        Ok(Some(Self {
+            provider,
+            key,
+            model,
+        }))
+    }
+}
+
+fn rakazo_model(model: &str) -> Result<&str, String> {
+    if is_model_id(model) {
+        Ok(model)
+    } else {
+        Err("settings.json's rakazo_model isn't a model id.".to_string())
     }
 }
 
@@ -175,11 +239,11 @@ pub fn is_model_id(model: &str) -> bool {
 pub fn key_item(chosen: Option<Provider>) -> Option<String> {
     match chosen {
         None => Some(NO_KEY_ITEM.to_string()),
-        Some(provider @ (Provider::OpenAi | Provider::Gemini)) => Some(format!(
-            "Setup saved your {} key but doesn't connect it to Rakazo's chat yet: each person, the Owner first, connects a provider in Settings → Models.",
+        Some(provider) if provider.is_per_user() => Some(format!(
+            "Chat on your {} key is the Owner's alone: everyone else connects their own provider in Rakazo, under Settings → Models.",
             provider.name()
         )),
-        Some(Provider::OpenRouter | Provider::Anthropic) => None,
+        Some(_) => None,
     }
 }
 
@@ -633,6 +697,28 @@ mod tests {
     }
 
     #[test]
+    fn owner_models_are_for_openai_and_gemini_only() {
+        let key = key();
+        let default = |provider| {
+            OwnerModel::new(provider, &key, None)
+                .unwrap()
+                .map(|m| (m.provider.rakazo_id(), m.model))
+        };
+        assert_eq!(default(Provider::OpenAi), Some(("openai", "gpt-6-luna")));
+        assert_eq!(
+            default(Provider::Gemini),
+            Some(("google", "gemini-3.5-flash-lite"))
+        );
+        assert_eq!(default(Provider::OpenRouter), None);
+        assert_eq!(default(Provider::Anthropic), None);
+
+        let model = OwnerModel::new(Provider::OpenAi, &key, Some("gpt-6-sol"));
+        assert_eq!(model.unwrap().unwrap().model, "gpt-6-sol");
+        assert!(OwnerModel::new(Provider::Gemini, &key, Some("a model")).is_err());
+        assert!(!format!("{:?}", OwnerModel::new(Provider::OpenAi, &key, None)).contains(KEY));
+    }
+
+    #[test]
     fn choices_round_trip_as_lowercase_words() {
         for word in ["openrouter", "openai", "gemini", "anthropic", "none"] {
             let choice = Choice::parse(word).unwrap();
@@ -658,11 +744,13 @@ mod tests {
     #[test]
     fn only_a_blank_key_or_a_per_user_provider_adds_a_key_item() {
         assert!(key_item(None).unwrap().contains("Connect a model"));
-        assert!(
-            key_item(Some(Provider::Gemini))
-                .unwrap()
-                .contains("Settings → Models")
-        );
+        for provider in [Provider::OpenAi, Provider::Gemini] {
+            let item = key_item(Some(provider)).unwrap();
+            assert!(
+                item.contains("everyone else connects their own provider"),
+                "{item}"
+            );
+        }
         assert_eq!(key_item(Some(Provider::OpenRouter)), None);
         assert_eq!(key_item(Some(Provider::Anthropic)), None);
     }

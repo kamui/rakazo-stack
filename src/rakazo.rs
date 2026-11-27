@@ -5,17 +5,23 @@
 use std::io::Write;
 use std::path::Path;
 use std::process::{Output, Stdio};
+use std::time::Duration;
 
 use crate::answers::Password;
-use crate::database_settings::{DefaultSpace, Rakazo, Session};
+use crate::database_settings::{Connect, DefaultSpace, Rakazo, Session};
 use crate::docker::Docker;
 use crate::lemonade::{RELAY_URL, SPEECH_MODEL, TRANSCRIPTION_MODEL};
 use crate::memory::ConnectedSpace;
+use crate::model_provider::{OwnerModel, Provider};
 
 /// Upstream's defaults for `POSTGRES_USER` and `POSTGRES_DB`, which setup never changes.
 /// The official Postgres image trusts local socket connections, so no password is needed.
 const DB_OWNER: &str = "rakazo";
 const DB_NAME: &str = "rakazo";
+
+/// `models.connect` asks the Model provider about the key before it saves, and Rakazo
+/// v0.16.0 allows that 30 s for a key check and 15 s for a first request.
+const POST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Reads the Owner's email and password as JSON on stdin, then runs Rakazo's own
 /// `bootstrap-owner` with them in its environment, as upstream's docs do with `-e`.
@@ -69,7 +75,13 @@ impl LocalRakazo<'_> {
         body: &str,
     ) -> Result<String, String> {
         let url = format!("{}{path}", self.origin);
-        let mut request = self.agent.post(&url).content_type("application/json");
+        let mut request = self
+            .agent
+            .post(&url)
+            .config()
+            .timeout_global(Some(POST_TIMEOUT))
+            .build()
+            .content_type("application/json");
         if let Some(session) = session {
             request = request.header("authorization", format!("Bearer {}", session.token));
         }
@@ -132,6 +144,11 @@ impl Rakazo for LocalRakazo<'_> {
         self.exists(&voice_query(email))
     }
 
+    fn model_connection(&self, email: &str, provider: Provider) -> Result<Option<String>, String> {
+        let reply = self.query(&model_connection_query(email, provider))?;
+        Ok((!reply.is_empty()).then_some(reply))
+    }
+
     fn default_space(&self, email: &str) -> Result<Option<DefaultSpace>, String> {
         let reply = self.query(&default_space_query(email))?;
         if reply.is_empty() {
@@ -173,6 +190,22 @@ impl Rakazo for LocalRakazo<'_> {
             &voice_connect_body(),
         )
         .map(drop)
+    }
+
+    fn connect_model(
+        &self,
+        session: &Session,
+        model: OwnerModel,
+        connect: &Connect,
+    ) -> Result<(), String> {
+        self.post(
+            "/rpc/models/connect",
+            Some(session),
+            &[],
+            &connect_model_body(model, connect),
+        )
+        .map(drop)
+        .map_err(|err| without_key(err, model.key.expose()))
     }
 
     fn connect_memory(
@@ -228,6 +261,59 @@ fn voice_connect_body() -> String {
         }
     })
     .to_string()
+}
+
+/// The name setup gives its connection, so that a new key goes to it even when the user
+/// added another to the same provider.
+fn connection_label(provider: Provider) -> String {
+    format!("{} (rakazo-stack)", provider.rakazo_name())
+}
+
+fn model_connection_query(email: &str, provider: Provider) -> String {
+    let literal = email.replace('\'', "''");
+    let id = provider.rakazo_id();
+    let label = connection_label(provider);
+    format!(
+        "SET default_transaction_read_only = on;\n\
+         SELECT c.id FROM user_model_credentials c JOIN \"user\" u ON u.id = c.\"userId\" \
+         WHERE u.email = '{literal}' AND c.provider = '{id}' \
+         ORDER BY c.label = '{label}' DESC, c.\"updatedAt\" DESC, c.\"createdAt\" DESC, c.id DESC LIMIT 1;\n"
+    )
+}
+
+/// A null `credentialId` adds a connection; without the field Rakazo would overwrite the
+/// provider's newest. Rakazo keeps an updated connection's name.
+fn connect_model_body(model: OwnerModel, connect: &Connect) -> String {
+    let credential_id = match connect {
+        Connect::Add => None,
+        Connect::Update { id, .. } => Some(id),
+    };
+    serde_json::json!({
+        "json": {
+            "provider": model.provider.rakazo_id(),
+            "apiKey": model.key.expose(),
+            "modelId": model.model,
+            "label": connection_label(model.provider),
+            "credentialId": credential_id,
+            "makeDefault": connect.make_default(),
+            "scope": "account",
+        }
+    })
+    .to_string()
+}
+
+/// Rakazo hides a key it is sent from its error messages. This also withholds a message
+/// that quotes any four characters of it, as a provider's masked key would.
+fn without_key(message: String, key: &str) -> String {
+    let quoted = key
+        .as_bytes()
+        .windows(4.min(key.len()))
+        .any(|part| message.as_bytes().windows(part.len()).any(|w| w == part));
+    if quoted {
+        "Rakazo's reason isn't shown, because it quotes part of the key".to_string()
+    } else {
+        message
+    }
 }
 
 /// The Space Rakazo opens first for the user (its default, earliest joined), as JSON, and
@@ -296,6 +382,9 @@ mod tests {
     use super::*;
     use crate::checklist::Checklist;
     use crate::database_settings::{DatabaseSetting, Fillable, fill_in};
+    use crate::http::testing::stub;
+    use crate::platform::Platform;
+    use crate::secrets::PastedKey;
 
     #[test]
     fn quotes_the_email_in_the_owner_query() {
@@ -379,6 +468,87 @@ mod tests {
     }
 
     #[test]
+    fn the_model_connection_query_prefers_setups_own_and_quotes_the_email() {
+        let query = model_connection_query("o'wner@example.com", Provider::Gemini);
+        assert!(query.starts_with("SET default_transaction_read_only = on;"));
+        assert!(query.contains("FROM user_model_credentials c JOIN \"user\" u"));
+        assert!(query.contains("u.email = 'o''wner@example.com' AND c.provider = 'google'"));
+        assert!(query.contains("ORDER BY c.label = 'Google (rakazo-stack)' DESC"));
+    }
+
+    #[test]
+    fn the_model_connect_body_adds_or_updates_one_connection() {
+        let key = PastedKey::new("placeholder-key").unwrap();
+        let body = |provider, connect: &Connect| -> serde_json::Value {
+            let model = OwnerModel::new(provider, &key, None).unwrap().unwrap();
+            serde_json::from_str(&connect_model_body(model, connect)).unwrap()
+        };
+        assert_eq!(
+            body(Provider::OpenAi, &Connect::Add),
+            serde_json::json!({"json":{"provider":"openai","apiKey":"placeholder-key","modelId":"gpt-6-luna","label":"OpenAI (rakazo-stack)","credentialId":null,"makeDefault":true,"scope":"account"}})
+        );
+        let update = Connect::Update {
+            id: "placeholder-credential-id".into(),
+            make_default: false,
+        };
+        assert_eq!(
+            body(Provider::Gemini, &update),
+            serde_json::json!({"json":{"provider":"google","apiKey":"placeholder-key","modelId":"gemini-3.5-flash-lite","label":"Google (rakazo-stack)","credentialId":"placeholder-credential-id","makeDefault":false,"scope":"account"}})
+        );
+    }
+
+    // Schema-derived, not recorded (that takes a real key): oRPC's error shape with
+    // v0.16.0's sentence for a refused key.
+    const MODEL_KEY_REFUSED: &str = r#"{"json":{"defined":false,"code":"BAD_REQUEST","status":400,"message":"API key was rejected by the provider."}}"#;
+
+    // Made up: Rakazo relaying a provider's masked key, or the end of one.
+    const MASKED_KEY: &str = r#"{"json":{"message":"Incorrect API key provided: sk-pla***wxyz."}}"#;
+    const KEY_ENDING: &str = r#"{"json":{"message":"The key ending wxyz was refused."}}"#;
+
+    #[test]
+    fn a_failed_model_connect_posts_to_the_route_and_never_shows_part_of_the_key() {
+        const WITHHELD: &str = "Rakazo's reason isn't shown, because it quotes part of the key";
+        let key = PastedKey::new("sk-placeholder-0123456789wxyz").unwrap();
+        let docker = Docker::find(Platform::Linux).unwrap();
+        let agent = crate::http::agent();
+        for (reply, shown) in [
+            (
+                MODEL_KEY_REFUSED,
+                "API key was rejected by the provider. (HTTP 400)",
+            ),
+            (MASKED_KEY, WITHHELD),
+            (KEY_ENDING, WITHHELD),
+        ] {
+            let (origin, served) = stub(400, reply);
+            let rakazo = LocalRakazo {
+                docker: &docker,
+                folder: Path::new("."),
+                agent: &agent,
+                origin: &origin,
+            };
+            let model = OwnerModel::new(Provider::OpenAi, &key, None)
+                .unwrap()
+                .unwrap();
+            let session = Session {
+                token: "placeholder-token".into(),
+            };
+            let err = rakazo
+                .connect_model(&session, model, &Connect::Add)
+                .unwrap_err();
+            assert_eq!(err, shown);
+            let request = served.join().unwrap();
+            assert_eq!(request.line, "POST /rpc/models/connect HTTP/1.1");
+            assert!(
+                request
+                    .headers
+                    .iter()
+                    .any(|h| h.eq_ignore_ascii_case("authorization: Bearer placeholder-token"))
+            );
+            assert_eq!(request.body, connect_model_body(model, &Connect::Add));
+        }
+    }
+
+    #[test]
     fn reads_the_signed_token_from_a_sign_in_reply() {
         let reply = r#"{"redirect":false,"token":"placeholder.signature","user":{"email":"owner@example.com"}}"#;
         assert_eq!(
@@ -424,6 +594,12 @@ mod tests {
             unreachable!()
         }
         fn connect_voice(&self, _: &Session) -> Result<(), String> {
+            unreachable!()
+        }
+        fn model_connection(&self, _: &str, _: Provider) -> Result<Option<String>, String> {
+            unreachable!()
+        }
+        fn connect_model(&self, _: &Session, _: OwnerModel, _: &Connect) -> Result<(), String> {
             unreachable!()
         }
         fn default_space(&self, _: &str) -> Result<Option<DefaultSpace>, String> {
