@@ -132,7 +132,7 @@ Setup runs its own Tailscale, which joins your tailnet as a device of its own. I
 
 1. In the Tailscale admin console, create an auth key that is **not ephemeral**: Tailscale deletes ephemeral devices after they go offline. Setup refuses OAuth client secrets and keys it can tell are ephemeral, but it can't tell from every ephemeral key, so check this yourself. Don't add tags.
 2. Run `rakazo-stack setup`, choose `tailscale`, paste the key and pick a device name (the default is `rakazo`).
-3. Do what the Checklist says, once: in the admin console, enable MagicDNS and HTTPS certificates, and turn off key expiry for the device. Device names then appear in public Certificate Transparency logs. If you enable them after setup, run `docker compose restart tailscale` from `~/rakazo-stack`.
+3. Do what the Checklist says, once: in the admin console, enable MagicDNS and HTTPS certificates, and turn off key expiry for the device: on the **Machines** page, open the device's **…** menu and choose **Disable key expiry**. That's the device's own key, not the auth key from step 1, whose expiration only limits how long it can add devices. Device names then appear in public Certificate Transparency logs. If you enable them after setup, run `docker compose restart tailscale` from `~/rakazo-stack`. Each later run lists only the steps still left, and drops the item when they're all done.
 
 Once the device has joined, setup deletes the auth key: the device keeps its identity, so later runs need no key. If the name is taken, Tailscale picks another, such as `rakazo-1`, and setup uses it.
 

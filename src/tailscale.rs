@@ -18,6 +18,8 @@ pub struct Joined {
     pub dns_name: String,
     /// MagicDNS and HTTPS certificates are on, so Serve can get a certificate.
     pub https_ready: bool,
+    /// The day the device's key expires, `YYYY-MM-DD`. `None` once key expiry is off.
+    pub key_expires: Option<String>,
 }
 
 impl Joined {
@@ -54,6 +56,10 @@ struct Status {
 struct Node {
     #[serde(rename = "DNSName")]
     dns_name: String,
+    /// Left out when the key doesn't expire: Tailscale's `ipnstate.PeerStatus` sets it
+    /// only for a non-zero `tailcfg.Node.KeyExpiry`.
+    #[serde(rename = "KeyExpiry")]
+    key_expiry: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -67,11 +73,15 @@ fn read_status(json: &str) -> Result<Joined, NotJoined> {
     if status.backend_state != "Running" {
         return Err(NotJoined::State(status.backend_state));
     }
-    let dns_name = status
+    let node = status
         .node
-        .map(|node| node.dns_name.trim_end_matches('.').to_ascii_lowercase())
+        .ok_or_else(|| NotJoined::State("Running without a DNS name".to_string()))?;
+    let dns_name = Some(node.dns_name.trim_end_matches('.').to_ascii_lowercase())
         .filter(|name| name.contains('.') && is_hostname(name))
         .ok_or_else(|| NotJoined::State("Running without a DNS name".to_string()))?;
+    let key_expires = node
+        .key_expiry
+        .map(|time| time.split('T').next().unwrap_or(&time).to_string());
     let https_ready = status.tailnet.is_some_and(|tailnet| tailnet.magic_dns)
         && status
             .cert_domains
@@ -79,6 +89,7 @@ fn read_status(json: &str) -> Result<Joined, NotJoined> {
     Ok(Joined {
         dns_name,
         https_ready,
+        key_expires,
     })
 }
 
@@ -151,13 +162,21 @@ pub fn not_removed_item(compose: &str) -> String {
 
 pub fn no_https_item(url: &str, compose: &str) -> String {
     format!(
-        "{url} doesn't answer yet, because your tailnet has MagicDNS or HTTPS certificates off. Enable both, then run `{compose} restart {SERVICE}` from ~/rakazo-stack."
+        "{url} doesn't answer yet, because your tailnet has MagicDNS or HTTPS certificates off. Enable both in the Tailscale admin console (device names then appear in public Certificate Transparency logs), then run `{compose} restart {SERVICE}` from ~/rakazo-stack."
     )
 }
 
+/// For a device whose key still expires; once it's off, the console steps are all done.
+pub fn key_expiry_item(device_name: &str, expires: &str) -> String {
+    format!(
+        "Tailscale: in the admin console, turn off key expiry for the device `{device_name}`: on the Machines page, open its … menu and choose Disable key expiry. Until you do, it leaves your tailnet when its key expires on {expires}, and the Instance URL stops working."
+    )
+}
+
+/// For a device setup couldn't read, so it can't tell which console steps are done.
 pub fn console_item(device_name: &str) -> String {
     format!(
-        "Tailscale: in the admin console, enable MagicDNS and HTTPS certificates (device names then appear in public Certificate Transparency logs), and turn off key expiry for the device `{device_name}`."
+        "Tailscale: in the admin console, enable MagicDNS and HTTPS certificates (device names then appear in public Certificate Transparency logs), and turn off key expiry for the device `{device_name}` (on the Machines page, its … menu, Disable key expiry)."
     )
 }
 
@@ -212,6 +231,24 @@ mod tests {
         let no_magic_dns =
             running("rakazo").replace(r#""MagicDNSEnabled":true"#, r#""MagicDNSEnabled":false"#);
         assert!(!read_status(&no_magic_dns).unwrap().https_ready);
+    }
+
+    #[test]
+    fn reads_the_day_the_key_expires_and_none_once_it_doesnt() {
+        assert_eq!(read_status(&running("rakazo")).unwrap().key_expires, None);
+        let expiring = running("rakazo").replace(
+            r#""Online":true"#,
+            r#""Online":true,"KeyExpiry":"2027-05-26T19:22:44Z""#,
+        );
+        assert_eq!(
+            read_status(&expiring).unwrap().key_expires.as_deref(),
+            Some("2027-05-26")
+        );
+        let item = key_expiry_item("rakazo", "2027-05-26");
+        assert!(item.contains("turn off key expiry for the device `rakazo`"));
+        assert!(item.contains("2027-05-26"));
+        assert!(item.contains("Disable key expiry"));
+        assert!(!item.contains("MagicDNS"));
     }
 
     #[test]
