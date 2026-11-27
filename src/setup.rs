@@ -198,7 +198,7 @@ impl Setup<'_> {
         };
         let release = match &recorded {
             Some(settings) => settings.rakazo_release(),
-            None => resolve_rakazo(&agent, &log)?,
+            None => resolve_rakazo(&agent, &|line| log.say(line))?,
         };
         // Recorded the first time memory runs; only `update` moves it after that.
         let hindsight = match (&hindsight_model, recorded.as_ref()) {
@@ -206,7 +206,7 @@ impl Setup<'_> {
             (Some(_), Some(settings)) if settings.components.hindsight.is_some() => {
                 settings.hindsight_release()
             }
-            (Some(_), _) => Some(resolve_hindsight(&agent, &log)?),
+            (Some(_), _) => Some(resolve_hindsight(&agent, &|line| log.say(line))?),
         };
         let mut settings = recorded.unwrap_or_else(|| Settings::new(&release));
         settings.program_version = env!("CARGO_PKG_VERSION").to_string();
@@ -266,29 +266,7 @@ impl Setup<'_> {
             }
         }
 
-        let rakazo_file = envfile::rakazo_compose_file(&release.tag);
-        let fetched = self.folder.read(&rakazo_file)?.is_some();
-        // The compose file is written last, so its presence means the script beside it
-        // came from the same tag.
-        let script = match self
-            .folder
-            .read(computer_egress::SCRIPT)?
-            .filter(|_| fetched)
-        {
-            Some(script) => script,
-            None => github::fetch_file(
-                &agent,
-                RAKAZO_REPO,
-                &release.tag,
-                computer_egress::UPSTREAM_SCRIPT,
-            )?,
-        };
-        computer_egress::write_build_folder(self.folder, &script)?;
-        if !fetched {
-            let upstream =
-                github::fetch_file(&agent, RAKAZO_REPO, &release.tag, RAKAZO_COMPOSE_PATH)?;
-            self.folder.write(&rakazo_file, &upstream)?;
-        }
+        write_stack_files(&agent, self.folder, &release.tag)?;
         let stack = Stack {
             project: overrides::compose_project(),
             release,
@@ -302,11 +280,6 @@ impl Setup<'_> {
             .write("secrets.env", secrets.to_text().as_bytes())?;
         self.folder
             .write("settings.json", settings.to_json().as_bytes())?;
-        self.folder
-            .write(STACK_COMPOSE_FILE, STACK_LAYER.as_bytes())?;
-        for (path, contents) in lemonade::RELAY_BUILD_FOLDER {
-            self.folder.write_build_file(path, contents.as_bytes())?;
-        }
         self.folder
             .write(".env", stack.env(&settings, &secrets).as_bytes())?;
         self.folder.reapply_modes()?;
@@ -708,6 +681,33 @@ fn services_made_in_wsl(ps_output: &str) -> Vec<String> {
     services
 }
 
+/// Step 5's stack files: Rakazo's compose file and egress script from `tag`, the layer
+/// file and both build folders. `restore` writes them before its database step (spec §16).
+pub fn write_stack_files(
+    agent: &ureq::Agent,
+    folder: &InstanceFolder,
+    tag: &str,
+) -> Result<(), SetupError> {
+    let rakazo_file = envfile::rakazo_compose_file(tag);
+    let fetched = folder.read(&rakazo_file)?.is_some();
+    // The compose file is written last, so its presence means the script beside it
+    // came from the same tag.
+    let script = match folder.read(computer_egress::SCRIPT)?.filter(|_| fetched) {
+        Some(script) => script,
+        None => github::fetch_file(agent, RAKAZO_REPO, tag, computer_egress::UPSTREAM_SCRIPT)?,
+    };
+    computer_egress::write_build_folder(folder, &script)?;
+    folder.write(STACK_COMPOSE_FILE, STACK_LAYER.as_bytes())?;
+    for (path, contents) in lemonade::RELAY_BUILD_FOLDER {
+        folder.write_build_file(path, contents.as_bytes())?;
+    }
+    if !fetched {
+        let upstream = github::fetch_file(agent, RAKAZO_REPO, tag, RAKAZO_COMPOSE_PATH)?;
+        folder.write(&rakazo_file, &upstream)?;
+    }
+    Ok(())
+}
+
 /// A Rakazo model override names a model at one provider, so a new provider drops it
 /// (spec §8), with a note saying so.
 fn keep_override(
@@ -733,16 +733,22 @@ fn keep_override(
     }
 }
 
-fn resolve_rakazo(agent: &ureq::Agent, log: &RunLog) -> Result<RakazoRelease, SetupError> {
+pub fn resolve_rakazo(
+    agent: &ureq::Agent,
+    say: &dyn Fn(&str),
+) -> Result<RakazoRelease, SetupError> {
     let tags = github::fetch_stable_tags(agent, RAKAZO_REPO)?;
     let ghcr = Ghcr::new(agent);
     let resolution = resolve::choose_rakazo(&tags, |image, tag| {
         ghcr.digest(image, tag).map_err(|err| err.to_string())
     });
-    report(resolution, "Rakazo", RAKAZO_FLOOR, log)
+    report(resolution, "Rakazo", RAKAZO_FLOOR, say)
 }
 
-fn resolve_hindsight(agent: &ureq::Agent, log: &RunLog) -> Result<HindsightRelease, SetupError> {
+pub fn resolve_hindsight(
+    agent: &ureq::Agent,
+    say: &dyn Fn(&str),
+) -> Result<HindsightRelease, SetupError> {
     let tags = github::fetch_stable_tags(agent, HINDSIGHT_REPO)?;
     let ghcr = Ghcr::new(agent);
     let resolution = resolve::choose_hindsight(
@@ -753,25 +759,25 @@ fn resolve_hindsight(agent: &ureq::Agent, log: &RunLog) -> Result<HindsightRelea
                 .map_err(|err| err.to_string())
         },
     );
-    report(resolution, "Hindsight", HINDSIGHT_FLOOR, log)
+    report(resolution, "Hindsight", HINDSIGHT_FLOOR, say)
 }
 
 fn report<R>(
     resolution: Result<Resolution<R>, ResolveError>,
     component: &str,
     floor: &str,
-    log: &RunLog,
+    say: &dyn Fn(&str),
 ) -> Result<R, SetupError> {
     match resolution {
         Ok(resolution) => {
             for skipped in &resolution.skipped {
-                log.say(&skipped.describe());
+                say(&skipped.describe());
             }
             Ok(resolution.release)
         }
         Err(ResolveError::NothingAtFloor { skipped }) => {
             for skipped in &skipped {
-                log.say(&skipped.describe());
+                say(&skipped.describe());
             }
             Err(SetupError(format!(
                 "No {component} release at or above {floor} has published images yet. Try again later."

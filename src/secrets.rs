@@ -125,6 +125,15 @@ impl Secrets {
         }
     }
 
+    /// The first of Rakazo's generated secrets that isn't here. Its data can't be read
+    /// without them, so a missing one is never generated afresh by a restore.
+    pub fn missing_rakazo(&self) -> Option<&'static str> {
+        RAKAZO_SECRETS
+            .iter()
+            .map(|(key, _)| *key)
+            .find(|key| self.get(key).is_none())
+    }
+
     pub fn rakazo(&self) -> impl Iterator<Item = (&'static str, &str)> {
         self.present(&RAKAZO_SECRETS)
     }

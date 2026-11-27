@@ -61,6 +61,10 @@ pub fn below_floor(tag: &str) -> bool {
     below(RAKAZO_FLOOR, tag)
 }
 
+pub fn hindsight_below_floor(version: &str) -> bool {
+    below(HINDSIGHT_FLOOR, version)
+}
+
 fn below(floor: &str, tag: &str) -> bool {
     let floor = Version::parse(floor).expect("valid floor");
     Version::parse(tag).is_none_or(|v| v < floor)

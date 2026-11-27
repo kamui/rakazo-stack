@@ -17,6 +17,7 @@ use crate::backup_file::{self, EXTENSION, Part, Passphrase, Spool};
 use crate::docker::Docker;
 use crate::instance::InstanceFolder;
 use crate::memory;
+use crate::platform::Platform;
 use crate::resolve::HINDSIGHT_DB_TAG;
 use crate::runlog::utc_stamp;
 use crate::settings::{Components, Settings};
@@ -35,7 +36,7 @@ const APPDATA_EXCLUDED: [&str; 2] = ["staging", "mcp-packages"];
 /// Holds `hindsight-db`'s image while memory is off, when `.env` doesn't.
 const BACKUP_ENV: &str = ".backup.env";
 const WAIT_TIMEOUT_SECONDS: &str = "900";
-const FORMAT: u32 = 1;
+pub const FORMAT: u32 = 1;
 
 #[derive(Debug)]
 pub struct BackupError(pub String);
@@ -93,6 +94,8 @@ struct Manifest<'a> {
     format: u32,
     program_version: &'static str,
     created: &'a str,
+    /// Where it was made, so a restore on another OS knows to set up Lemonade afresh.
+    platform: &'static str,
     components: &'a Components,
 }
 
@@ -167,6 +170,7 @@ impl Backup<'_> {
             format: FORMAT,
             program_version: env!("CARGO_PKG_VERSION"),
             created: &stamp,
+            platform: Platform::detect().id(),
             components: &settings.components,
         };
         let manifest = serde_json::to_vec_pretty(&manifest)?;
@@ -533,7 +537,11 @@ impl Backup<'_> {
     }
 }
 
-fn checked(program: &str, args: &[&str], out: std::process::Output) -> Result<String, BackupError> {
+pub fn checked(
+    program: &str,
+    args: &[&str],
+    out: std::process::Output,
+) -> Result<String, BackupError> {
     if out.status.success() {
         return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
     }
@@ -545,7 +553,7 @@ fn checked(program: &str, args: &[&str], out: std::process::Output) -> Result<St
     )))
 }
 
-fn volume(project: &str, name: &str) -> String {
+pub fn volume(project: &str, name: &str) -> String {
     format!("{project}_{name}")
 }
 
@@ -583,7 +591,7 @@ fn stream_out(mut command: Command, out: &mut dyn Write) -> Result<(), String> {
 }
 
 /// Runs `command` with `input` on its standard input.
-fn stream_in(mut command: Command, input: &mut dyn Read) -> Result<(), String> {
+pub fn stream_in(mut command: Command, input: &mut dyn Read) -> Result<(), String> {
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

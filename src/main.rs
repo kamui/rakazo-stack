@@ -22,6 +22,7 @@ mod preflight;
 mod rakazo;
 mod registry;
 mod resolve;
+mod restore;
 mod runlog;
 mod secrets;
 mod settings;
@@ -64,7 +65,13 @@ enum Command {
         output: Option<PathBuf>,
     },
     /// Restore the Instance from a Backup.
-    Restore,
+    Restore {
+        /// The Backup file.
+        file: PathBuf,
+        /// Wipe the Instance here first, once you type its name.
+        #[arg(long)]
+        replace: bool,
+    },
 }
 
 impl Command {
@@ -73,7 +80,7 @@ impl Command {
             Self::Setup { .. } => "setup",
             Self::Update => "update",
             Self::Backup { .. } => "backup",
-            Self::Restore => "restore",
+            Self::Restore { .. } => "restore",
         }
     }
 
@@ -81,7 +88,7 @@ impl Command {
         match self {
             Self::Setup { .. } => Some(preflight::Command::Setup),
             Self::Update => Some(preflight::Command::Update),
-            Self::Restore => Some(preflight::Command::Restore),
+            Self::Restore { .. } => Some(preflight::Command::Restore),
             Self::Backup { .. } => None,
         }
     }
@@ -94,6 +101,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let folder = InstanceFolder::for_home(&home);
+    let folder_existed = folder.path().exists();
     let first_setup = !folder.has_settings();
     let _lock = match folder.lock() {
         Ok(lock) => lock,
@@ -139,6 +147,9 @@ fn main() -> ExitCode {
             eprintln!("{label}: {}", finding.message);
         }
         if findings.iter().any(|f| f.level == Level::Stop) {
+            if matches!(command, Command::Restore { .. }) && !folder_existed {
+                restore::remove_new_folder(&folder);
+            }
             return ExitCode::FAILURE;
         }
         eprintln!("Preflight passed.");
@@ -146,6 +157,15 @@ fn main() -> ExitCode {
 
     if let Command::Backup { output } = &command {
         return run_backup(platform, &home, &folder, output.as_deref());
+    }
+
+    if let Command::Restore { file, replace } = &command {
+        let replace = if *replace {
+            restore::Replace::Typed
+        } else {
+            restore::Replace::No
+        };
+        return run_restore(platform, &folder, file, replace, nftables, folder_existed);
     }
 
     if let Command::Setup { no_questions } = command {
@@ -168,6 +188,40 @@ fn main() -> ExitCode {
 
     eprintln!("rakazo-stack {}: not implemented yet", command.name());
     ExitCode::FAILURE
+}
+
+fn run_restore(
+    platform: Platform,
+    folder: &InstanceFolder,
+    file: &std::path::Path,
+    replace: restore::Replace,
+    nftables: bool,
+    folder_existed: bool,
+) -> ExitCode {
+    let docker = docker::Docker::find(platform).expect("preflight found Docker");
+    let mut terminal = answers::Terminal::attached().ok();
+    let restore = restore::Restore {
+        platform,
+        docker: &docker,
+        folder,
+        file,
+        replace,
+        nftables,
+    };
+    let env = |name: &str| std::env::var(name).ok();
+    match restore.run(
+        &env,
+        terminal.as_mut().map(|t| t as &mut dyn answers::Prompt),
+    ) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            if !err.touched && !folder_existed {
+                restore::remove_new_folder(folder);
+            }
+            eprintln!("Stop: {}", err.message);
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn run_backup(
