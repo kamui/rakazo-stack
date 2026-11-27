@@ -4,6 +4,7 @@
 use crate::access::{AUTH_KEY_NAME, Addresses};
 use crate::composio;
 use crate::lemonade::LemonadeRelease;
+use crate::lemond;
 use crate::memory::{self, MemoryEnv};
 use crate::model_provider::ChatModel;
 use crate::resolve::RakazoRelease;
@@ -69,8 +70,9 @@ pub fn render(inputs: &EnvInputs) -> String {
     for (key, value) in inputs.secrets.rakazo() {
         lines.push(format!("{key}={value}"));
     }
-    if let Some(lemonade) = inputs.lemonade {
-        lines.push(format!("LEMONADE_IMAGE={}", lemonade.image()));
+    match inputs.lemonade {
+        Some(lemonade) => lines.push(format!("LEMONADE_IMAGE={}", lemonade.image())),
+        None => lines.push(format!("LEMONADE_UPSTREAM={}", lemond::upstream())),
     }
     if let Some(key) = inputs.secrets.get(LEMONADE_API_KEY.0) {
         lines.push(format!("{}={key}", LEMONADE_API_KEY.0));
@@ -275,6 +277,34 @@ mod tests {
             ],
         );
         assert!(!text.contains("RAKAZO_WEB_BIND"), "web stays on 127.0.0.1");
+    }
+
+    #[test]
+    fn points_the_relay_at_native_lemond_on_macos() {
+        let linux = rendered(&Access::Localhost, None, None);
+        assert!(!linux.contains("LEMONADE_UPSTREAM"));
+        let mut secrets = Secrets::default();
+        secrets.fill_missing(|n| "ab".repeat(n));
+        let macos = render(&EnvInputs {
+            project: "rakazo-stack",
+            rakazo: &release(),
+            lemonade: None,
+            secrets: &secrets,
+            web_port: 5173,
+            chat: None,
+            addresses: &Access::Localhost.addresses(None, 5173),
+            tailscale: None,
+            memory: None,
+        });
+        assert_lines(
+            &macos,
+            &[
+                "COMPOSE_PROFILES=",
+                "LEMONADE_UPSTREAM=http://host.docker.internal:13315",
+            ],
+        );
+        assert!(!macos.contains("LEMONADE_IMAGE"));
+        assert!(macos.lines().any(|l| l.starts_with("LEMONADE_API_KEY=")));
     }
 
     #[test]

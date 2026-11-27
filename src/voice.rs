@@ -31,8 +31,13 @@ pub struct Warmed {
 
 /// The Checklist item for every voice failure that leaves the Owner without voice.
 pub fn not_set_up(reason: &str) -> String {
+    let logs = if cfg!(target_os = "macos") {
+        "`docker compose logs lemonade-relay` and logs/lemond.log in ~/rakazo-stack show"
+    } else {
+        "`docker compose logs lemonade lemonade-relay` in ~/rakazo-stack (`docker.exe compose …` on Windows) shows"
+    };
     format!(
-        "Voice isn't set up: {reason}. Run `rakazo-stack setup` again; if it keeps failing, `docker compose logs lemonade lemonade-relay` in ~/rakazo-stack (`docker.exe compose …` on Windows) shows why."
+        "Voice isn't set up: {reason}. Run `rakazo-stack setup` again; if it keeps failing, {logs} why."
     )
 }
 

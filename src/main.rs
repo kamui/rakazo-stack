@@ -11,6 +11,7 @@ mod github;
 mod http;
 mod instance;
 mod lemonade;
+mod lemond;
 mod memory;
 mod model_provider;
 mod overrides;

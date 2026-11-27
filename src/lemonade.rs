@@ -1,5 +1,6 @@
-//! Lemonade on Linux and Windows (spec §4, §9): which release runs, and the running
-//! `lemonade` container as setup's voice-model steps reach it.
+//! Lemonade (spec §4, §9): which release runs on Linux and Windows, and the running
+//! Lemonade as setup's voice-model steps reach it: the `lemonade` container, or on macOS
+//! the Instance's own `lemond`.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -8,6 +9,7 @@ use std::process::{Child, Stdio};
 use serde::Deserialize;
 
 use crate::docker::Docker;
+use crate::lemond::Lemond;
 use crate::voice::{Lemonade, Warmed};
 
 pub const LEMONADE_REPO: &str = "lemonade-sdk/lemonade";
@@ -16,7 +18,12 @@ pub const LEMONADE_IMAGE: &str = "lemonade-sdk/lemonade-server";
 /// The voice models setup pulls through the relay, and the relay's address in Rakazo's
 /// network (spec §9).
 pub const SPEECH_MODEL: &str = "kokoro-v1";
-pub const TRANSCRIPTION_MODEL: &str = "Whisper-Small";
+/// The program is built per OS, and only macOS runs Whisper on Metal (spec §9).
+pub const TRANSCRIPTION_MODEL: &str = if cfg!(target_os = "macos") {
+    "Whisper-Large-v3-Turbo"
+} else {
+    "Whisper-Small"
+};
 pub const RELAY_URL: &str = "http://lemonade-relay:13306/api/v1";
 /// How Rakazo names the relay when it asks for consent: its URL's origin.
 pub const RELAY_ORIGIN: &str = "http://lemonade-relay:13306";
@@ -92,6 +99,8 @@ pub fn describe_skipped(tag: &str) -> String {
 pub struct LocalLemonade<'a> {
     pub docker: &'a Docker,
     pub folder: &'a Path,
+    /// macOS: configured on the host. The models still go through the relay.
+    pub native: Option<&'a Lemond>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -162,6 +171,9 @@ fn finish(mut child: Child, service: &str) -> Result<(), String> {
 
 impl Lemonade for LocalLemonade<'_> {
     fn configure(&self) -> Result<(), String> {
+        if let Some(lemond) = self.native {
+            return lemond.configure();
+        }
         let mut args = vec!["lemonade", "config", "set"];
         args.extend(CONFIG);
         let mut child = self.spawn("lemonade", &args)?;
