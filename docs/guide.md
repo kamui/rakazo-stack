@@ -64,7 +64,7 @@ Setup checks your computer first. A problem it can't work around stops it before
 
 | Question | Notes |
 |---|---|
-| Owner email and password | Your Owner account in Rakazo. The password is 16–128 characters, typed twice. Setup never saves it. |
+| Owner email and password | Your Owner account in Rakazo. The password is 16–128 characters, typed twice; if the two don't match, setup asks again, up to three times. Setup never saves it. |
 | Model provider | `openrouter` (the default), `openai`, `gemini`, `anthropic` or `none`. |
 | The Model provider's API key | Blank is allowed. Setup checks the key with the provider before saving it, and never saves a key the provider rejects. |
 | Composio project API key | Blank is allowed, and leaves integrations off. Checked with Composio the same way. |
@@ -75,7 +75,7 @@ Keys and passwords are typed without being shown. Setup then starts everything, 
 
 ### Running setup again
 
-Run `rakazo-stack setup` again whenever you want to change an answer. It shows your earlier answers as defaults, and a saved key as "set, press Enter to keep, or paste a new one". It never prints a saved key, never changes the passwords it created, and never changes Component versions: only `rakazo-stack update` does that. When something in Rakazo still has to be set up, such as memory you turned on later, it asks once for the Owner password you already sign in with. A Component you switch on later, such as memory or Tailscale, starts at its newest release.
+Run `rakazo-stack setup` again whenever you want to change an answer. It shows your earlier answers as defaults, and a saved key as "set, press Enter to keep, or paste a new one". It never prints a saved key, never changes the passwords it created, and never changes Component versions: only `rakazo-stack update` does that. When something in Rakazo still has to be set up, such as memory you turned on later, it asks once for the Owner password you already sign in with. If you mistype it, setup says so and asks again, up to three times. A Component you switch on later, such as memory or Tailscale, starts at its newest release.
 
 If you removed something in Rakazo that setup had set up, such as your voice settings, setup asks whether to add it back.
 

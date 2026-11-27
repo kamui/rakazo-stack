@@ -24,6 +24,20 @@ pub const INSTANCE_URL_VAR: &str = "RAKAZO_STACK_INSTANCE_URL";
 const PASSWORD_MIN: usize = 16;
 const PASSWORD_MAX: usize = 128;
 
+/// How many times the wizard asks for the Owner password before setup gives up on it.
+pub const PASSWORD_TRIES: usize = 3;
+
+/// What setup does with the Owner password it asks for at fill-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasswordUse {
+    /// Creates the Owner with it.
+    NewOwner,
+    /// Signs in as the Owner with it.
+    SignIn,
+    /// Signs in again after Rakazo rejected the last one.
+    SignInAgain { tries_left: usize },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputError {
     NoTerminal,
@@ -96,6 +110,15 @@ impl fmt::Display for InputError {
     }
 }
 
+impl InputError {
+    fn is_mistyped_password(&self) -> bool {
+        matches!(
+            self,
+            Self::ShortPassword | Self::LongPassword | Self::PasswordsDiffer
+        )
+    }
+}
+
 /// The Owner password. It is never saved, logged or printed, so it has no `Display`
 /// and its `Debug` hides it.
 #[derive(Clone, PartialEq, Eq)]
@@ -164,8 +187,7 @@ pub trait FrontEnd {
     /// The password at step 2. The wizard asks only on a first run, which needs it.
     fn password_now(&mut self, first_run: bool) -> Result<Option<Password>, InputError>;
     /// The password when a database-only setting will be filled in and none was given.
-    /// `new_owner` is whether setup creates the Owner with it, or signs in as the Owner.
-    fn password_for_fill_in(&mut self, new_owner: bool) -> Result<Option<Password>, InputError>;
+    fn password_for_fill_in(&mut self, used: PasswordUse) -> Result<Option<Password>, InputError>;
     fn model_provider(&mut self, recorded: Option<Choice>) -> Result<Choice, InputError>;
     /// A new key for `provider`; `None` keeps the saved one, if there is one.
     fn model_key(
@@ -278,7 +300,7 @@ impl<F: Fn(&str) -> Option<String>> FrontEnd for NoQuestions<F> {
         self.var(OWNER_PASSWORD_VAR).map(Password::new).transpose()
     }
 
-    fn password_for_fill_in(&mut self, _new_owner: bool) -> Result<Option<Password>, InputError> {
+    fn password_for_fill_in(&mut self, _: PasswordUse) -> Result<Option<Password>, InputError> {
         Ok(None)
     }
 
@@ -400,8 +422,32 @@ impl<P: Prompt> Wizard<P> {
             .ok_or(InputError::InvalidKey(service))
     }
 
+    /// Calls `ask` until it gives a password, at most `tries` times. After a mistyped
+    /// password, the next question starts with what was wrong.
+    fn retrying(
+        &mut self,
+        tries: usize,
+        mut note: String,
+        ask: fn(&mut Self, &str) -> Result<Password, InputError>,
+    ) -> Result<Password, InputError> {
+        let mut tries_left = tries;
+        loop {
+            tries_left -= 1;
+            match ask(self, &note) {
+                Err(err) if tries_left > 0 && err.is_mistyped_password() => {
+                    note = try_again(&err.to_string(), tries_left);
+                }
+                result => return result,
+            }
+        }
+    }
+
     fn new_password(&mut self) -> Result<Password, InputError> {
-        let question = format!("Owner password (at least {PASSWORD_MIN} characters): ");
+        self.retrying(PASSWORD_TRIES, String::new(), Self::new_password_once)
+    }
+
+    fn new_password_once(&mut self, note: &str) -> Result<Password, InputError> {
+        let question = format!("{note}Owner password (at least {PASSWORD_MIN} characters): ");
         let first = self.prompt.secret(&question).ok_or(InputError::NoAnswer)?;
         let password = Password::new(first)?;
         let again = self
@@ -414,6 +460,28 @@ impl<P: Prompt> Wizard<P> {
             Err(InputError::PasswordsDiffer)
         }
     }
+
+    fn existing_password_once(&mut self, note: &str) -> Result<Password, InputError> {
+        let question =
+            format!("{note}Owner password (the one you already sign in to Rakazo with): ");
+        let answer = self.prompt.secret(&question).ok_or(InputError::NoAnswer)?;
+        Password::new(answer)
+    }
+}
+
+/// "The two Owner passwords don't match. Try again (2 tries left).", on its own line.
+fn try_again(reason: &str, tries_left: usize) -> String {
+    let mut chars = reason.chars();
+    let first: String = chars
+        .next()
+        .into_iter()
+        .flat_map(char::to_uppercase)
+        .collect();
+    let tries = if tries_left == 1 { "try" } else { "tries" };
+    format!(
+        "{first}{} Try again ({tries_left} {tries} left).\n",
+        chars.as_str()
+    )
 }
 
 impl<P: Prompt> FrontEnd for Wizard<P> {
@@ -437,15 +505,18 @@ impl<P: Prompt> FrontEnd for Wizard<P> {
         }
     }
 
-    fn password_for_fill_in(&mut self, new_owner: bool) -> Result<Option<Password>, InputError> {
-        if new_owner {
-            return self.new_password().map(Some);
-        }
-        let answer = self
-            .prompt
-            .secret("Owner password (the one you already sign in to Rakazo with): ")
-            .ok_or(InputError::NoAnswer)?;
-        Password::new(answer).map(Some)
+    fn password_for_fill_in(&mut self, used: PasswordUse) -> Result<Option<Password>, InputError> {
+        let password = match used {
+            PasswordUse::NewOwner => self.new_password(),
+            PasswordUse::SignIn => {
+                self.retrying(PASSWORD_TRIES, String::new(), Self::existing_password_once)
+            }
+            PasswordUse::SignInAgain { tries_left } => {
+                let note = try_again("Rakazo didn't accept that password.", tries_left);
+                self.retrying(1, note, Self::existing_password_once)
+            }
+        };
+        password.map(Some)
     }
 
     fn model_provider(&mut self, recorded: Option<Choice>) -> Result<Choice, InputError> {
@@ -802,7 +873,12 @@ mod tests {
         let answers = collect_owner(&mut front, Some("owner@example.com"), false).unwrap();
         assert_eq!(answers.owner_email, "owner@example.com");
         assert!(answers.owner_password.is_none());
-        assert!(front.password_for_fill_in(false).unwrap().is_none());
+        assert!(
+            front
+                .password_for_fill_in(PasswordUse::SignIn)
+                .unwrap()
+                .is_none()
+        );
         assert!(!front.add_back("Add it back?"));
 
         let mut changed = NoQuestions {
@@ -821,19 +897,50 @@ mod tests {
         assert_eq!(answers.owner_password.unwrap().expose(), GOOD);
         assert_eq!(wizard.prompt.asked.len(), 6);
 
+        const OTHER: &str = "correct-horse-battery-staple";
         let mut differ = Wizard {
-            prompt: Scripted::new(&["owner@example.com", GOOD, "correct-horse-battery-staple"]),
+            prompt: Scripted::new(&["owner@example.com", GOOD, OTHER, GOOD, OTHER, GOOD, OTHER]),
         };
         assert_eq!(
             collect_owner(&mut differ, None, true).unwrap_err(),
             InputError::PasswordsDiffer
         );
+        let short = "fifteen-chars!!";
         let mut short = Wizard {
-            prompt: Scripted::new(&["owner@example.com", "fifteen-chars!!"]),
+            prompt: Scripted::new(&["owner@example.com", short, short, short]),
         };
         assert_eq!(
             collect_owner(&mut short, None, true).unwrap_err(),
             InputError::ShortPassword
+        );
+    }
+
+    #[test]
+    fn a_mistyped_password_is_asked_again_up_to_three_times() {
+        let mut wizard = Wizard {
+            prompt: Scripted::new(&[
+                "owner@example.com",
+                GOOD,
+                "correct-horse-battery-staple",
+                "fifteen-chars!!",
+                GOOD,
+                GOOD,
+                "",
+                "",
+                "",
+            ]),
+        };
+        let answers = collect_owner(&mut wizard, None, true).unwrap();
+        assert_eq!(answers.owner_password.unwrap().expose(), GOOD);
+        assert_eq!(
+            wizard.prompt.asked[1..6],
+            [
+                "Owner password (at least 16 characters): ",
+                "Owner password again: ",
+                "The two Owner passwords don't match. Try again (2 tries left).\nOwner password (at least 16 characters): ",
+                "The Owner password needs at least 16 characters. Try again (1 try left).\nOwner password (at least 16 characters): ",
+                "Owner password again: ",
+            ]
         );
     }
 
@@ -862,7 +969,10 @@ mod tests {
         let mut existing = Wizard {
             prompt: Scripted::new(&[password]),
         };
-        let given = existing.password_for_fill_in(false).unwrap().unwrap();
+        let given = existing
+            .password_for_fill_in(PasswordUse::SignIn)
+            .unwrap()
+            .unwrap();
         assert_eq!(given.expose(), password);
         assert_eq!(
             existing.prompt.asked,
@@ -872,12 +982,29 @@ mod tests {
         let mut new_owner = Wizard {
             prompt: Scripted::new(&[password, password]),
         };
-        assert!(new_owner.password_for_fill_in(true).unwrap().is_some());
+        assert!(
+            new_owner
+                .password_for_fill_in(PasswordUse::NewOwner)
+                .unwrap()
+                .is_some()
+        );
         assert_eq!(
             new_owner.prompt.asked,
             [
                 "Owner password (at least 16 characters): ",
                 "Owner password again: ",
+            ]
+        );
+
+        let mut rejected = Wizard {
+            prompt: Scripted::new(&[password]),
+        };
+        let used = PasswordUse::SignInAgain { tries_left: 2 };
+        assert!(rejected.password_for_fill_in(used).unwrap().is_some());
+        assert_eq!(
+            rejected.prompt.asked,
+            [
+                "Rakazo didn't accept that password. Try again (2 tries left).\nOwner password (the one you already sign in to Rakazo with): "
             ]
         );
     }
