@@ -1586,3 +1586,162 @@ socket.on("timeout", () => { console.log("unreachable"); process.exit(0); });
         }
     }
 }
+
+const OTHERS_ITEM: &str = "key is the Owner's alone: everyone else connects their own provider in Rakazo, under Settings → Models.";
+const OPENAI_KEY: &str = "zq-0000-0000-0000-0000";
+const GEMINI_KEY: &str = "zq-1111-1111-1111-1111";
+
+/// No real key is needed. With the provider reachable, Rakazo has it refuse the
+/// placeholder. Then `api` is made unable to reach it, and Rakazo v0.16.0 saves a key it
+/// can't judge, which runs the whole fill-in. Setup's own key check is cut off as in the
+/// memory test, so each key is already in `secrets.env`.
+#[test]
+#[ignore = "needs Docker and pulls Rakazo's images; CI and the dev machine run it with --include-ignored"]
+fn openai_and_gemini_connect_the_owners_chat_through_models_connect() {
+    let instance = TestInstance::new();
+    let folder = instance.folder();
+    fs::create_dir_all(&folder).unwrap();
+    let save_key = |name: &str, key: &str| {
+        let path = folder.join("secrets.env");
+        let mut text = fs::read_to_string(&path).unwrap_or_default();
+        text.push_str(&format!("{name}={key}\n"));
+        fs::write(path, text).unwrap();
+    };
+    let run = |provider: &str, password: bool| -> Vec<String> {
+        let mut env = vec![
+            ("RAKAZO_STACK_OWNER_EMAIL", OWNER_EMAIL),
+            ("RAKAZO_STACK_MODEL_PROVIDER", provider),
+            ("RAKAZO_STACK_MEMORY", "off"),
+        ];
+        if password {
+            env.push(("RAKAZO_STACK_OWNER_PASSWORD", OWNER_PASSWORD));
+        }
+        env.extend(UNREACHABLE);
+        let out = instance.setup(&["--no-questions"], &env);
+        let output = text(&out);
+        assert!(out.status.success(), "{output}");
+        for key in [OPENAI_KEY, GEMINI_KEY, MODEL_KEY] {
+            assert!(!output.contains(key), "setup printed a key");
+        }
+        checklist(&out)
+    };
+    let settings = || -> serde_json::Value {
+        serde_json::from_slice(&fs::read(folder.join("settings.json")).unwrap()).unwrap()
+    };
+    let connections = || {
+        instance
+            .sql("SELECT provider || ' ' || label FROM user_model_credentials ORDER BY provider")
+    };
+    let main_model = || {
+        instance.sql(
+            "SELECT r.provider || ' ' || r.\"modelId\" || ' ' || c.label FROM user_model_role_choices r JOIN user_model_credentials c ON c.id = r.\"credentialId\" WHERE r.role = 'main' AND r.position = 0",
+        )
+    };
+    let failed = |items: &[String]| items.iter().any(|i| i.contains("wasn't connected"));
+    let switched = |items: &[String]| -> Vec<String> {
+        items
+            .iter()
+            .filter(|i| i.starts_with("You switched away from"))
+            .cloned()
+            .collect()
+    };
+
+    // The provider refuses the key: an item with the UI steps, and nothing saved.
+    save_key("OPENAI_API_KEY", OPENAI_KEY);
+    let items = run("openai", true);
+    assert!(
+        items.iter().any(
+            |item| item.starts_with("OpenAI chat wasn't connected for the Owner: ")
+                && item.contains("(HTTP 400)")
+                && item.contains("choose the model gpt-6-luna")
+        ),
+        "{items:?}"
+    );
+    assert!(items.iter().any(|i| i.ends_with(OTHERS_ITEM)), "{items:?}");
+    assert_eq!(connections(), "");
+    assert_eq!(
+        settings()["filled_by_setup"],
+        serde_json::json!(["owner", "voice"])
+    );
+
+    let blocked = instance.compose(&[
+        "exec",
+        "-T",
+        "-u",
+        "0",
+        "api",
+        "sh",
+        "-c",
+        "printf '%s api.openai.com generativelanguage.googleapis.com\\n' 127.0.0.1 ::1 >> /etc/hosts",
+    ]);
+    assert!(blocked.status.success(), "{}", text(&blocked));
+
+    let items = run("openai", true);
+    assert!(!failed(&items), "{items:?}");
+    assert_eq!(connections(), "openai OpenAI (rakazo-stack)");
+    assert_eq!(main_model(), "openai gpt-6-luna OpenAI (rakazo-stack)");
+    assert_eq!(
+        settings()["filled_by_setup"],
+        serde_json::json!(["owner", "voice", "model_connection"])
+    );
+
+    // Connected: left alone, without the password.
+    let saved =
+        "SELECT id || ' ' || \"secretId\" FROM user_model_credentials WHERE provider = 'openai'";
+    let before = instance.sql(saved);
+    let items = run("openai", false);
+    assert!(!failed(&items), "{items:?}");
+    assert_eq!(instance.sql(saved), before);
+
+    // A key still due, as a pasted new one leaves it: the same connection takes it.
+    let mut due = settings();
+    due["model_connection_due"] = "new_key".into();
+    fs::write(folder.join("settings.json"), due.to_string()).unwrap();
+    let items = run("openai", true);
+    assert!(!failed(&items), "{items:?}");
+    let after = instance.sql(saved);
+    let id = |row: &str| row.split(' ').next().unwrap().to_string();
+    assert_eq!(id(&after), id(&before));
+    assert_ne!(after, before, "the key was saved again");
+    assert_eq!(connections(), "openai OpenAI (rakazo-stack)");
+    assert!(settings()["model_connection_due"].is_null());
+
+    save_key("GEMINI_API_KEY", GEMINI_KEY);
+    let items = run("gemini", true);
+    assert!(!failed(&items), "{items:?}");
+    assert_eq!(
+        connections(),
+        "google Google (rakazo-stack)\nopenai OpenAI (rakazo-stack)"
+    );
+    assert_eq!(
+        main_model(),
+        "google gemini-3.5-flash-lite Google (rakazo-stack)"
+    );
+    assert_eq!(
+        switched(&items),
+        ["You switched away from OpenAI: remove the old connection in Settings → Models."]
+    );
+
+    save_key("OPENROUTER_API_KEY", MODEL_KEY);
+    let items = run("openrouter", false);
+    assert_eq!(
+        switched(&items),
+        ["OpenAI", "Gemini"].map(|name| format!(
+            "You switched away from {name}: remove the old connection in Settings → Models, because until then it stays the Owner's default."
+        ))
+    );
+    assert!(!items.iter().any(|i| i.ends_with(OTHERS_ITEM)), "{items:?}");
+
+    // Removed in Rakazo: the items go, and the providers are forgotten.
+    for provider in ["openai", "google"] {
+        let (status, reply) = rpc_as_owner(
+            &instance.origin(),
+            "/rpc/models/disconnect",
+            &serde_json::json!({ "json": { "provider": provider } }),
+        );
+        assert_eq!(status, 200, "{reply}");
+    }
+    let items = run("openrouter", false);
+    assert_eq!(switched(&items), Vec::<String>::new());
+    assert!(settings()["model_providers_left"].is_null());
+}

@@ -25,7 +25,7 @@ Words like **Self-hoster** (you, the person running it) and **Instance** (your c
 | [Tailscale](https://tailscale.com) | Lets your phone and other devices reach it securely, at an address like `https://rakazo.<your-tailnet>.ts.net` | Only if you choose it |
 | Bot-computer firewall | Stops bot computers from reaching your computer, your home network and your Tailscale devices | Always |
 
-Setup also creates your admin account in Rakazo and connects your voice to Lemonade. If you turned memory on, it connects that too. If any of these steps fails, it tells you how to finish it in Rakazo's settings.
+Setup also creates your admin account in Rakazo and connects your voice to Lemonade. With an OpenAI or Gemini key it connects chat for that account, and if you turned memory on, it connects that too. If any of these steps fails, it tells you how to finish it in Rakazo's settings.
 
 Integrations through [Composio](https://composio.dev) are optional. Setup asks for a Composio key, and you can leave it blank.
 

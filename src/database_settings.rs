@@ -1,6 +1,5 @@
 //! Database-only settings in Rakazo (spec §7): detect what exists, decide what to fill,
-//! fill it through Rakazo's own code paths, and record what was filled. The model
-//! connection plugs in here later.
+//! fill it through Rakazo's own code paths, and record what was filled.
 
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +7,8 @@ use crate::answers::{FrontEnd, OWNER_PASSWORD_VAR, Password};
 use crate::checklist::Checklist;
 use crate::lemonade::{RELAY_ORIGIN, RELAY_URL, SPEECH_MODEL, TRANSCRIPTION_MODEL};
 use crate::memory::{CONNECT_STEPS, ConnectedSpace};
+use crate::model_provider::{Choice, OwnerModel, Provider};
+use crate::settings::Settings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -17,6 +18,63 @@ pub enum DatabaseSetting {
     Voice,
     /// The default Space's memory connection.
     Memory,
+    /// The Owner's connection to the chosen Model provider, for OpenAI and Gemini.
+    ModelConnection,
+}
+
+/// Why the Owner's model connection still has to take the saved key. It stays in
+/// `settings.json` until `models.connect` succeeds, so a failed fill-in is tried again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Due {
+    NewKey,
+    /// The Instance switched to this provider, so its connection becomes the main model.
+    NewProvider,
+}
+
+/// How `models.connect` saves the key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Connect {
+    /// A new connection, which becomes the Owner's main model.
+    Add,
+    /// The key of the connection with this id.
+    Update { id: String, make_default: bool },
+}
+
+impl Connect {
+    pub fn make_default(&self) -> bool {
+        match self {
+            Self::Add => true,
+            Self::Update { make_default, .. } => *make_default,
+        }
+    }
+}
+
+/// Notes what this run's Model provider and key mean for the Owner's connections. Call it
+/// before `settings.model_provider` changes. `new_key` is whether the key differs from the
+/// saved one.
+pub fn note_model_change(settings: &mut Settings, chosen: Choice, new_key: bool) {
+    let previous = settings.model_provider.filter(|was| *was != chosen);
+    if let Some(was) = previous {
+        // A connection to another provider is a different setting, never filled so far.
+        settings
+            .filled_by_setup
+            .retain(|setting| *setting != DatabaseSetting::ModelConnection);
+        if was.0.is_some_and(Provider::is_per_user) && !settings.model_providers_left.contains(&was)
+        {
+            settings.model_providers_left.push(was);
+        }
+    }
+    settings.model_providers_left.retain(|left| *left != chosen);
+    settings.model_connection_due = if !chosen.0.is_some_and(Provider::is_per_user) {
+        None
+    } else if previous.is_some() {
+        Some(Due::NewProvider)
+    } else if new_key {
+        settings.model_connection_due.or(Some(Due::NewKey))
+    } else {
+        settings.model_connection_due
+    };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +119,9 @@ pub trait Rakazo {
     fn owner_exists(&self, email: &str) -> Result<bool, String>;
     /// Read-only: any voice credential for the user with this email.
     fn voice_exists(&self, email: &str) -> Result<bool, String>;
+    /// Read-only: the id of the user's connection to the provider, setup's own first, or
+    /// else the newest.
+    fn model_connection(&self, email: &str, provider: Provider) -> Result<Option<String>, String>;
     /// Read-only. `None` when the user has no default Space.
     fn default_space(&self, email: &str) -> Result<Option<DefaultSpace>, String>;
     /// Read-only: every Space connected to Hindsight, whoever connected it.
@@ -69,6 +130,13 @@ pub trait Rakazo {
     fn sign_in(&self, email: &str, password: &Password) -> Result<Session, String>;
     /// `POST /rpc/voice/connect` with the relay, `kokoro-v1` and `Whisper-Small`.
     fn connect_voice(&self, session: &Session) -> Result<(), String>;
+    /// `POST /rpc/models/connect` with the key.
+    fn connect_model(
+        &self,
+        session: &Session,
+        model: OwnerModel,
+        connect: &Connect,
+    ) -> Result<(), String>;
     /// Connects the Space to Hindsight with the tenant key, leaving Rakazo's memory
     /// toggles at their defaults.
     fn connect_memory(
@@ -80,13 +148,22 @@ pub trait Rakazo {
     fn sign_out(&self, session: Session) -> Result<(), String>;
 }
 
+/// The Owner's model connection, when the Model provider is one Rakazo connects per user.
+#[derive(Debug)]
+pub struct ModelFill<'a> {
+    pub model: OwnerModel<'a>,
+    /// Cleared once the connection has the key.
+    pub due: &'a mut Option<Due>,
+}
+
 /// The settings this run may fill besides the Owner.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Default)]
 pub struct Fillable<'a> {
     /// The voice models are there, so voice is a setting to fill.
     pub voice: bool,
     /// Hindsight's tenant key, when memory is on.
     pub memory: Option<&'a str>,
+    pub model: Option<ModelFill<'a>>,
 }
 
 /// Steps 2–12 of the sequence. Every failure becomes a Checklist item; none stops setup.
@@ -96,7 +173,7 @@ pub fn fill_in(
     front: &mut dyn FrontEnd,
     email: &str,
     password: Option<Password>,
-    fillable: Fillable,
+    mut fillable: Fillable,
     filled: &mut Vec<DatabaseSetting>,
     checklist: &mut Checklist,
 ) {
@@ -138,13 +215,20 @@ pub fn fill_in(
         voice,
         "Your voice settings were removed in Rakazo. Add them back?",
     );
+    let model = fillable.model.as_ref().map(|fill| fill.model);
+    let connect = match &fillable.model {
+        // A new Owner account has no model connection either.
+        Some(_) if fill_owner => Some(Connect::Add),
+        Some(fill) => model_to_connect(rakazo, front, email, fill, filled, checklist),
+        None => None,
+    };
     // A new Owner's default Space appears with the Owner, so it is looked up afterwards.
     let mut memory_space = match fillable.memory {
         Some(_) if owner_present => memory_to_fill(rakazo, front, email, filled, checklist),
         _ => None,
     };
     let fill_memory = memory_space.is_some() || (fill_owner && fillable.memory.is_some());
-    if !fill_owner && !fill_voice && !fill_memory {
+    if !fill_owner && !fill_voice && !fill_memory && connect.is_none() {
         return;
     }
 
@@ -154,6 +238,9 @@ pub fn fill_in(
         }
         if fill_voice {
             checklist.add(voice_not_connected(reason));
+        }
+        if let (Some(model), Some(connect)) = (model, &connect) {
+            checklist.add(model_not_connected(model, connect, reason));
         }
         if fill_memory {
             checklist.add(memory_not_connected(reason));
@@ -196,6 +283,9 @@ pub fn fill_in(
             if fill_voice {
                 checklist.add(voice_not_connected(&reason));
             }
+            if let (Some(model), Some(connect)) = (model, &connect) {
+                checklist.add(model_not_connected(model, connect, &reason));
+            }
             if memory_space.is_some() {
                 checklist.add(memory_not_connected(&reason));
             }
@@ -209,6 +299,15 @@ pub fn fill_in(
                 checklist.add(voice_consent());
             }
             Err(err) => checklist.add(voice_not_connected(&err)),
+        }
+    }
+    if let (Some(fill), Some(connect)) = (fillable.model.as_mut(), connect) {
+        match rakazo.connect_model(&session, fill.model, &connect) {
+            Ok(()) => {
+                record(filled, DatabaseSetting::ModelConnection);
+                *fill.due = None;
+            }
+            Err(err) => checklist.add(model_not_connected(fill.model, &connect, &err)),
         }
     }
     if let (Some(space), Some(key)) = (memory_space, fillable.memory) {
@@ -235,6 +334,41 @@ fn wanted(front: &mut dyn FrontEnd, decision: Decision, question: &str) -> bool 
 fn record(filled: &mut Vec<DatabaseSetting>, setting: DatabaseSetting) {
     if !filled.contains(&setting) {
         filled.push(setting);
+    }
+}
+
+/// How the Owner's model connection will be saved, if it will be.
+fn model_to_connect(
+    rakazo: &dyn Rakazo,
+    front: &mut dyn FrontEnd,
+    email: &str,
+    fill: &ModelFill,
+    filled: &[DatabaseSetting],
+    checklist: &mut Checklist,
+) -> Option<Connect> {
+    let provider = fill.model.provider;
+    match rakazo.model_connection(email, provider) {
+        Ok(Some(id)) => fill.due.map(|due| Connect::Update {
+            id,
+            make_default: due == Due::NewProvider,
+        }),
+        Ok(None) => wanted(
+            front,
+            decide(false, filled.contains(&DatabaseSetting::ModelConnection)),
+            &format!(
+                "Your {} model connection was removed in Rakazo. Add it back?",
+                provider.name()
+            ),
+        )
+        .then_some(Connect::Add),
+        Err(err) => {
+            checklist.add(model_not_connected(
+                fill.model,
+                &Connect::Add,
+                &format!("setup couldn't check Rakazo's database for it ({err})"),
+            ));
+            None
+        }
     }
 }
 
@@ -283,6 +417,59 @@ pub fn still_connected(rakazo: &dyn Rakazo, checklist: &mut Checklist) {
     }
 }
 
+/// One item for each provider the Instance left whose connection the Owner still has
+/// (spec §7). A provider without one is forgotten.
+pub fn old_connections(
+    rakazo: &dyn Rakazo,
+    email: &str,
+    chosen: Choice,
+    left: &mut Vec<Choice>,
+    checklist: &mut Checklist,
+) {
+    left.retain(|choice| {
+        let Some(provider) = choice.0 else {
+            return false;
+        };
+        let name = provider.name();
+        match rakazo.model_connection(email, provider) {
+            Ok(None) => false,
+            Ok(Some(_)) => {
+                // A per-user provider's new connection takes over as the main model.
+                let why = if chosen.0.is_some_and(Provider::is_per_user) {
+                    ""
+                } else {
+                    ", because until then it stays the Owner's default"
+                };
+                checklist.add(format!(
+                    "You switched away from {name}: remove the old connection in Settings → Models{why}."
+                ));
+                true
+            }
+            Err(err) => {
+                checklist.add(format!(
+                    "Setup couldn't check whether the Owner still has a {name} connection: {err}. If so, remove it in Settings → Models."
+                ));
+                true
+            }
+        }
+    });
+}
+
+fn model_not_connected(model: OwnerModel, connect: &Connect, reason: &str) -> String {
+    let name = model.provider.name();
+    let in_rakazo = model.provider.rakazo_name();
+    if connect.make_default() {
+        format!(
+            "{name} chat wasn't connected for the Owner: {reason}. Run `rakazo-stack setup` again, or in Rakazo open Settings → Models, connect {in_rakazo} with your API key and choose the model {}.",
+            model.model
+        )
+    } else {
+        format!(
+            "The Owner's {name} connection didn't get the new key: {reason}. Run `rakazo-stack setup` again, or in Rakazo open Settings → Models and enter the key on the {in_rakazo} connection."
+        )
+    }
+}
+
 fn owner_not_created(reason: &str) -> String {
     format!(
         "The Owner account wasn't created: {reason}. Run `rakazo-stack setup` again; if it keeps failing, create it as Rakazo's docs describe under \"Installations without email\"."
@@ -314,7 +501,6 @@ mod tests {
     use super::*;
     use crate::access::{AccessMode, AuthKey, AuthKeyState};
     use crate::answers::{InputError, Prompt, Wizard};
-    use crate::model_provider::{Choice, Provider};
     use crate::secrets::PastedKey;
     use std::cell::RefCell;
 
@@ -334,6 +520,10 @@ mod tests {
         sign_in_error: Option<String>,
         connect_error: Option<String>,
         memory_error: Option<String>,
+        /// The providers the Owner has a connection to.
+        connections: RefCell<Vec<Provider>>,
+        model_error: Option<String>,
+        connects: RefCell<Vec<(&'static str, String, Connect)>>,
         calls: RefCell<Vec<&'static str>>,
     }
 
@@ -353,6 +543,38 @@ mod tests {
                 Some(err) => Err(err.clone()),
                 None => {
                     *self.voice.borrow_mut() = true;
+                    Ok(())
+                }
+            }
+        }
+        fn model_connection(&self, _: &str, provider: Provider) -> Result<Option<String>, String> {
+            self.calls.borrow_mut().push("detect model");
+            Ok(self
+                .connections
+                .borrow()
+                .contains(&provider)
+                .then(|| format!("{}-connection", provider.id())))
+        }
+        fn connect_model(
+            &self,
+            session: &Session,
+            model: OwnerModel,
+            connect: &Connect,
+        ) -> Result<(), String> {
+            assert_eq!(session.token, "placeholder-token");
+            self.calls.borrow_mut().push("connect model");
+            self.connects.borrow_mut().push((
+                model.provider.id(),
+                model.model.to_string(),
+                connect.clone(),
+            ));
+            match &self.model_error {
+                Some(err) => Err(err.clone()),
+                None => {
+                    let mut connections = self.connections.borrow_mut();
+                    if !connections.contains(&model.provider) {
+                        connections.push(model.provider);
+                    }
                     Ok(())
                 }
             }
@@ -659,7 +881,7 @@ mod tests {
         let mut checklist = Checklist::default();
         let fillable = Fillable {
             voice: true,
-            memory: None,
+            ..Default::default()
         };
         fill_in(
             rakazo,
@@ -831,8 +1053,8 @@ mod tests {
             EMAIL,
             password,
             Fillable {
-                voice: false,
                 memory: Some(TENANT_KEY),
+                ..Default::default()
             },
             filled,
             &mut checklist,
@@ -976,5 +1198,275 @@ mod tests {
         assert_eq!(items.len(), 3);
         assert!(items[0].contains("\"Personal\", connected by owner@example.com,"));
         assert!(items[1].contains("\"Team\" is still connected"));
+    }
+
+    fn fill_model(
+        rakazo: &FakeRakazo,
+        front: &mut dyn FrontEnd,
+        password: Option<Password>,
+        provider: Provider,
+        due: &mut Option<Due>,
+        filled: &mut Vec<DatabaseSetting>,
+    ) -> Vec<String> {
+        let key = PastedKey::new("placeholder-key").unwrap();
+        let model = OwnerModel::new(provider, &key, None).unwrap().unwrap();
+        let mut checklist = Checklist::default();
+        fill_in(
+            rakazo,
+            front,
+            EMAIL,
+            password,
+            Fillable {
+                model: Some(ModelFill { model, due }),
+                ..Default::default()
+            },
+            filled,
+            &mut checklist,
+        );
+        checklist.items().map(str::to_string).collect()
+    }
+
+    fn with_owner() -> FakeRakazo {
+        FakeRakazo {
+            owner: RefCell::new(true),
+            ..Default::default()
+        }
+    }
+
+    fn scripted() -> crate::answers::NoQuestions<fn(&str) -> Option<String>> {
+        crate::answers::NoQuestions { env: |_| None }
+    }
+
+    #[test]
+    fn a_first_run_adds_the_new_owners_connection_as_the_main_model() {
+        let rakazo = FakeRakazo::default();
+        let (mut filled, mut due) = (Vec::new(), Some(Due::NewKey));
+        let items = fill_model(
+            &rakazo,
+            &mut Silent,
+            Some(password()),
+            Provider::Gemini,
+            &mut due,
+            &mut filled,
+        );
+        assert_eq!(
+            *rakazo.calls.borrow(),
+            [
+                "detect",
+                "bootstrap-owner",
+                "sign-in",
+                "connect model",
+                "sign-out"
+            ]
+        );
+        assert_eq!(
+            *rakazo.connects.borrow(),
+            [("gemini", "gemini-3.5-flash-lite".to_string(), Connect::Add)]
+        );
+        assert_eq!(
+            filled,
+            [DatabaseSetting::Owner, DatabaseSetting::ModelConnection]
+        );
+        assert_eq!(due, None);
+        assert_eq!(items.len(), 1, "only the standing item: {items:?}");
+    }
+
+    #[test]
+    fn a_connection_that_has_the_key_is_left_alone_without_a_password() {
+        let rakazo = with_owner();
+        rakazo.connections.borrow_mut().push(Provider::OpenAi);
+        for mut filled in [vec![], vec![DatabaseSetting::ModelConnection]] {
+            rakazo.calls.borrow_mut().clear();
+            let before = filled.clone();
+            fill_model(
+                &rakazo,
+                &mut Silent,
+                None,
+                Provider::OpenAi,
+                &mut None,
+                &mut filled,
+            );
+            assert_eq!(*rakazo.calls.borrow(), ["detect", "detect model"]);
+            assert_eq!(filled, before);
+        }
+    }
+
+    #[test]
+    fn a_new_key_updates_the_connection_and_only_a_new_provider_makes_it_the_main_model() {
+        for (reason, make_default) in [(Due::NewKey, false), (Due::NewProvider, true)] {
+            let rakazo = with_owner();
+            rakazo.connections.borrow_mut().push(Provider::OpenAi);
+            let (mut filled, mut due) = (Vec::new(), Some(reason));
+            fill_model(
+                &rakazo,
+                &mut Silent,
+                Some(password()),
+                Provider::OpenAi,
+                &mut due,
+                &mut filled,
+            );
+            let update = Connect::Update {
+                id: "openai-connection".into(),
+                make_default,
+            };
+            assert_eq!(
+                *rakazo.connects.borrow(),
+                [("openai", "gpt-6-luna".to_string(), update)]
+            );
+            assert_eq!(due, None);
+            assert_eq!(filled, [DatabaseSetting::ModelConnection]);
+        }
+    }
+
+    #[test]
+    fn a_failed_connect_stays_due_and_gives_the_ui_steps() {
+        let rakazo = FakeRakazo {
+            model_error: Some("Your OpenAI rejected the API key. (HTTP 400)".into()),
+            ..with_owner()
+        };
+        let (mut filled, mut due) = (Vec::new(), Some(Due::NewProvider));
+        let items = fill_model(
+            &rakazo,
+            &mut Silent,
+            Some(password()),
+            Provider::OpenAi,
+            &mut due,
+            &mut filled,
+        );
+        assert!(filled.is_empty());
+        assert_eq!(due, Some(Due::NewProvider));
+        assert_eq!(rakazo.calls.borrow().last().unwrap(), &"sign-out");
+        assert_eq!(
+            items[0],
+            "OpenAI chat wasn't connected for the Owner: Your OpenAI rejected the API key. (HTTP 400). Run `rakazo-stack setup` again, or in Rakazo open Settings → Models, connect OpenAI with your API key and choose the model gpt-6-luna."
+        );
+
+        rakazo.connections.borrow_mut().push(Provider::OpenAi);
+        let mut due = Some(Due::NewKey);
+        let items = fill_model(
+            &rakazo,
+            &mut scripted(),
+            None,
+            Provider::OpenAi,
+            &mut due,
+            &mut filled,
+        );
+        assert_eq!(due, Some(Due::NewKey));
+        assert!(
+            items[0].starts_with("The Owner's OpenAI connection didn't get the new key: no Owner password was given (set RAKAZO_STACK_OWNER_PASSWORD).")
+                && items[0].contains("enter the key on the OpenAI connection"),
+            "{items:?}"
+        );
+    }
+
+    #[test]
+    fn a_removed_connection_comes_back_only_when_the_wizard_says_yes() {
+        let rakazo = with_owner();
+        let filled = vec![DatabaseSetting::ModelConnection];
+        fill_model(
+            &rakazo,
+            &mut scripted(),
+            Some(password()),
+            Provider::Gemini,
+            &mut Some(Due::NewKey),
+            &mut filled.clone(),
+        );
+        assert_eq!(*rakazo.calls.borrow(), ["detect", "detect model"]);
+
+        let mut yes = Wizard {
+            prompt: Answers(vec!["y", "correct-horse-battery", "correct-horse-battery"]),
+        };
+        fill_model(
+            &rakazo,
+            &mut yes,
+            None,
+            Provider::Gemini,
+            &mut None,
+            &mut filled.clone(),
+        );
+        assert_eq!(rakazo.connects.borrow()[0].2, Connect::Add);
+    }
+
+    fn settings_on(provider: Option<Provider>) -> Settings {
+        let mut settings = Settings::new(&crate::resolve::RakazoRelease {
+            tag: "v0.16.0".into(),
+            app_digest: "sha256:aaa".into(),
+            computer_digest: "sha256:ccc".into(),
+        });
+        settings.model_provider = provider.map(|p| Choice(Some(p)));
+        settings
+    }
+
+    /// What setup does on each run: note the change, then record the new choice.
+    fn choose(settings: &mut Settings, provider: Option<Provider>, new_key: bool) {
+        note_model_change(settings, Choice(provider), new_key);
+        settings.model_provider = Some(Choice(provider));
+    }
+
+    #[test]
+    fn a_new_key_or_provider_is_due_until_it_is_connected() {
+        let mut settings = settings_on(None);
+        choose(&mut settings, Some(Provider::OpenAi), true);
+        assert_eq!(settings.model_connection_due, Some(Due::NewKey));
+        settings.model_connection_due = None;
+        choose(&mut settings, Some(Provider::OpenAi), false);
+        assert_eq!(settings.model_connection_due, None);
+
+        settings.filled_by_setup = vec![DatabaseSetting::Owner, DatabaseSetting::ModelConnection];
+        choose(&mut settings, Some(Provider::Gemini), true);
+        assert_eq!(settings.model_connection_due, Some(Due::NewProvider));
+        assert_eq!(settings.filled_by_setup, [DatabaseSetting::Owner]);
+        // A switch that hasn't connected yet still makes it the main model later.
+        choose(&mut settings, Some(Provider::Gemini), true);
+        assert_eq!(settings.model_connection_due, Some(Due::NewProvider));
+        choose(&mut settings, Some(Provider::Gemini), false);
+        assert_eq!(settings.model_connection_due, Some(Due::NewProvider));
+
+        choose(&mut settings, Some(Provider::OpenRouter), true);
+        assert_eq!(settings.model_connection_due, None);
+    }
+
+    #[test]
+    fn providers_the_instance_left_are_remembered_until_chosen_again() {
+        let openai = Choice(Some(Provider::OpenAi));
+        let gemini = Choice(Some(Provider::Gemini));
+        let mut settings = settings_on(Some(Provider::OpenRouter));
+        choose(&mut settings, Some(Provider::OpenAi), true);
+        assert!(settings.model_providers_left.is_empty());
+        choose(&mut settings, Some(Provider::Gemini), true);
+        assert_eq!(settings.model_providers_left, [openai]);
+        choose(&mut settings, None, false);
+        assert_eq!(settings.model_providers_left, [openai, gemini]);
+        choose(&mut settings, Some(Provider::OpenAi), true);
+        assert_eq!(settings.model_providers_left, [gemini]);
+    }
+
+    #[test]
+    fn switching_away_lists_the_old_connection_until_it_is_removed() {
+        let openai = Choice(Some(Provider::OpenAi));
+        let check = |rakazo: &FakeRakazo, chosen, left: &mut Vec<Choice>| {
+            let mut checklist = Checklist::default();
+            old_connections(rakazo, EMAIL, chosen, left, &mut checklist);
+            checklist.items().map(str::to_string).collect::<Vec<_>>()
+        };
+        let rakazo = with_owner();
+        rakazo.connections.borrow_mut().push(Provider::OpenAi);
+        let mut left = vec![openai];
+        let items = check(&rakazo, Choice(Some(Provider::OpenRouter)), &mut left);
+        assert_eq!(
+            items[0],
+            "You switched away from OpenAI: remove the old connection in Settings → Models, because until then it stays the Owner's default."
+        );
+        let items = check(&rakazo, Choice(Some(Provider::Gemini)), &mut left);
+        assert_eq!(
+            items[0],
+            "You switched away from OpenAI: remove the old connection in Settings → Models."
+        );
+        assert_eq!(left, [openai]);
+
+        rakazo.connections.borrow_mut().clear();
+        let items = check(&rakazo, Choice(None), &mut left);
+        assert_eq!(items.len(), 1, "only the standing item: {items:?}");
+        assert!(left.is_empty());
     }
 }

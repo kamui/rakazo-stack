@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::access::{AccessMode, DEFAULT_DEVICE_NAME};
-use crate::database_settings::DatabaseSetting;
+use crate::database_settings::{DatabaseSetting, Due};
 use crate::lemonade::LemonadeRelease;
 use crate::memory::Memory;
 use crate::model_provider::Choice;
@@ -34,6 +34,12 @@ pub struct Settings {
     /// Rakazo" from "never set" (spec §7).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filled_by_setup: Vec<DatabaseSetting>,
+    /// Set while the Owner's OpenAI or Gemini connection still has to take the saved key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_connection_due: Option<Due>,
+    /// OpenAI or Gemini after a switch away, until the Owner's old connection is gone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_providers_left: Vec<Choice>,
     #[serde(default)]
     pub access: AccessMode,
     /// The requested name until Tailscale assigns one, then the assigned name.
@@ -104,6 +110,8 @@ impl Settings {
             memory: None,
             memory_model: None,
             filled_by_setup: Vec::new(),
+            model_connection_due: None,
+            model_providers_left: Vec::new(),
             access: AccessMode::default(),
             tailscale_device_name: None,
             tailscale_dns_name: None,

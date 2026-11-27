@@ -1,7 +1,7 @@
 //! `rakazo-stack setup` (spec §7), so far: the Owner, Model provider, Composio, Memory and
 //! access questions, the key checks, Rakazo, Hindsight when memory is on, the stack's
-//! Tailscale device, voice through Lemonade, the Owner, their voice and the default Space's
-//! memory filled in through Rakazo's own code paths, and the Checklist.
+//! Tailscale device, voice through Lemonade, the Owner, their voice and model connection and
+//! the default Space's memory filled in through Rakazo's own code paths, and the Checklist.
 
 use std::time::Duration;
 
@@ -18,7 +18,7 @@ use crate::http;
 use crate::instance::InstanceFolder;
 use crate::lemonade::{self, LEMONADE_IMAGE, LEMONADE_REPO, LemonadeRelease, LocalLemonade};
 use crate::memory::{self, HindsightModel, Memory, MemoryEnv};
-use crate::model_provider::{self, ChatModel, Choice, Provider};
+use crate::model_provider::{self, ChatModel, Choice, OwnerModel, Provider};
 use crate::overrides;
 use crate::platform::Platform;
 use crate::preflight;
@@ -145,6 +145,14 @@ impl Setup<'_> {
             }
             None => None,
         };
+        let owner_model = match model {
+            Some((provider, key)) => {
+                OwnerModel::new(provider, key, rakazo_model.as_deref()).map_err(SetupError)?
+            }
+            None => None,
+        };
+        let new_key = model
+            .is_some_and(|(provider, key)| secrets.get(provider.key_name()) != Some(key.expose()));
         let hindsight_model = match model {
             Some((provider, key)) if answers.memory == Some(Memory::On) => Some(
                 HindsightModel::new(provider, key, memory_model.as_deref()).map_err(SetupError)?,
@@ -204,8 +212,11 @@ impl Setup<'_> {
         if settings.owner_email.as_deref() != Some(answers.owner_email.as_str()) {
             // Everything setup fills belongs to the Owner, so a new address starts afresh.
             settings.filled_by_setup.clear();
+            settings.model_connection_due = None;
+            settings.model_providers_left.clear();
             settings.owner_email = Some(answers.owner_email.clone());
         }
+        database_settings::note_model_change(&mut settings, answers.model_provider, new_key);
         settings.model_provider = Some(answers.model_provider);
         settings.rakazo_model.clone_from(&rakazo_model);
         let lemonade = match (self.platform, settings.lemonade_release()) {
@@ -410,8 +421,19 @@ impl Setup<'_> {
             database_settings::Fillable {
                 voice: voice_ready,
                 memory: tenant_key,
+                model: owner_model.map(|model| database_settings::ModelFill {
+                    model,
+                    due: &mut settings.model_connection_due,
+                }),
             },
             &mut settings.filled_by_setup,
+            &mut checklist,
+        );
+        database_settings::old_connections(
+            &rakazo,
+            &answers.owner_email,
+            answers.model_provider,
+            &mut settings.model_providers_left,
             &mut checklist,
         );
         if stack.hindsight.is_some() {
