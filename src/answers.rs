@@ -7,6 +7,7 @@ use std::io::{BufRead, IsTerminal, Write};
 
 use crate::access::{AccessError, AccessMode, AuthKey, AuthKeyState};
 use crate::composio;
+use crate::memory::{MEMORY_VAR, Memory};
 use crate::model_provider::{Choice, PROVIDER_VAR, Provider};
 use crate::secrets::{PastedKey, Secrets};
 
@@ -38,6 +39,7 @@ pub enum InputError {
     InvalidKey(&'static str),
     /// Names the key's line in `secrets.env`.
     InvalidSavedKey(&'static str),
+    UnknownMemory,
     Access(AccessError),
 }
 
@@ -86,6 +88,10 @@ impl fmt::Display for InputError {
                 "the {key_name} line in secrets.env isn't a usable key. Correct or remove it."
             ),
             Self::Access(err) => err.fmt(f),
+            Self::UnknownMemory => write!(
+                f,
+                "memory is on or off (set {MEMORY_VAR} with {NO_QUESTIONS_OPTION})."
+            ),
         }
     }
 }
@@ -148,6 +154,8 @@ pub struct Answers {
     pub model_key: Option<PastedKey>,
     /// A new key, or else the saved one. `None` leaves integrations off.
     pub composio_key: Option<PastedKey>,
+    /// Asked only with a key, which memory runs on.
+    pub memory: Option<Memory>,
 }
 
 /// One of setup's two front ends. Both produce the same [`Answers`].
@@ -166,6 +174,7 @@ pub trait FrontEnd {
     ) -> Result<Option<PastedKey>, InputError>;
     /// A new Composio key; `None` keeps the saved one, if there is one.
     fn composio_key(&mut self, saved: bool) -> Result<Option<PastedKey>, InputError>;
+    fn memory(&mut self, recorded: Option<Memory>) -> Result<Memory, InputError>;
     /// "Check again" (true) or "Continue without it", when ZDR only is off.
     fn check_zdr_again(&mut self) -> bool;
     /// "… was removed in Rakazo. Add it back? [y/N]"
@@ -187,6 +196,7 @@ pub fn collect(
     front: &mut dyn FrontEnd,
     recorded_email: Option<&str>,
     recorded_provider: Option<Choice>,
+    recorded_memory: Option<Memory>,
     secrets: &Secrets,
     first_run: bool,
 ) -> Result<Answers, InputError> {
@@ -205,12 +215,17 @@ pub fn collect(
     let composio_key = pasted_key(secrets, composio::KEY_NAME, |saved| {
         front.composio_key(saved)
     })?;
+    let memory = match model_key {
+        Some(_) => Some(front.memory(recorded_memory)?),
+        None => None,
+    };
     Ok(Answers {
         owner_email,
         owner_password,
         model_provider,
         model_key,
         composio_key,
+        memory,
     })
 }
 
@@ -283,6 +298,13 @@ impl<F: Fn(&str) -> Option<String>> FrontEnd for NoQuestions<F> {
 
     fn composio_key(&mut self, _saved: bool) -> Result<Option<PastedKey>, InputError> {
         self.pasted(composio::KEY_NAME, "Composio")
+    }
+
+    fn memory(&mut self, recorded: Option<Memory>) -> Result<Memory, InputError> {
+        match self.var(MEMORY_VAR) {
+            Some(text) => Memory::parse(&text).ok_or(InputError::UnknownMemory),
+            None => Ok(recorded.unwrap_or_default()),
+        }
     }
 
     fn check_zdr_again(&mut self) -> bool {
@@ -447,6 +469,19 @@ impl<P: Prompt> FrontEnd for Wizard<P> {
 
     fn composio_key(&mut self, saved: bool) -> Result<Option<PastedKey>, InputError> {
         self.pasted("Composio project API key", saved, "Composio")
+    }
+
+    fn memory(&mut self, recorded: Option<Memory>) -> Result<Memory, InputError> {
+        let default = recorded.unwrap_or_default();
+        let question = format!(
+            "Memory (on, or off to stop Hindsight and keep its data) [{}]: ",
+            default.id()
+        );
+        let answer = self.prompt.line(&question).ok_or(InputError::NoAnswer)?;
+        match answer.trim() {
+            "" => Ok(default),
+            answer => Memory::parse(answer).ok_or(InputError::UnknownMemory),
+        }
     }
 
     fn check_zdr_again(&mut self) -> bool {
@@ -637,7 +672,14 @@ mod tests {
         recorded_email: Option<&str>,
         first_run: bool,
     ) -> Result<Answers, InputError> {
-        collect(front, recorded_email, None, &Secrets::default(), first_run)
+        collect(
+            front,
+            recorded_email,
+            None,
+            None,
+            &Secrets::default(),
+            first_run,
+        )
     }
 
     struct Scripted {
@@ -831,6 +873,7 @@ mod tests {
             front,
             Some("owner@example.com"),
             recorded,
+            None,
             &Secrets::parse(secrets),
             false,
         )?;
@@ -895,10 +938,72 @@ mod tests {
         );
     }
 
+    fn memory(
+        front: &mut dyn FrontEnd,
+        recorded: Option<Memory>,
+        secrets: &str,
+    ) -> Result<Option<Memory>, InputError> {
+        collect(
+            front,
+            Some("owner@example.com"),
+            Some(anthropic()),
+            recorded,
+            &Secrets::parse(secrets),
+            false,
+        )
+        .map(|answers| answers.memory)
+    }
+
+    #[test]
+    fn memory_is_asked_only_with_a_key_and_defaults_to_on_or_the_recorded_answer() {
+        let mut nothing = NoQuestions { env: env(&[]) };
+        assert_eq!(memory(&mut nothing, Some(Memory::Off), ""), Ok(None));
+        assert_eq!(memory(&mut nothing, None, SAVED), Ok(Some(Memory::On)));
+        assert_eq!(
+            memory(&mut nothing, Some(Memory::Off), SAVED),
+            Ok(Some(Memory::Off))
+        );
+        let mut off = NoQuestions {
+            env: env(&[(MEMORY_VAR, "off")]),
+        };
+        assert_eq!(memory(&mut off, None, SAVED), Ok(Some(Memory::Off)));
+        let mut typo = NoQuestions {
+            env: env(&[(MEMORY_VAR, "no")]),
+        };
+        assert_eq!(
+            memory(&mut typo, None, SAVED),
+            Err(InputError::UnknownMemory)
+        );
+
+        let mut keep = Wizard {
+            prompt: Scripted::new(&["", "", "", "", ""]),
+        };
+        assert_eq!(
+            memory(&mut keep, Some(Memory::Off), SAVED),
+            Ok(Some(Memory::Off))
+        );
+        assert_eq!(
+            keep.prompt.asked[4],
+            "Memory (on, or off to stop Hindsight and keep its data) [off]: "
+        );
+        let mut on = Wizard {
+            prompt: Scripted::new(&["", "", "", "", "on"]),
+        };
+        assert_eq!(
+            memory(&mut on, Some(Memory::Off), SAVED),
+            Ok(Some(Memory::On))
+        );
+        let mut blank_key = Wizard {
+            prompt: Scripted::new(&["", "", "", ""]),
+        };
+        assert_eq!(memory(&mut blank_key, None, ""), Ok(None));
+        assert_eq!(blank_key.prompt.asked.len(), 4, "no memory question");
+    }
+
     #[test]
     fn the_wizard_keeps_a_saved_key_on_enter_and_takes_a_pasted_one() {
         let mut keep = Wizard {
-            prompt: Scripted::new(&["", "", "", ""]),
+            prompt: Scripted::new(&["", "", "", "", ""]),
         };
         assert_eq!(
             model(&mut keep, Some(anthropic()), SAVED),
@@ -910,7 +1015,7 @@ mod tests {
         );
 
         let mut paste = Wizard {
-            prompt: Scripted::new(&["", "gemini", " placeholder-new ", ""]),
+            prompt: Scripted::new(&["", "gemini", " placeholder-new ", "", ""]),
         };
         assert_eq!(
             model(&mut paste, Some(anthropic()), SAVED),
@@ -946,6 +1051,7 @@ mod tests {
             front,
             Some("owner@example.com"),
             Some(Choice(None)),
+            None,
             &Secrets::parse(secrets),
             false,
         )?;

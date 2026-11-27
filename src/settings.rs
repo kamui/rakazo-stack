@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::access::{AccessMode, DEFAULT_DEVICE_NAME};
 use crate::database_settings::DatabaseSetting;
 use crate::lemonade::LemonadeRelease;
+use crate::memory::Memory;
 use crate::model_provider::Choice;
-use crate::resolve::RakazoRelease;
+use crate::resolve::{HindsightRelease, RakazoRelease};
 
 pub const SCHEMA: u32 = 1;
 
@@ -23,6 +24,12 @@ pub struct Settings {
     /// Overrides the program's default chat model (spec §8). Only the Self-hoster writes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rakazo_model: Option<String>,
+    /// The answer to the Memory question (spec §7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
+    /// Overrides the program's default memory model (spec §8). Only the Self-hoster writes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_model: Option<String>,
     /// The database-only settings setup has filled in, so a re-run can tell "removed in
     /// Rakazo" from "never set" (spec §7).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -48,6 +55,10 @@ pub struct Components {
     /// Linux and Windows; on macOS Lemonade runs natively.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lemonade: Option<RecordedImage>,
+    /// Recorded the first time memory runs, and kept while it is off, so turning it on
+    /// again runs the version that migrated `hindsight-pgdata`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hindsight: Option<RecordedHindsight>,
 }
 
 /// A Component that runs one image.
@@ -69,6 +80,19 @@ pub struct RakazoImages {
     pub computer: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordedHindsight {
+    pub version: String,
+    pub images: HindsightImages,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HindsightImages {
+    pub hindsight: String,
+    #[serde(rename = "hindsight-db")]
+    pub hindsight_db: String,
+}
+
 impl Settings {
     pub fn new(release: &RakazoRelease) -> Self {
         Self {
@@ -77,6 +101,8 @@ impl Settings {
             owner_email: None,
             model_provider: None,
             rakazo_model: None,
+            memory: None,
+            memory_model: None,
             filled_by_setup: Vec::new(),
             access: AccessMode::default(),
             tailscale_device_name: None,
@@ -92,6 +118,7 @@ impl Settings {
                 },
                 tailscale: None,
                 lemonade: None,
+                hindsight: None,
             },
         }
     }
@@ -137,6 +164,27 @@ impl Settings {
             computer_digest: rakazo.images.computer.clone(),
         }
     }
+
+    pub fn hindsight_release(&self) -> Option<HindsightRelease> {
+        self.components
+            .hindsight
+            .as_ref()
+            .map(|hindsight| HindsightRelease {
+                version: hindsight.version.clone(),
+                digest: hindsight.images.hindsight.clone(),
+                db_digest: hindsight.images.hindsight_db.clone(),
+            })
+    }
+
+    pub fn record_hindsight(&mut self, release: &HindsightRelease) {
+        self.components.hindsight = Some(RecordedHindsight {
+            version: release.version.clone(),
+            images: HindsightImages {
+                hindsight: release.digest.clone(),
+                hindsight_db: release.db_digest.clone(),
+            },
+        });
+    }
 }
 
 #[cfg(test)]
@@ -155,6 +203,37 @@ mod tests {
         assert_eq!(Settings::parse(&text).unwrap(), settings);
         assert_eq!(settings.rakazo_release().computer_digest, "sha256:ccc");
         assert!(!text.contains("owner_email"));
+        assert!(!text.contains("hindsight") && !text.contains("memory"));
+    }
+
+    #[test]
+    fn records_memory_and_hindsights_two_digests() {
+        let mut settings = Settings::new(&RakazoRelease {
+            tag: "v0.16.0".into(),
+            app_digest: "sha256:aaa".into(),
+            computer_digest: "sha256:ccc".into(),
+        });
+        settings.memory = Some(Memory::Off);
+        settings.memory_model = Some("z-ai/glm-5.3-flash".into());
+        settings.filled_by_setup = vec![DatabaseSetting::Owner, DatabaseSetting::Memory];
+        let release = HindsightRelease {
+            version: "1.3.0".into(),
+            digest: "sha256:hhh".into(),
+            db_digest: "sha256:ddd".into(),
+        };
+        settings.record_hindsight(&release);
+        let text = settings.to_json();
+        for expected in [
+            "\"memory\": \"off\"",
+            "\"memory_model\": \"z-ai/glm-5.3-flash\"",
+            "\"hindsight\": {\n      \"version\": \"1.3.0\",\n      \"images\": {\n        \"hindsight\": \"sha256:hhh\",\n        \"hindsight-db\": \"sha256:ddd\"",
+            "\"memory\"\n  ]",
+        ] {
+            assert!(text.contains(expected), "{expected}: {text}");
+        }
+        let parsed = Settings::parse(&text).unwrap();
+        assert_eq!(parsed, settings);
+        assert_eq!(parsed.hindsight_release(), Some(release));
     }
 
     #[test]

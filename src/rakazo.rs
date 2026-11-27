@@ -7,9 +7,10 @@ use std::path::Path;
 use std::process::{Output, Stdio};
 
 use crate::answers::Password;
-use crate::database_settings::{Rakazo, Session};
+use crate::database_settings::{DefaultSpace, Rakazo, Session};
 use crate::docker::Docker;
 use crate::lemonade::{RELAY_URL, SPEECH_MODEL, TRANSCRIPTION_MODEL};
+use crate::memory::ConnectedSpace;
 
 /// Upstream's defaults for `POSTGRES_USER` and `POSTGRES_DB`, which setup never changes.
 /// The official Postgres image trusts local socket connections, so no password is needed.
@@ -60,11 +61,20 @@ impl LocalRakazo<'_> {
         }
     }
 
-    fn post(&self, path: &str, session: Option<&Session>, body: &str) -> Result<String, String> {
+    fn post(
+        &self,
+        path: &str,
+        session: Option<&Session>,
+        headers: &[(&str, &str)],
+        body: &str,
+    ) -> Result<String, String> {
         let url = format!("{}{path}", self.origin);
         let mut request = self.agent.post(&url).content_type("application/json");
         if let Some(session) = session {
             request = request.header("authorization", format!("Bearer {}", session.token));
+        }
+        for (name, value) in headers {
+            request = request.header(*name, *value);
         }
         let mut response = request.send(body).map_err(|err| err.to_string())?;
         let status = response.status().as_u16();
@@ -83,6 +93,16 @@ impl LocalRakazo<'_> {
 impl LocalRakazo<'_> {
     /// One read-only `SELECT EXISTS (…)` as the database owner role.
     fn exists(&self, query: &str) -> Result<bool, String> {
+        match self.query(query)?.as_str() {
+            "t" => Ok(true),
+            "f" => Ok(false),
+            other => Err(format!("unexpected reply from Postgres: {other:?}")),
+        }
+    }
+
+    /// Runs a query that sets itself read-only, as the database owner role, and returns
+    /// what it printed, unaligned.
+    fn query(&self, query: &str) -> Result<String, String> {
         let args = [
             "psql",
             "-X",
@@ -99,11 +119,7 @@ impl LocalRakazo<'_> {
             "-",
         ];
         let output = self.exec("postgres", &args, query.as_bytes())?;
-        match String::from_utf8_lossy(&output.stdout).trim() {
-            "t" => Ok(true),
-            "f" => Ok(false),
-            other => Err(format!("unexpected reply from Postgres: {other:?}")),
-        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 }
 
@@ -114,6 +130,21 @@ impl Rakazo for LocalRakazo<'_> {
 
     fn voice_exists(&self, email: &str) -> Result<bool, String> {
         self.exists(&voice_query(email))
+    }
+
+    fn default_space(&self, email: &str) -> Result<Option<DefaultSpace>, String> {
+        let reply = self.query(&default_space_query(email))?;
+        if reply.is_empty() {
+            return Ok(None);
+        }
+        serde_json::from_str(&reply)
+            .map(Some)
+            .map_err(|err| format!("unexpected reply from Postgres: {err}"))
+    }
+
+    fn spaces_on_hindsight(&self) -> Result<Vec<ConnectedSpace>, String> {
+        let reply = self.query(SPACES_ON_HINDSIGHT)?;
+        serde_json::from_str(&reply).map_err(|err| format!("unexpected reply from Postgres: {err}"))
     }
 
     fn bootstrap_owner(&self, email: &str, password: &Password) -> Result<(), String> {
@@ -128,19 +159,40 @@ impl Rakazo for LocalRakazo<'_> {
 
     fn sign_in(&self, email: &str, password: &Password) -> Result<Session, String> {
         let body = serde_json::json!({ "email": email, "password": password.expose() });
-        let reply = self.post("/api/auth/sign-in/email", None, &body.to_string())?;
+        let reply = self.post("/api/auth/sign-in/email", None, &[], &body.to_string())?;
         session_token(&reply)
             .map(|token| Session { token })
             .ok_or_else(|| "Rakazo's sign-in reply had no token".to_string())
     }
 
     fn connect_voice(&self, session: &Session) -> Result<(), String> {
-        self.post("/rpc/voice/connect", Some(session), &voice_connect_body())
-            .map(drop)
+        self.post(
+            "/rpc/voice/connect",
+            Some(session),
+            &[],
+            &voice_connect_body(),
+        )
+        .map(drop)
+    }
+
+    fn connect_memory(
+        &self,
+        session: &Session,
+        space_id: &str,
+        tenant_key: &str,
+    ) -> Result<(), String> {
+        // The header names the Space, so the call can't land on another one the Owner opened.
+        self.post(
+            "/rpc/memory/connectProvider",
+            Some(session),
+            &[("x-rakazo-space-id", space_id)],
+            &connect_memory_body(tenant_key),
+        )
+        .map(drop)
     }
 
     fn sign_out(&self, session: Session) -> Result<(), String> {
-        self.post("/api/auth/sign-out", Some(&session), "{}")
+        self.post("/api/auth/sign-out", Some(&session), &[], "{}")
             .map(drop)
     }
 }
@@ -173,6 +225,38 @@ fn voice_connect_body() -> String {
             "baseUrl": RELAY_URL,
             "ttsModel": SPEECH_MODEL,
             "sttModel": TRANSCRIPTION_MODEL,
+        }
+    })
+    .to_string()
+}
+
+/// The Space Rakazo opens first for the user (its default, earliest joined), as JSON, and
+/// whether it has a memory connection to any provider: one setup didn't make is left alone.
+fn default_space_query(email: &str) -> String {
+    let literal = email.replace('\'', "''");
+    format!(
+        "SET default_transaction_read_only = on;\n\
+         SELECT json_build_object('id', m.\"spaceId\", 'memory', EXISTS \
+         (SELECT 1 FROM space_memory_configs c WHERE c.\"spaceId\" = m.\"spaceId\")) \
+         FROM space_members m JOIN spaces s ON s.id = m.\"spaceId\" JOIN \"user\" u ON u.id = m.\"userId\" \
+         WHERE u.email = '{literal}' AND s.\"isDefault\" AND s.\"deletingAt\" IS NULL \
+         ORDER BY m.\"createdAt\", m.id LIMIT 1;\n"
+    )
+}
+
+const SPACES_ON_HINDSIGHT: &str = "SET default_transaction_read_only = on;\n\
+     SELECT coalesce(json_agg(json_build_object('space', s.name, 'by', u.email) \
+     ORDER BY s.name), '[]') FROM space_memory_configs c JOIN spaces s ON s.id = c.\"spaceId\" \
+     LEFT JOIN \"user\" u ON u.id = c.\"userId\" WHERE c.provider = 'hindsight';\n";
+
+/// Spec §7 step 9: nothing for `retainConversations` or the other toggles, so Rakazo's
+/// defaults stay.
+fn connect_memory_body(tenant_key: &str) -> String {
+    serde_json::json!({
+        "json": {
+            "provider": "hindsight",
+            "settings": { "mode": "local", "baseUrl": "http://hindsight:8888" },
+            "credentials": { "apiKey": tenant_key },
         }
     })
     .to_string()
@@ -211,7 +295,7 @@ fn last_line(bytes: &[u8]) -> Option<String> {
 mod tests {
     use super::*;
     use crate::checklist::Checklist;
-    use crate::database_settings::{DatabaseSetting, fill_in};
+    use crate::database_settings::{DatabaseSetting, Fillable, fill_in};
 
     #[test]
     fn quotes_the_email_in_the_owner_query() {
@@ -251,6 +335,47 @@ mod tests {
             failure_message(400, RECORDED_VOICE_UNREACHABLE),
             "Couldn't reach the speech server at http://lemonade-relay:9. (HTTP 400)"
         );
+    }
+
+    #[test]
+    fn the_space_queries_are_read_only_and_quote_the_email() {
+        let query = default_space_query("o'wner@example.com");
+        assert!(query.starts_with("SET default_transaction_read_only = on;"));
+        assert!(query.contains("u.email = 'o''wner@example.com'"));
+        assert!(SPACES_ON_HINDSIGHT.starts_with("SET default_transaction_read_only = on;"));
+    }
+
+    #[test]
+    fn the_memory_connect_body_is_the_specs_and_sets_no_memory_toggle() {
+        let body: serde_json::Value =
+            serde_json::from_str(&connect_memory_body("placeholder-tenant-key")).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({"json":{"provider":"hindsight","settings":{"mode":"local","baseUrl":"http://hindsight:8888"},"credentials":{"apiKey":"placeholder-tenant-key"}}})
+        );
+    }
+
+    // In the layout Postgres's `json_build_object` and `json_agg` print, as read from
+    // Rakazo v0.16.0's database; the id is a placeholder.
+    const RECORDED_DEFAULT_SPACE: &str = r#"{"id" : "placeholder-space-id", "memory" : false}"#;
+    const RECORDED_SPACES: &str = "[{\"space\" : \"Personal\", \"by\" : \"owner@example.com\"}, \n {\"space\" : \"Team\", \"by\" : null}]";
+
+    #[test]
+    fn reads_the_default_space_and_the_spaces_on_hindsight() {
+        let space: DefaultSpace = serde_json::from_str(RECORDED_DEFAULT_SPACE).unwrap();
+        assert_eq!(
+            space,
+            DefaultSpace {
+                id: "placeholder-space-id".into(),
+                memory: false
+            }
+        );
+        let spaces: Vec<ConnectedSpace> = serde_json::from_str(RECORDED_SPACES).unwrap();
+        assert_eq!(spaces[0].space, "Personal");
+        assert_eq!(spaces[0].by.as_deref(), Some("owner@example.com"));
+        assert_eq!(spaces[1].by, None);
+        let none: Vec<ConnectedSpace> = serde_json::from_str("[]").unwrap();
+        assert!(none.is_empty());
     }
 
     #[test]
@@ -301,6 +426,15 @@ mod tests {
         fn connect_voice(&self, _: &Session) -> Result<(), String> {
             unreachable!()
         }
+        fn default_space(&self, _: &str) -> Result<Option<DefaultSpace>, String> {
+            unreachable!()
+        }
+        fn spaces_on_hindsight(&self) -> Result<Vec<ConnectedSpace>, String> {
+            unreachable!()
+        }
+        fn connect_memory(&self, _: &Session, _: &str, _: &str) -> Result<(), String> {
+            unreachable!()
+        }
         fn sign_out(&self, _: Session) -> Result<(), String> {
             unreachable!()
         }
@@ -318,7 +452,7 @@ mod tests {
             &mut front,
             "owner@example.com",
             Some(Password::new("correct-horse-battery".into()).unwrap()),
-            false,
+            Fillable::default(),
             &mut filled,
             &mut checklist,
         );

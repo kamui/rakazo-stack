@@ -4,6 +4,7 @@ use crate::http::{self, HttpError};
 use crate::version::Version;
 
 pub const RAKAZO_REPO: &str = "elie222/rakazo";
+pub const HINDSIGHT_REPO: &str = "vectorize-io/hindsight";
 
 #[derive(Deserialize)]
 struct Release {

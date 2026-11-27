@@ -1,7 +1,7 @@
-//! `rakazo-stack setup` (spec §7), so far: the Owner, Model provider, Composio and access
-//! questions, the key checks, Rakazo, the stack's Tailscale device, voice through
-//! Lemonade, the Owner and their voice filled in through Rakazo's own code paths, and the
-//! Checklist.
+//! `rakazo-stack setup` (spec §7), so far: the Owner, Model provider, Composio, Memory and
+//! access questions, the key checks, Rakazo, Hindsight when memory is on, the stack's
+//! Tailscale device, voice through Lemonade, the Owner, their voice and the default Space's
+//! memory filled in through Rakazo's own code paths, and the Checklist.
 
 use std::time::Duration;
 
@@ -13,19 +13,23 @@ use crate::computer_egress;
 use crate::database_settings;
 use crate::docker::{ContainerSummary, Docker};
 use crate::envfile::{self, EnvInputs, STACK_COMPOSE_FILE, TailscaleEnv};
-use crate::github::{self, RAKAZO_REPO};
+use crate::github::{self, HINDSIGHT_REPO, RAKAZO_REPO};
 use crate::http;
 use crate::instance::InstanceFolder;
 use crate::lemonade::{self, LEMONADE_IMAGE, LEMONADE_REPO, LemonadeRelease, LocalLemonade};
+use crate::memory::{self, HindsightModel, Memory, MemoryEnv};
 use crate::model_provider::{self, ChatModel, Choice, Provider};
 use crate::overrides;
 use crate::platform::Platform;
 use crate::preflight;
 use crate::rakazo::LocalRakazo;
 use crate::registry::{self, Ghcr};
-use crate::resolve::{self, RAKAZO_FLOOR, RakazoRelease, ResolveError};
+use crate::resolve::{
+    self, HINDSIGHT_DB_IMAGE, HINDSIGHT_DB_TAG, HINDSIGHT_FLOOR, HindsightRelease, RAKAZO_FLOOR,
+    RakazoRelease, Resolution, ResolveError,
+};
 use crate::runlog::RunLog;
-use crate::secrets::{self, Secrets};
+use crate::secrets::{self, HINDSIGHT_TENANT_KEY, Secrets};
 use crate::settings::Settings;
 use crate::tailscale::{self, Joined};
 use crate::voice;
@@ -53,6 +57,8 @@ struct Stack<'a> {
     chat: Option<ChatModel<'a>>,
     /// `None` where Lemonade runs natively.
     lemonade: Option<LemonadeRelease>,
+    /// `Some` while memory is on.
+    hindsight: Option<(HindsightRelease, HindsightModel<'a>)>,
 }
 
 impl Stack<'_> {
@@ -82,6 +88,11 @@ impl Stack<'_> {
                 device_name: settings.device_name(),
                 auth_key: secrets.get(AUTH_KEY_NAME),
             }),
+            memory: self.hindsight.as_ref().map(|(release, model)| MemoryEnv {
+                release,
+                model: *model,
+                secrets,
+            }),
         })
     }
 }
@@ -105,6 +116,7 @@ impl Setup<'_> {
             front.as_mut(),
             recorded.as_ref().and_then(|s| s.owner_email.as_deref()),
             recorded.as_ref().and_then(|s| s.model_provider),
+            recorded.as_ref().and_then(|s| s.memory),
             &secrets,
             recorded.is_none(),
         )?;
@@ -114,13 +126,30 @@ impl Setup<'_> {
             secrets.get(AUTH_KEY_NAME),
         )?;
         let model = answers.model_provider.0.zip(answers.model_key.as_ref());
-        let (rakazo_model, dropped_override) =
-            keep_override(recorded.as_ref(), answers.model_provider);
+        let recorded_provider = recorded.as_ref().and_then(|s| s.model_provider);
+        let (rakazo_model, dropped_override) = keep_override(
+            "Rakazo model",
+            recorded.as_ref().and_then(|s| s.rakazo_model.clone()),
+            recorded_provider,
+            answers.model_provider,
+        );
+        let (memory_model, dropped_memory_override) = keep_override(
+            "memory model",
+            recorded.as_ref().and_then(|s| s.memory_model.clone()),
+            recorded_provider,
+            answers.model_provider,
+        );
         let chat = match model {
             Some((provider, key)) => {
                 ChatModel::new(provider, key, rakazo_model.as_deref()).map_err(SetupError)?
             }
             None => None,
+        };
+        let hindsight_model = match model {
+            Some((provider, key)) if answers.memory == Some(Memory::On) => Some(
+                HindsightModel::new(provider, key, memory_model.as_deref()).map_err(SetupError)?,
+            ),
+            _ => None,
         };
         let key_warning = match model {
             Some((provider, key)) => {
@@ -141,8 +170,8 @@ impl Setup<'_> {
             None => None,
         };
         let log = RunLog::create(self.folder.path())?;
-        if let Some(note) = dropped_override {
-            log.say(&note);
+        for note in dropped_override.iter().chain(&dropped_memory_override) {
+            log.say(note);
         }
         for warning in [key_warning, composio_warning].into_iter().flatten() {
             log.say(&warning);
@@ -162,6 +191,14 @@ impl Setup<'_> {
             Some(settings) => settings.rakazo_release(),
             None => resolve_rakazo(&agent, &log)?,
         };
+        // Recorded the first time memory runs; only `update` moves it after that.
+        let hindsight = match (&hindsight_model, recorded.as_ref()) {
+            (None, _) => None,
+            (Some(_), Some(settings)) if settings.components.hindsight.is_some() => {
+                settings.hindsight_release()
+            }
+            (Some(_), _) => Some(resolve_hindsight(&agent, &log)?),
+        };
         let mut settings = recorded.unwrap_or_else(|| Settings::new(&release));
         settings.program_version = env!("CARGO_PKG_VERSION").to_string();
         if settings.owner_email.as_deref() != Some(answers.owner_email.as_str()) {
@@ -180,9 +217,20 @@ impl Setup<'_> {
                 Some(release)
             }
         };
+        settings.memory_model.clone_from(&memory_model);
+        if let Some(memory) = answers.memory {
+            settings.memory = Some(memory);
+        }
+        let memory_ran_before = settings.components.hindsight.is_some();
+        if let Some(hindsight) = &hindsight {
+            settings.record_hindsight(hindsight);
+        }
 
         access.record(&mut settings);
         secrets.fill_missing(secrets::random_hex);
+        if hindsight.is_some() {
+            secrets.fill_missing_hindsight(secrets::random_hex);
+        }
         model_provider::save_key(&mut secrets, model);
         secrets.set_pasted(composio::KEY_NAME, answers.composio_key.as_ref());
         if let Access::Tailscale {
@@ -232,6 +280,7 @@ impl Setup<'_> {
             access,
             chat,
             lemonade,
+            hindsight: hindsight.zip(hindsight_model),
         };
         self.folder
             .write("secrets.env", secrets.to_text().as_bytes())?;
@@ -263,6 +312,13 @@ impl Setup<'_> {
         {
             checklist.add(tailscale::not_removed_item(self.compose_command()));
         }
+        if stack.hindsight.is_none() && memory_ran_before {
+            let mut args = vec!["--profile", memory::PROFILE, "rm", "--stop", "--force"];
+            args.extend(memory::SERVICES);
+            if self.compose(&args).is_err() {
+                checklist.add(memory::not_removed_item(self.compose_command()));
+            }
+        }
         if self.platform == Platform::Wsl {
             self.recreate_containers_made_in_wsl(&stack.project, &log)?;
         }
@@ -271,11 +327,21 @@ impl Setup<'_> {
         let rakazo_services =
             self.services_besides(&[VOICE_SERVICES.as_slice(), &[tailscale::SERVICE]].concat())?;
         log.say(&format!("Pulling Rakazo {} images…", stack.release.tag));
+        if let Some((hindsight, _)) = &stack.hindsight {
+            log.say(&format!(
+                "Memory is on: pulling Hindsight {}, which is about 6.4 GB…",
+                hindsight.version
+            ));
+        }
         self.compose_for(&["pull", "--quiet", "--ignore-buildable"], &rakazo_services)?;
         log.say("Building the computer-egress sidecar…");
         self.compose(&["build", "--quiet", computer_egress::SERVICE])?;
         let voice_started = self.start_voice(&log, &mut checklist);
-        log.say("Starting Rakazo…");
+        log.say(if stack.hindsight.is_some() {
+            "Starting Rakazo and Hindsight (Hindsight takes about a minute)…"
+        } else {
+            "Starting Rakazo…"
+        });
         self.start(&stack, &rakazo_services)?;
         let origin = stack.local_origin();
         log.say(&format!(
@@ -331,15 +397,28 @@ impl Setup<'_> {
             agent: &agent,
             origin: &origin,
         };
+        let tenant_key = stack
+            .hindsight
+            .is_some()
+            .then(|| secrets.get(HINDSIGHT_TENANT_KEY))
+            .flatten();
         database_settings::fill_in(
             &rakazo,
             front.as_mut(),
             &answers.owner_email,
             answers.owner_password,
-            voice_ready,
+            database_settings::Fillable {
+                voice: voice_ready,
+                memory: tenant_key,
+            },
             &mut settings.filled_by_setup,
             &mut checklist,
         );
+        if stack.hindsight.is_some() {
+            checklist.add(memory::another_space_item());
+        } else {
+            database_settings::still_connected(&rakazo, &mut checklist);
+        }
         if let Some(item) = zdr_item {
             checklist.add(item);
         }
@@ -583,17 +662,22 @@ fn services_made_in_wsl(ps_output: &str) -> Vec<String> {
 
 /// A Rakazo model override names a model at one provider, so a new provider drops it
 /// (spec §8), with a note saying so.
-fn keep_override(recorded: Option<&Settings>, chosen: Choice) -> (Option<String>, Option<String>) {
-    let Some(model) = recorded.and_then(|s| s.rakazo_model.clone()) else {
+fn keep_override(
+    label: &str,
+    model: Option<String>,
+    recorded_provider: Option<Choice>,
+    chosen: Choice,
+) -> (Option<String>, Option<String>) {
+    let Some(model) = model else {
         return (None, None);
     };
-    match recorded.and_then(|s| s.model_provider) {
+    match recorded_provider {
         Some(previous) if previous != chosen => {
             let was = previous.0.map_or("none", Provider::name);
             (
                 None,
                 Some(format!(
-                    "Removed the Rakazo model override `{model}`, which was set for {was}. Add one for the new provider to `settings.json` if you want it."
+                    "Removed the {label} override `{model}`, which was set for {was}. Add one for the new provider to `settings.json` if you want it."
                 )),
             )
         }
@@ -607,6 +691,29 @@ fn resolve_rakazo(agent: &ureq::Agent, log: &RunLog) -> Result<RakazoRelease, Se
     let resolution = resolve::choose_rakazo(&tags, |image, tag| {
         ghcr.digest(image, tag).map_err(|err| err.to_string())
     });
+    report(resolution, "Rakazo", RAKAZO_FLOOR, log)
+}
+
+fn resolve_hindsight(agent: &ureq::Agent, log: &RunLog) -> Result<HindsightRelease, SetupError> {
+    let tags = github::fetch_stable_tags(agent, HINDSIGHT_REPO)?;
+    let ghcr = Ghcr::new(agent);
+    let resolution = resolve::choose_hindsight(
+        &tags,
+        |image, tag| ghcr.digest(image, tag).map_err(|err| err.to_string()),
+        || {
+            registry::docker_hub_digest(agent, HINDSIGHT_DB_IMAGE, HINDSIGHT_DB_TAG)
+                .map_err(|err| err.to_string())
+        },
+    );
+    report(resolution, "Hindsight", HINDSIGHT_FLOOR, log)
+}
+
+fn report<R>(
+    resolution: Result<Resolution<R>, ResolveError>,
+    component: &str,
+    floor: &str,
+    log: &RunLog,
+) -> Result<R, SetupError> {
     match resolution {
         Ok(resolution) => {
             for skipped in &resolution.skipped {
@@ -619,11 +726,11 @@ fn resolve_rakazo(agent: &ureq::Agent, log: &RunLog) -> Result<RakazoRelease, Se
                 log.say(&skipped.describe());
             }
             Err(SetupError(format!(
-                "No Rakazo release at or above {RAKAZO_FLOOR} has published images yet. Try again later."
+                "No {component} release at or above {floor} has published images yet. Try again later."
             )))
         }
         Err(ResolveError::Lookup(err)) => Err(SetupError(format!(
-            "Couldn't check Rakazo's releases: {err}"
+            "Couldn't check {component}'s releases: {err}"
         ))),
     }
 }
@@ -689,6 +796,7 @@ mod tests {
             },
             chat: None,
             lemonade: None,
+            hindsight: None,
         }
     }
 
@@ -736,7 +844,7 @@ mod tests {
         }
         assert!(!service.contains("ports:"), "{service}");
         let (_, content) = rest.split_once("content: |\n").unwrap();
-        let (json, _) = content.split_once("\nvolumes:").unwrap();
+        let (json, _) = content.split_once("\n\n").unwrap();
         let serve: serde_json::Value = serde_json::from_str(&json.replace("$$", "$")).unwrap();
         assert_eq!(
             serve,
@@ -832,23 +940,27 @@ mod tests {
     }
 
     #[test]
-    fn a_new_provider_drops_the_rakazo_model_override() {
-        let mut settings = Settings::new(&RakazoRelease {
-            tag: "v0.16.0".into(),
-            app_digest: "sha256:aaa".into(),
-            computer_digest: "sha256:ccc".into(),
-        });
-        settings.model_provider = Some(Choice(Some(Provider::OpenRouter)));
-        settings.rakazo_model = Some("z-ai/glm-5.3-flash".into());
+    fn a_new_provider_drops_the_model_overrides() {
+        let openrouter = Choice(Some(Provider::OpenRouter));
+        let model = || Some("z-ai/glm-5.3-flash".to_string());
 
-        let same = keep_override(Some(&settings), Choice(Some(Provider::OpenRouter)));
-        assert_eq!(same, (Some("z-ai/glm-5.3-flash".into()), None));
+        let same = keep_override("Rakazo model", model(), Some(openrouter), openrouter);
+        assert_eq!(same, (model(), None));
 
-        let (kept, note) = keep_override(Some(&settings), Choice(Some(Provider::Anthropic)));
+        let anthropic = Choice(Some(Provider::Anthropic));
+        let (kept, note) = keep_override("memory model", model(), Some(openrouter), anthropic);
         assert_eq!(kept, None);
-        assert!(note.unwrap().contains("set for OpenRouter"));
+        let note = note.unwrap();
+        assert!(
+            note.starts_with("Removed the memory model override")
+                && note.contains("set for OpenRouter"),
+            "{note}"
+        );
 
-        assert_eq!(keep_override(None, Choice(None)), (None, None));
+        assert_eq!(
+            keep_override("Rakazo model", None, None, Choice(None)),
+            (None, None)
+        );
     }
 
     #[test]

@@ -157,8 +157,8 @@ rakazo-stack installs the latest stable release of each Component, best effort, 
   - **Releases without images.** If the tag has no `app` or no `computer` image on GHCR, setup and update walk back to the newest release that has both, and say which release they skipped and why. A later `update` picks up the skipped release once its images appear. The program never builds Rakazo images locally ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#45](https://github.com/kamui/rakazo-stack/issues/45)). (Rakazo v0.16.0 was tagged a day before its images were published.)
   - The same rule covers every Component resolved from GitHub releases: a Hindsight or Lemonade release whose image (or, on macOS, whose embeddable tarball) isn't published yet is skipped the same way ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
   - Rakazo's Postgres is whatever its compose file uses (today `postgres:16`, pinned by digest upstream) ([#31](https://github.com/kamui/rakazo-stack/issues/31), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
-- **Hindsight:** GitHub's latest release of `vectorize-io/hindsight`. Release `vX.Y.Z` maps to image tag `X.Y.Z` (Hindsight's tags have no `v`) ([#44](https://github.com/kamui/rakazo-stack/issues/44)). Tested on 1.3.0.
-- **`hindsight-db`:** `pgvector/pgvector:pg18`. It floats within PostgreSQL 18 (minors and security fixes), never to a new major ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
+- **Hindsight:** GitHub's latest release of `vectorize-io/hindsight`. Release `vX.Y.Z` maps to image tag `X.Y.Z` (Hindsight's tags have no `v`) ([#44](https://github.com/kamui/rakazo-stack/issues/44)). Tested on 1.3.0. Resolved only when memory runs ([#66](https://github.com/kamui/rakazo-stack/issues/66)).
+- **`hindsight-db`:** `pgvector/pgvector:pg18`, from Docker Hub. It floats within PostgreSQL 18 (minors and security fixes), never to a new major ([#32](https://github.com/kamui/rakazo-stack/issues/32)). Its digest is read when Hindsight is resolved and recorded with it.
 - **Lemonade:** GitHub's latest release of `lemonade-sdk/lemonade`. Linux/Windows use the image of that tag (release `vX.Y.Z` is image tag `vX.Y.Z`; tested on v2026.48.3, [#64](https://github.com/kamui/rakazo-stack/issues/64)); macOS downloads the embeddable tarball and checks it against GitHub's published SHA-256 for that asset ([#17](https://github.com/kamui/rakazo-stack/issues/17), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
 - **Tailscale:** the version behind the `stable` tag in the image registry, not GitHub releases, because images lag releases ([#24](https://github.com/kamui/rakazo-stack/issues/24)). On Docker Hub, `tailscale/tailscale:stable` gives the digest, and its image index's `org.opencontainers.image.version` annotation gives the version: `1.104.7` is recorded as `v1.104.7` ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 - **Relay and sidecar bases:** fixed in each program release (for example `oven/bun:1.4.4-alpine` and `alpine:3.24.4`). The relay's ffmpeg comes from Alpine and is pinned loosely (`~=8.1`), because Alpine deletes old package versions ([#31](https://github.com/kamui/rakazo-stack/issues/31), [#32](https://github.com/kamui/rakazo-stack/issues/32)).
@@ -170,7 +170,7 @@ rakazo-stack installs the latest stable release of each Component, best effort, 
 ### Who moves versions
 
 - The first `setup` resolves and records the latest versions ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
-- Re-runs of `setup` keep the recorded versions. The one exception: a Component switched on later (memory, Tailscale) starts at its latest version ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
+- Re-runs of `setup` keep the recorded versions. The one exception: a Component switched on later (memory, Tailscale) starts at its latest version ([#32](https://github.com/kamui/rakazo-stack/issues/32)). Its record stays when it is switched off, so switching it on again runs the version that last migrated its data ([#66](https://github.com/kamui/rakazo-stack/issues/66)).
 - Only `rakazo-stack update` moves recorded versions ([§14](#14-rakazo-stack-update)).
 - `restore` brings back the versions recorded in the Backup ([§16](#16-rakazo-stack-restore)).
 
@@ -264,6 +264,9 @@ Rakazo's `pgdata`, `appdata` and `webassets` (upstream), plus `lemonade-models`,
 | `SIGNUPS_ENABLED` | `false` (the API re-applies it from env on every start, so setup owns it) | [#2, #21] |
 | `PHONE_CALLS_ENABLED` | `true` | [#1, #6] |
 | `MCP_ALLOW_PRIVATE_ENDPOINT` | `true` (lets Rakazo reach `lemonade-relay` and `hindsight`; broader than voice) | [#6, #10] |
+| `HINDSIGHT_IMAGE_TAG`, `HINDSIGHT_DB_IMAGE_TAG` | memory on only: recorded tag and digest (`1.3.0@sha256:…`, `pg18@sha256:…`) | [#66](https://github.com/kamui/rakazo-stack/issues/66) |
+| `HINDSIGHT_DB_PASSWORD`, `HINDSIGHT_API_TENANT_API_KEY` | memory on only: generated ([§6](#generated-secrets)) | [#44, #66] |
+| `HINDSIGHT_API_LLM_PROVIDER`, `HINDSIGHT_API_LLM_API_KEY`, `HINDSIGHT_API_LLM_MODEL`, and on OpenRouter `HINDSIGHT_API_LLM_REASONING_EFFORT` and `HINDSIGHT_API_LLM_EXTRA_BODY` | memory on only: per provider ([§8](#8-model-provider)). The layer passes them to `hindsight` alone, so Rakazo's services never see them; the JSON is single-quoted | [#44, #66] |
 | `RAKAZO_OPENAI_COMPAT_PRIVATE_HOSTS` | `lemonade-relay` | [#10](https://github.com/kamui/rakazo-stack/issues/10) |
 | `SANDBOX_COMPUTER_EGRESS` | `restricted` (never `auto`, never `open`) | [#25, #40] |
 | `BETTER_AUTH_URL`, `WEB_ORIGIN`, `API_URL`, `RAKAZO_HOST` | from the access mode ([§11](#11-access-localhost-tailscale-and-phones)) | [#8, #24] |
@@ -322,7 +325,8 @@ The schema so far; later slices add the fields above as they land. A bring-your-
   "program_version": "0.1.0",
   "owner_email": "owner@example.com",
   "model_provider": "openrouter",
-  "filled_by_setup": ["owner", "voice"],
+  "memory": "on",
+  "filled_by_setup": ["owner", "voice", "memory"],
   "access": "tailscale",
   "tailscale_device_name": "rakazo",
   "tailscale_dns_name": "rakazo.example.ts.net",
@@ -332,13 +336,20 @@ The schema so far; later slices add the fields above as they land. A bring-your-
       "images": { "app": "sha256:…", "computer": "sha256:…" }
     },
     "tailscale": { "version": "v1.104.7", "digest": "sha256:…" },
-    "lemonade": { "version": "v2026.48.3", "digest": "sha256:…" }
+    "lemonade": { "version": "v2026.48.3", "digest": "sha256:…" },
+    "hindsight": {
+      "version": "1.3.0",
+      "images": { "hindsight": "sha256:…", "hindsight-db": "sha256:…" }
+    }
   }
 }
 ```
 
 - `model_provider` is the answer to the Model provider question: `openrouter`, `openai`, `gemini`, `anthropic` or `none`. It is recorded even when the key was left blank.
 - `rakazo_model` is the Rakazo model override ([§8](#8-model-provider)). It is absent unless the Self-hoster adds it, and setup keeps it.
+- `memory` is the answer to the Memory question, `on` or `off`. Like `model_provider`, it is kept while the key is blank, so adding a key later brings the choice back. Memory runs only when it is `on` and a key is set ([#66](https://github.com/kamui/rakazo-stack/issues/66)).
+- `memory_model` is the memory model override ([§8](#8-model-provider)), under the same rules as `rakazo_model` ([#66](https://github.com/kamui/rakazo-stack/issues/66)).
+- `components.hindsight` appears the first time memory runs: the image tag, and the digests of `hindsight` and `hindsight-db` ([§4](#how-versions-are-resolved)). It stays while memory is off ([#66](https://github.com/kamui/rakazo-stack/issues/66)).
 
 ### `secrets.env`
 
@@ -355,7 +366,7 @@ Generated once, on the run that first needs them, and never regenerated ([#9](ht
 | `ENCRYPTION_KEY` | Rakazo's content encryption. Must never change after first start | [#2](https://github.com/kamui/rakazo-stack/issues/2) |
 | `SCREEN_PROXY_SECRET`, `SANDBOX_SUPERVISOR_TOKEN` | Rakazo's supervisor and screens. At least 32 characters, different from each other and from `BETTER_AUTH_SECRET` | [#2](https://github.com/kamui/rakazo-stack/issues/2) |
 | `LEMONADE_API_KEY` | Lemonade, on every OS; only the relay sends it | [#10, #17] |
-| Hindsight's database password | `hindsight-db` and `HINDSIGHT_API_DATABASE_URL` | [#44](https://github.com/kamui/rakazo-stack/issues/44) |
+| `HINDSIGHT_DB_PASSWORD` | `hindsight-db` and `HINDSIGHT_API_DATABASE_URL`; hex, because it sits in a URL | [#44, #66] |
 | `HINDSIGHT_API_TENANT_API_KEY` | Hindsight's API key, 8–4096 characters; also stored by Rakazo for each connected Space | [#44, #49] |
 
 #### Pasted keys
@@ -372,7 +383,7 @@ The Model provider key, `COMPOSIO_API_KEY` and the Tailscale auth key ([#3](http
 One re-runnable command. It is an interactive wizard on a first run and safe to re-run at any time to change things. A no-questions mode, `rakazo-stack setup --no-questions`, is for scripted runs and for `restore`'s hand-over ([#9](https://github.com/kamui/rakazo-stack/issues/9)). The wizard and the no-questions mode are two front ends to one set of answers ([#61](https://github.com/kamui/rakazo-stack/issues/61)):
 
 - **No-questions mode** takes each answer from its environment variable, then from `settings.json`, then the wizard's default. An answer with no default stops the run when neither gives it. So a first scripted run, with no `settings.json` yet, gives its choices as environment variables, and a scripted re-run can change a choice the same way.
-- **Environment variables** are `RAKAZO_STACK_` followed by the answer's name: `RAKAZO_STACK_OWNER_EMAIL`, `RAKAZO_STACK_OWNER_PASSWORD`, `RAKAZO_STACK_MODEL_PROVIDER`, and each pasted key under its `secrets.env` name ([§6](#pasted-keys)). Of the Model provider keys, only the chosen provider's variable is read. The access questions are `RAKAZO_STACK_ACCESS` (`localhost`, `tailscale` or `bring-your-own`), `RAKAZO_STACK_TAILSCALE_DEVICE_NAME`, `RAKAZO_STACK_TS_AUTHKEY` and `RAKAZO_STACK_INSTANCE_URL` ([#68](https://github.com/kamui/rakazo-stack/issues/68)). Later questions add theirs under the same scheme. The program removes every `RAKAZO_STACK_*` variable from the environment of the Docker commands it runs.
+- **Environment variables** are `RAKAZO_STACK_` followed by the answer's name: `RAKAZO_STACK_OWNER_EMAIL`, `RAKAZO_STACK_OWNER_PASSWORD`, `RAKAZO_STACK_MODEL_PROVIDER`, `RAKAZO_STACK_MEMORY` (`on` or `off`), and each pasted key under its `secrets.env` name ([§6](#pasted-keys)). Of the Model provider keys, only the chosen provider's variable is read. The access questions are `RAKAZO_STACK_ACCESS` (`localhost`, `tailscale` or `bring-your-own`), `RAKAZO_STACK_TAILSCALE_DEVICE_NAME`, `RAKAZO_STACK_TS_AUTHKEY` and `RAKAZO_STACK_INSTANCE_URL` ([#68](https://github.com/kamui/rakazo-stack/issues/68)). Later questions add theirs under the same scheme. The program removes every `RAKAZO_STACK_*` variable from the environment of the Docker commands it runs.
 - **The wizard** needs a terminal. Without one, and without `--no-questions`, setup stops before changing anything.
 
 ### Questions
@@ -386,7 +397,7 @@ One re-runnable command. It is an interactive wizard on a first run and safe to 
 | Access | localhost only (default), Tailscale, or bring-your-own (advanced, unsupported) | Pre-filled; switching warns first ([§11](#switching-the-instance-url)) | [#8, #68] |
 | Tailscale auth key and device name | Only with Tailscale access. A key that isn't ephemeral, typed without echo; device name default `rakazo` | Device name pre-filled with the name Tailscale actually assigned. Once joined, Enter skips the key; a key saved before a join succeeded is "set, press Enter to keep" | [#8, #24, #68] |
 | Bring-your-own Instance URL | Only with bring-your-own access. Advanced, unsupported; mutually exclusive with Tailscale | Pre-filled | [#8, #68] |
-| Memory | On when a key is given; Enter keeps it on, `off` stops Hindsight but keeps its data | Pre-filled | [#9](https://github.com/kamui/rakazo-stack/issues/9) |
+| Memory | Asked only when a key is given. On by default; Enter keeps it on, `off` stops Hindsight but keeps its data | Pre-filled | [#9, #66] |
 
 The wizard asks no model questions. The model overrides are edited in `settings.json` ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
 
@@ -420,8 +431,8 @@ Setup **stops before changing anything** on a failed preflight or invalid input:
 - Turning Tailscale **off**: Compose leaves a service whose profile is off running, so setup runs `docker compose --profile tailscale rm --stop --force tailscale`. `tailscale-state` is kept, so turning it on again rejoins as the same device with no key. A failed removal is a checklist item ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 - Never regenerate a secret; never print a pasted key ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
 - Rewrite the stack files and `.env`, re-apply file modes, and re-run steps 6–13 idempotently.
-- Turning memory **on** later: generate Hindsight's secrets, resolve and start Hindsight, connect the default Space ([#9](https://github.com/kamui/rakazo-stack/issues/9)).
-- Turning memory **off** (`off`, or a blank key): drop the `hindsight` profile so `hindsight` and `hindsight-db` stop; keep `hindsight-pgdata`. Nothing is deleted unless separately asked ([#9](https://github.com/kamui/rakazo-stack/issues/9)). Setup doesn't disconnect memory in Rakazo; it finds the Spaces still connected (`SELECT "spaceId" FROM space_memory_configs WHERE provider = 'hindsight'`, read-only) and adds a checklist item for each ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
+- Turning memory **on** later: generate Hindsight's secrets, resolve and start Hindsight (or the recorded version, if memory ran before), connect the default Space ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#66](https://github.com/kamui/rakazo-stack/issues/66)).
+- Turning memory **off** (`off`, or a blank key): drop the `hindsight` profile and remove both containers (`docker compose --profile hindsight rm --stop --force hindsight hindsight-db`, because `up` alone leaves a running container of an inactive profile up); keep `hindsight-pgdata`. Nothing is deleted unless separately asked ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#66](https://github.com/kamui/rakazo-stack/issues/66)). Setup doesn't disconnect memory in Rakazo; it finds the Spaces still connected (`space_memory_configs` rows with `provider = 'hindsight'`, with each Space's name and the email of who connected it, read-only) and adds a checklist item for each ([#1](https://github.com/kamui/rakazo-stack/issues/1)).
 - A re-run started by the install one-liner with a newer program behaves the same: it keeps recorded versions and changes nothing a newer program needs except stack files. If recorded versions are below the new floor, it stops with "run `rakazo-stack update`" ([#32](https://github.com/kamui/rakazo-stack/issues/32), [#35](https://github.com/kamui/rakazo-stack/issues/35)).
 
 ### Database-only settings in Rakazo
@@ -434,18 +445,18 @@ Sequence ([#21](https://github.com/kamui/rakazo-stack/issues/21), [#23](https://
 2. **Detect** what exists with read-only SQL as the database owner role in Rakazo's Postgres (no password needed):
    - Owner: a verified `user` with the Owner email and a `credential` account. `docker compose exec -T postgres psql -U rakazo -d rakazo` with the query on stdin, after `SET default_transaction_read_only = on`. The email is trimmed and lowercased first, as `bootstrap-owner` stores it ([#61](https://github.com/kamui/rakazo-stack/issues/61)).
    - Voice: any `user_voice_credentials` row for the Owner (`JOIN "user" u ON u.id = v."userId"` on the Owner email). Its row-level security isn't forced, so the owner role sees every row.
-   - Memory: `SELECT 1 FROM space_memory_configs WHERE "spaceId" = $1 AND provider = 'hindsight'` for the Owner's default Space.
+   - Memory: any `space_memory_configs` row for the Owner's default Space. The default Space is the one Rakazo opens first: the Owner's earliest `space_members` row whose Space has `isDefault` and no `deletingAt`. A connection to another memory provider counts as present, so setup leaves it alone ([#66](https://github.com/kamui/rakazo-stack/issues/66)).
    - Model connection (OpenAI/Gemini only): an existing connection for the Owner.
 3. **Decide** what to fill:
    - Missing and never filled by setup: fill it.
-   - Missing but `settings.json` says setup filled it before: treat it as removed in Rakazo's UI. The wizard asks "Your voice settings were removed in Rakazo. Add them back? [y/N]" (same for the Owner, memory and the model connection); no-questions mode leaves it removed ([#23](https://github.com/kamui/rakazo-stack/issues/23)). Changing the Owner email clears `filled_by_setup`, because everything setup fills belongs to the Owner, so the new address and its settings count as never set. An Owner created on this run counts its voice as never set too ([#61](https://github.com/kamui/rakazo-stack/issues/61), [#64](https://github.com/kamui/rakazo-stack/issues/64)).
+   - Missing but `settings.json` says setup filled it before: treat it as removed in Rakazo's UI. The wizard asks "Your voice settings were removed in Rakazo. Add them back? [y/N]" (same for the Owner, memory and the model connection); no-questions mode leaves it removed ([#23](https://github.com/kamui/rakazo-stack/issues/23)). Changing the Owner email clears `filled_by_setup`, because everything setup fills belongs to the Owner, so the new address and its settings count as never set. An Owner created on this run counts its voice and its default Space's memory as never set too ([#61](https://github.com/kamui/rakazo-stack/issues/61), [#64](https://github.com/kamui/rakazo-stack/issues/64), [#66](https://github.com/kamui/rakazo-stack/issues/66)).
    - Present: leave it alone, even if it differs from what setup would write ([#21](https://github.com/kamui/rakazo-stack/issues/21)).
 4. Only if something will be filled: ask for the Owner password, unless step 2 already took it. No-questions mode never asks: without `RAKAZO_STACK_OWNER_PASSWORD` nothing is filled, and a checklist item says to run again with it set ([#61](https://github.com/kamui/rakazo-stack/issues/61)).
 5. Owner missing: run Rakazo's `dist/cli/bootstrap-owner.js` in `api` with `OWNER_EMAIL` and `OWNER_PASSWORD` set. The password must not reach an argument list, and WSL's environment doesn't reach `docker.exe`, so setup runs `docker compose exec -T api node -e <script>` and writes `{"email","password"}` to its stdin; the script sets both variables and imports `bootstrap-owner.js` ([#61](https://github.com/kamui/rakazo-stack/issues/61)). Never run `bootstrap-owner` as a check: it ignores arguments (including `--help`) and rewrites `deployment_settings` on every run ([#11](https://github.com/kamui/rakazo-stack/issues/11), [#21](https://github.com/kamui/rakazo-stack/issues/21)).
 6. `POST /api/auth/sign-in/email` with `{email, password}`; read `.token` (on v0.16.0 already the signed value the bearer plugin requires); send it as `Authorization: Bearer …`. Send no `Origin`, cookie or `Sec-Fetch-*` headers. Sign-in is rate-limited to 10 tries per 15 minutes ([#11](https://github.com/kamui/rakazo-stack/issues/11), [#21](https://github.com/kamui/rakazo-stack/issues/21)).
 7. Voice missing: `POST /rpc/voice/connect` with `{"json":{"provider":"openai-compatible","baseUrl":"http://lemonade-relay:13306/api/v1","ttsModel":"kokoro-v1","sttModel":"<Whisper model>"}}`. The server lists models and voices before saving and picks the voice (`af_heart`) ([#11](https://github.com/kamui/rakazo-stack/issues/11), [#21](https://github.com/kamui/rakazo-stack/issues/21), [#24](https://github.com/kamui/rakazo-stack/issues/24)). Lemonade has no `/audio/voices`, so Rakazo falls back to its own Kokoro list, which starts with `af_heart`. Only after step 9 of the first run made voice ready; on v0.16.0 it runs after `bootstrap-owner` in the same signed-in session ([#64](https://github.com/kamui/rakazo-stack/issues/64)).
 8. OpenAI or Gemini and no Owner connection: the `models.connect` RPC with the key and `makeDefault`. A new key on a re-run updates this connection ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
-9. Memory on and missing: `POST /rpc/memory/connectProvider` with `{"json":{"provider":"hindsight","settings":{"mode":"local","baseUrl":"http://hindsight:8888"},"credentials":{"apiKey":"<HINDSIGHT_API_TENANT_API_KEY>"}}}`. Pass nothing for `retainConversations` or other memory toggles: Rakazo's defaults stay ([#44](https://github.com/kamui/rakazo-stack/issues/44), [#45](https://github.com/kamui/rakazo-stack/issues/45), [#50](https://github.com/kamui/rakazo-stack/issues/50)).
+9. Memory on and missing: `POST /rpc/memory/connectProvider` with `x-rakazo-space-id: <default Space id>`, so the call can't land on another Space the Owner's session opens, and `{"json":{"provider":"hindsight","settings":{"mode":"local","baseUrl":"http://hindsight:8888"},"credentials":{"apiKey":"<HINDSIGHT_API_TENANT_API_KEY>"}}}`. A new Owner's default Space is read after `bootstrap-owner` creates it. Rakazo checks the key against Hindsight before saving, which needs no LLM. Pass nothing for `retainConversations` or other memory toggles: Rakazo's defaults stay ([#44](https://github.com/kamui/rakazo-stack/issues/44), [#45](https://github.com/kamui/rakazo-stack/issues/45), [#50](https://github.com/kamui/rakazo-stack/issues/50)).
 10. `POST /api/auth/sign-out`; discard the token ([#21](https://github.com/kamui/rakazo-stack/issues/21)).
 11. Record in `settings.json` what was filled.
 12. A non-2xx reply (`{"json":{"code","status","message"}}` from `/rpc`, `{"code","message"}` from `/api/auth`) becomes a checklist item with its message and the UI steps; setup carries on. So does a failed `bootstrap-owner`, with its error message; with no Owner, nothing after it is filled ([#9](https://github.com/kamui/rakazo-stack/issues/9), [#21](https://github.com/kamui/rakazo-stack/issues/21), [#61](https://github.com/kamui/rakazo-stack/issues/61)).
@@ -520,7 +531,7 @@ Sources: ([#33](https://github.com/kamui/rakazo-stack/issues/33), [#36](https://
 - The key goes into `HINDSIGHT_API_LLM_API_KEY` for every provider, including OpenAI and Gemini, which Rakazo itself connects per user ([#44](https://github.com/kamui/rakazo-stack/issues/44)).
 - With OpenAI or Gemini, memory runs on the Owner's key for everyone, so other people's conversations are learned through the Owner's account. The README FAQ says so ([#50](https://github.com/kamui/rakazo-stack/issues/50)).
 - `OPENAI_API_KEY` and `GEMINI_API_KEY` are not written to Rakazo's env: Rakazo doesn't use them for runs ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
-- **Overrides.** `settings.json` may hold one Rakazo model (`rakazo_model`, written as `PI_DEFAULT_MODEL`) and one memory model (`HINDSIGHT_API_LLM_MODEL`). A `rakazo_model` that is empty or holds anything but ASCII letters, digits and `~ - _ . / : @` is invalid input. Choosing another provider removes the override, because it names a model at the old one, and setup says so ([#65](https://github.com/kamui/rakazo-stack/issues/65)). No per-operation Hindsight models (`HINDSIGHT_API_RETAIN_LLM_*`, `…_CONSOLIDATION_LLM_*`, `…_REFLECT_LLM_*`) ([#36](https://github.com/kamui/rakazo-stack/issues/36), [#51](https://github.com/kamui/rakazo-stack/issues/51)).
+- **Overrides.** `settings.json` may hold one Rakazo model (`rakazo_model`, written as `PI_DEFAULT_MODEL`) and one memory model (`memory_model`, written as `HINDSIGHT_API_LLM_MODEL`). An override that is empty or holds anything but ASCII letters, digits and `~ - _ . / : @` is invalid input. Choosing another provider removes both overrides, because they name models at the old one, and setup says so ([#65](https://github.com/kamui/rakazo-stack/issues/65), [#66](https://github.com/kamui/rakazo-stack/issues/66)). No per-operation Hindsight models (`HINDSIGHT_API_RETAIN_LLM_*`, `…_CONSOLIDATION_LLM_*`, `…_REFLECT_LLM_*`) ([#36](https://github.com/kamui/rakazo-stack/issues/36), [#51](https://github.com/kamui/rakazo-stack/issues/51)).
 - **Defaults belong to the program version.** `rakazo-stack update` moves to a newer program's defaults; overrides always win ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
 - **Switching provider** never touches stored memories: Hindsight's embeddings run locally and don't depend on the provider ([#44](https://github.com/kamui/rakazo-stack/issues/44)).
 - **`~z-ai/glm-flash-latest` is an OpenRouter alias.** It moves when Z.ai ships a new Flash model, not on an Update. A Self-hoster who wants a fixed model sets the override (for example `z-ai/glm-5.3-flash`) ([#36](https://github.com/kamui/rakazo-stack/issues/36)).
@@ -621,7 +632,7 @@ Accepted and documented, not worked around ([#15](https://github.com/kamui/rakaz
 
 v1's memory is Hindsight, replacing Honcho, which is planned as a later option ([#44](https://github.com/kamui/rakazo-stack/issues/44)). See [ADR 0001](adr/0001-hindsight-for-v1-memory.md).
 
-- **On** only when the Self-hoster gives a Model provider key, any of the four. Hindsight refuses to start without an LLM key, so a blank key means memory is off ([#44](https://github.com/kamui/rakazo-stack/issues/44)).
+- **On** only when the Self-hoster gives a Model provider key, any of the four. Hindsight refuses to start without an LLM key, so a blank key means memory is off ([#44](https://github.com/kamui/rakazo-stack/issues/44)). A key its startup check can't use only gives a warning (1.3.0's check fails open), which is how the integration test runs memory with a placeholder key ([#66](https://github.com/kamui/rakazo-stack/issues/66)).
 - **Setup connects memory only in the default Space** ([§7](#database-only-settings-in-rakazo)). Rakazo lets only a Space's owner connect memory, so other Spaces, including other people's, are connected by hand from the checklist and README instructions ([#49](https://github.com/kamui/rakazo-stack/issues/49)).
 - **Learn from conversations stays on** (Rakazo's default). Setup passes nothing for `retainConversations` and doesn't ask. It can be turned off per Space under **Settings → Memory → Edit** ([#50](https://github.com/kamui/rakazo-stack/issues/50)).
 - **One memory model** for all of Hindsight's work ([#51](https://github.com/kamui/rakazo-stack/issues/51)).
@@ -914,7 +925,7 @@ Nobody tracks upstream releases by hand. A weekly GitHub Actions job on Linux ru
 
 - a fresh install against the latest versions;
 - an `update` from the versions of its last passing run;
-- a memory check that creates a **second** Hindsight bank on a populated database, so a missing `shm_size` shows up. It needs no Model provider key: it seeds memories without the LLM and skips Hindsight's LLM check, as [#48](https://github.com/kamui/rakazo-stack/issues/48)'s `repro.sh` did;
+- a memory check that creates a **second** Hindsight bank on a populated database, so a missing `shm_size` shows up. It needs no Model provider key: it seeds memories without the LLM, as [#48](https://github.com/kamui/rakazo-stack/issues/48)'s `repro.sh` did. The integration test `memory_runs_hindsight_connects_the_default_space_and_turns_off_and_on` is that check, so it also runs on every pull request: Hindsight runs on a placeholder key, a bank is seeded in chunks mode, `memory_units` is grown past 8 MB by copying rows in SQL (seconds, where `repro.sh` took 8 minutes of writes), and two new banks are created at once ([#66](https://github.com/kamui/rakazo-stack/issues/66));
 - when the repo secret `OPENROUTER_API_KEY` is set, a short end-to-end memory check through Rakazo on the default model (`~z-ai/glm-flash-latest`): a few turns are learned, then recalled. The key is a separate OpenRouter key with a spending limit of about $1 a month, never printed in the log. Without the secret, this part is skipped and the run says so ([#77](https://github.com/kamui/rakazo-stack/issues/77)).
 
 It opens an issue when any part fails. macOS isn't covered (GitHub's Mac runners can't run Docker). There is no canary for the ZDR only probe, because its result depends on the privacy settings of the account that owns the key ([#39](https://github.com/kamui/rakazo-stack/issues/39)).
@@ -973,6 +984,5 @@ No ticket fixes these names. The implementation picks them, and the docs then st
 
 - the environment variable for the Backup passphrase in no-questions use (keys and the Owner password follow [§7](#7-rakazo-stack-setup)'s `RAKAZO_STACK_` scheme);
 - macOS lemond's port and the LaunchAgent label;
-- the variable name for Hindsight's database password in `secrets.env`;
 - the update-check timestamp file and the Backup file's extension;
 - the rest of `settings.json`'s schema (its start is in [§6](#settingsjson)).

@@ -1,12 +1,13 @@
 //! Database-only settings in Rakazo (spec §7): detect what exists, decide what to fill,
 //! fill it through Rakazo's own code paths, and record what was filled. The model
-//! connection and memory plug in here later.
+//! connection plugs in here later.
 
 use serde::{Deserialize, Serialize};
 
 use crate::answers::{FrontEnd, OWNER_PASSWORD_VAR, Password};
 use crate::checklist::Checklist;
 use crate::lemonade::{RELAY_ORIGIN, RELAY_URL, SPEECH_MODEL, TRANSCRIPTION_MODEL};
+use crate::memory::{CONNECT_STEPS, ConnectedSpace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -14,6 +15,8 @@ pub enum DatabaseSetting {
     Owner,
     /// The Owner's voice credential, pointing at the relay.
     Voice,
+    /// The default Space's memory connection.
+    Memory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,28 +47,56 @@ impl std::fmt::Debug for Session {
     }
 }
 
+/// The Owner's default Space: the one Rakazo opens first.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct DefaultSpace {
+    pub id: String,
+    /// Whether the Space has a memory connection, to any provider.
+    pub memory: bool,
+}
+
 /// The running Instance's Rakazo, as the fill-in sequence uses it.
 pub trait Rakazo {
     /// Read-only: a verified user with this email and a password (`credential`) account.
     fn owner_exists(&self, email: &str) -> Result<bool, String>;
     /// Read-only: any voice credential for the user with this email.
     fn voice_exists(&self, email: &str) -> Result<bool, String>;
+    /// Read-only. `None` when the user has no default Space.
+    fn default_space(&self, email: &str) -> Result<Option<DefaultSpace>, String>;
+    /// Read-only: every Space connected to Hindsight, whoever connected it.
+    fn spaces_on_hindsight(&self) -> Result<Vec<ConnectedSpace>, String>;
     fn bootstrap_owner(&self, email: &str, password: &Password) -> Result<(), String>;
     fn sign_in(&self, email: &str, password: &Password) -> Result<Session, String>;
     /// `POST /rpc/voice/connect` with the relay, `kokoro-v1` and `Whisper-Small`.
     fn connect_voice(&self, session: &Session) -> Result<(), String>;
+    /// Connects the Space to Hindsight with the tenant key, leaving Rakazo's memory
+    /// toggles at their defaults.
+    fn connect_memory(
+        &self,
+        session: &Session,
+        space_id: &str,
+        tenant_key: &str,
+    ) -> Result<(), String>;
     fn sign_out(&self, session: Session) -> Result<(), String>;
 }
 
+/// The settings this run may fill besides the Owner.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Fillable<'a> {
+    /// The voice models are there, so voice is a setting to fill.
+    pub voice: bool,
+    /// Hindsight's tenant key, when memory is on.
+    pub memory: Option<&'a str>,
+}
+
 /// Steps 2–12 of the sequence. Every failure becomes a Checklist item; none stops setup.
-/// `voice_ready` says the voice models are there, so voice is a setting to fill.
 /// `filled` is what `settings.json` records as filled by setup, and gains what this run fills.
 pub fn fill_in(
     rakazo: &dyn Rakazo,
     front: &mut dyn FrontEnd,
     email: &str,
     password: Option<Password>,
-    voice_ready: bool,
+    fillable: Fillable,
     filled: &mut Vec<DatabaseSetting>,
     checklist: &mut Checklist,
 ) {
@@ -87,7 +118,7 @@ pub fn fill_in(
         return;
     }
     // A new Owner account has no voice yet, whatever an earlier one had.
-    let voice = if !voice_ready {
+    let voice = if !fillable.voice {
         Decision::Leave
     } else if fill_owner {
         Decision::Fill
@@ -107,7 +138,13 @@ pub fn fill_in(
         voice,
         "Your voice settings were removed in Rakazo. Add them back?",
     );
-    if !fill_owner && !fill_voice {
+    // A new Owner's default Space appears with the Owner, so it is looked up afterwards.
+    let mut memory_space = match fillable.memory {
+        Some(_) if owner_present => memory_to_fill(rakazo, front, email, filled, checklist),
+        _ => None,
+    };
+    let fill_memory = memory_space.is_some() || (fill_owner && fillable.memory.is_some());
+    if !fill_owner && !fill_voice && !fill_memory {
         return;
     }
 
@@ -117,6 +154,9 @@ pub fn fill_in(
         }
         if fill_voice {
             checklist.add(voice_not_connected(reason));
+        }
+        if fill_memory {
+            checklist.add(memory_not_connected(reason));
         }
     };
     let password = match password.map_or_else(|| front.password_for_fill_in(), |p| Ok(Some(p))) {
@@ -139,6 +179,9 @@ pub fn fill_in(
             return;
         }
         record(filled, DatabaseSetting::Owner);
+        if fillable.memory.is_some() {
+            memory_space = memory_to_fill(rakazo, front, email, filled, checklist);
+        }
     }
 
     let session = match rakazo.sign_in(email, &password) {
@@ -149,10 +192,12 @@ pub fn fill_in(
                     "Setup created the Owner account {email} but couldn't sign in with it: {err}. Sign in to Rakazo to check the email and password."
                 ));
             }
+            let reason = format!("setup couldn't sign in as the Owner ({err})");
             if fill_voice {
-                checklist.add(voice_not_connected(&format!(
-                    "setup couldn't sign in as the Owner ({err})"
-                )));
+                checklist.add(voice_not_connected(&reason));
+            }
+            if memory_space.is_some() {
+                checklist.add(memory_not_connected(&reason));
             }
             return;
         }
@@ -164,6 +209,12 @@ pub fn fill_in(
                 checklist.add(voice_consent());
             }
             Err(err) => checklist.add(voice_not_connected(&err)),
+        }
+    }
+    if let (Some(space), Some(key)) = (memory_space, fillable.memory) {
+        match rakazo.connect_memory(&session, &space, key) {
+            Ok(()) => record(filled, DatabaseSetting::Memory),
+            Err(err) => checklist.add(memory_not_connected(&err)),
         }
     }
     if let Err(err) = rakazo.sign_out(session) {
@@ -187,6 +238,51 @@ fn record(filled: &mut Vec<DatabaseSetting>, setting: DatabaseSetting) {
     }
 }
 
+/// The default Space's id when its memory will be filled.
+fn memory_to_fill(
+    rakazo: &dyn Rakazo,
+    front: &mut dyn FrontEnd,
+    email: &str,
+    filled: &[DatabaseSetting],
+    checklist: &mut Checklist,
+) -> Option<String> {
+    let space = match rakazo.default_space(email) {
+        Ok(Some(space)) => space,
+        Ok(None) => {
+            checklist.add(memory_not_connected(&format!(
+                "Rakazo has no default Space for {email}"
+            )));
+            return None;
+        }
+        Err(err) => {
+            checklist.add(memory_not_connected(&format!(
+                "setup couldn't read the default Space from Rakazo's database: {err}"
+            )));
+            return None;
+        }
+    };
+    wanted(
+        front,
+        decide(space.memory, filled.contains(&DatabaseSetting::Memory)),
+        "The default Space's memory was removed in Rakazo. Add it back?",
+    )
+    .then_some(space.id)
+}
+
+/// With memory off, one item for each Space still connected to Hindsight (spec §7).
+pub fn still_connected(rakazo: &dyn Rakazo, checklist: &mut Checklist) {
+    match rakazo.spaces_on_hindsight() {
+        Ok(spaces) => {
+            for space in &spaces {
+                checklist.add(crate::memory::still_connected_item(space));
+            }
+        }
+        Err(err) => checklist.add(format!(
+            "Setup couldn't check which Spaces are still connected to Hindsight: {err}. Each Space's owner checks Settings → Memory and disconnects Hindsight there."
+        )),
+    }
+}
+
 fn owner_not_created(reason: &str) -> String {
     format!(
         "The Owner account wasn't created: {reason}. Run `rakazo-stack setup` again; if it keeps failing, create it as Rakazo's docs describe under \"Installations without email\"."
@@ -207,6 +303,12 @@ fn voice_not_connected(reason: &str) -> String {
     )
 }
 
+fn memory_not_connected(reason: &str) -> String {
+    format!(
+        "The default Space wasn't connected to memory: {reason}. Run `rakazo-stack setup` again, or connect it in Rakazo: {CONNECT_STEPS}."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +319,7 @@ mod tests {
     use std::cell::RefCell;
 
     const EMAIL: &str = "owner@example.com";
+    const TENANT_KEY: &str = "placeholder-tenant-key";
 
     fn password() -> Password {
         Password::new("correct-horse-battery".into()).unwrap()
@@ -226,9 +329,11 @@ mod tests {
     struct FakeRakazo {
         owner: RefCell<bool>,
         voice: RefCell<bool>,
+        memory: RefCell<bool>,
         bootstrap_error: Option<String>,
         sign_in_error: Option<String>,
         connect_error: Option<String>,
+        memory_error: Option<String>,
         calls: RefCell<Vec<&'static str>>,
     }
 
@@ -248,6 +353,42 @@ mod tests {
                 Some(err) => Err(err.clone()),
                 None => {
                     *self.voice.borrow_mut() = true;
+                    Ok(())
+                }
+            }
+        }
+        fn default_space(&self, _email: &str) -> Result<Option<DefaultSpace>, String> {
+            self.calls.borrow_mut().push("default-space");
+            Ok(self.owner.borrow().then(|| DefaultSpace {
+                id: "space-default".into(),
+                memory: *self.memory.borrow(),
+            }))
+        }
+        fn spaces_on_hindsight(&self) -> Result<Vec<ConnectedSpace>, String> {
+            Ok(vec![
+                ConnectedSpace {
+                    space: "Personal".into(),
+                    by: Some(EMAIL.into()),
+                },
+                ConnectedSpace {
+                    space: "Team".into(),
+                    by: None,
+                },
+            ])
+        }
+        fn connect_memory(
+            &self,
+            session: &Session,
+            space_id: &str,
+            tenant_key: &str,
+        ) -> Result<(), String> {
+            assert_eq!(session.token, "placeholder-token");
+            assert_eq!((space_id, tenant_key), ("space-default", TENANT_KEY));
+            self.calls.borrow_mut().push("connect-memory");
+            match &self.memory_error {
+                Some(err) => Err(err.clone()),
+                None => {
+                    *self.memory.borrow_mut() = true;
                     Ok(())
                 }
             }
@@ -303,6 +444,12 @@ mod tests {
         fn check_zdr_again(&mut self) -> bool {
             panic!("asked about ZDR only")
         }
+        fn memory(
+            &mut self,
+            _: Option<crate::memory::Memory>,
+        ) -> Result<crate::memory::Memory, InputError> {
+            panic!("asked about memory")
+        }
         fn add_back(&mut self, _: &str) -> bool {
             panic!("asked to add back")
         }
@@ -355,7 +502,7 @@ mod tests {
             &mut Silent,
             EMAIL,
             Some(password()),
-            false,
+            Fillable::default(),
             &mut filled,
             &mut checklist,
         );
@@ -380,7 +527,7 @@ mod tests {
             &mut Silent,
             EMAIL,
             None,
-            false,
+            Fillable::default(),
             &mut filled,
             &mut checklist,
         );
@@ -401,7 +548,7 @@ mod tests {
             &mut no,
             EMAIL,
             None,
-            false,
+            Fillable::default(),
             &mut filled,
             &mut checklist,
         );
@@ -415,7 +562,7 @@ mod tests {
             &mut yes,
             EMAIL,
             None,
-            false,
+            Fillable::default(),
             &mut filled,
             &mut checklist,
         );
@@ -438,7 +585,7 @@ mod tests {
             &mut front,
             EMAIL,
             None,
-            false,
+            Fillable::default(),
             &mut filled,
             &mut checklist,
         );
@@ -466,7 +613,7 @@ mod tests {
             &mut Silent,
             EMAIL,
             Some(password()),
-            false,
+            Fillable::default(),
             &mut filled,
             &mut checklist,
         );
@@ -489,7 +636,7 @@ mod tests {
             &mut Silent,
             EMAIL,
             Some(password()),
-            false,
+            Fillable::default(),
             &mut filled,
             &mut checklist,
         );
@@ -510,7 +657,19 @@ mod tests {
         filled: &mut Vec<DatabaseSetting>,
     ) -> Vec<String> {
         let mut checklist = Checklist::default();
-        fill_in(rakazo, front, EMAIL, password, true, filled, &mut checklist);
+        let fillable = Fillable {
+            voice: true,
+            memory: None,
+        };
+        fill_in(
+            rakazo,
+            front,
+            EMAIL,
+            password,
+            fillable,
+            filled,
+            &mut checklist,
+        );
         checklist.items().map(str::to_string).collect()
     }
 
@@ -622,7 +781,7 @@ mod tests {
             &mut Silent,
             EMAIL,
             None,
-            false,
+            Fillable::default(),
             &mut filled,
             &mut checklist,
         );
@@ -657,5 +816,165 @@ mod tests {
         let items = run(&rakazo, &mut front, None, &mut vec![DatabaseSetting::Owner]);
         assert!(items[0].starts_with("Voice wasn't connected"), "{items:?}");
         assert!(items[0].contains(OWNER_PASSWORD_VAR));
+    }
+
+    fn fill_memory(
+        rakazo: &FakeRakazo,
+        front: &mut dyn FrontEnd,
+        password: Option<Password>,
+        filled: &mut Vec<DatabaseSetting>,
+    ) -> Checklist {
+        let mut checklist = Checklist::default();
+        fill_in(
+            rakazo,
+            front,
+            EMAIL,
+            password,
+            Fillable {
+                voice: false,
+                memory: Some(TENANT_KEY),
+            },
+            filled,
+            &mut checklist,
+        );
+        checklist
+    }
+
+    #[test]
+    fn a_first_run_with_memory_connects_the_new_owners_default_space() {
+        let rakazo = FakeRakazo::default();
+        let mut filled = Vec::new();
+        let checklist = fill_memory(&rakazo, &mut Silent, Some(password()), &mut filled);
+        assert_eq!(
+            *rakazo.calls.borrow(),
+            [
+                "detect",
+                "bootstrap-owner",
+                "default-space",
+                "sign-in",
+                "connect-memory",
+                "sign-out"
+            ]
+        );
+        assert_eq!(filled, [DatabaseSetting::Owner, DatabaseSetting::Memory]);
+        assert_eq!(checklist.items().count(), 1, "only the standing item");
+    }
+
+    #[test]
+    fn memory_turned_on_later_needs_the_password_and_touches_nothing_else() {
+        let rakazo = FakeRakazo {
+            owner: RefCell::new(true),
+            ..Default::default()
+        };
+        let mut filled = vec![DatabaseSetting::Owner];
+        let mut scripted = crate::answers::NoQuestions {
+            env: |_: &str| None,
+        };
+        let checklist = fill_memory(&rakazo, &mut scripted, None, &mut filled);
+        assert_eq!(*rakazo.calls.borrow(), ["detect", "default-space"]);
+        let item = checklist.items().next().unwrap();
+        assert!(
+            item.starts_with("The default Space wasn't connected to memory: no Owner password was given (set RAKAZO_STACK_OWNER_PASSWORD).")
+                && item.contains("http://hindsight:8888"),
+            "{item}"
+        );
+
+        rakazo.calls.borrow_mut().clear();
+        fill_memory(&rakazo, &mut Silent, Some(password()), &mut filled);
+        assert_eq!(
+            *rakazo.calls.borrow(),
+            [
+                "detect",
+                "default-space",
+                "sign-in",
+                "connect-memory",
+                "sign-out"
+            ]
+        );
+        assert_eq!(filled, [DatabaseSetting::Owner, DatabaseSetting::Memory]);
+
+        rakazo.calls.borrow_mut().clear();
+        let checklist = fill_memory(&rakazo, &mut Silent, None, &mut filled);
+        assert_eq!(
+            *rakazo.calls.borrow(),
+            ["detect", "default-space"],
+            "a connected Space is left alone, without asking for the password"
+        );
+        assert_eq!(checklist.items().count(), 1);
+    }
+
+    #[test]
+    fn memory_removed_in_rakazo_comes_back_only_when_the_wizard_says_yes() {
+        let rakazo = FakeRakazo {
+            owner: RefCell::new(true),
+            ..Default::default()
+        };
+        let mut filled = vec![DatabaseSetting::Owner, DatabaseSetting::Memory];
+        let mut scripted = crate::answers::NoQuestions {
+            env: |_: &str| None,
+        };
+        let checklist = fill_memory(&rakazo, &mut scripted, Some(password()), &mut filled);
+        assert_eq!(*rakazo.calls.borrow(), ["detect", "default-space"]);
+        assert_eq!(checklist.items().count(), 1);
+
+        let mut yes = Wizard {
+            prompt: Answers(vec!["y", "correct-horse-battery", "correct-horse-battery"]),
+        };
+        fill_memory(&rakazo, &mut yes, None, &mut filled);
+        assert_eq!(
+            rakazo.calls.borrow()[2..],
+            [
+                "detect",
+                "default-space",
+                "sign-in",
+                "connect-memory",
+                "sign-out"
+            ]
+        );
+        assert_eq!(filled, [DatabaseSetting::Owner, DatabaseSetting::Memory]);
+    }
+
+    #[test]
+    fn a_failed_connect_becomes_an_item_with_the_ui_steps_and_isnt_recorded() {
+        let rakazo = FakeRakazo {
+            owner: RefCell::new(true),
+            memory_error: Some("Hindsight rejected the API key (HTTP 400)".into()),
+            ..Default::default()
+        };
+        let mut filled = vec![DatabaseSetting::Owner];
+        let checklist = fill_memory(&rakazo, &mut Silent, Some(password()), &mut filled);
+        assert_eq!(filled, [DatabaseSetting::Owner]);
+        let item = checklist.items().next().unwrap();
+        assert!(
+            item.starts_with("The default Space wasn't connected to memory: Hindsight rejected the API key (HTTP 400).")
+                && item.contains("Settings → Memory → Connect memory provider → Hindsight → Advanced → Self-hosted"),
+            "{item}"
+        );
+        assert!(rakazo.calls.borrow().ends_with(&["sign-out"]));
+    }
+
+    #[test]
+    fn memory_off_never_looks_at_spaces_and_lists_those_still_connected() {
+        let rakazo = FakeRakazo {
+            owner: RefCell::new(true),
+            ..Default::default()
+        };
+        let mut filled = vec![DatabaseSetting::Owner];
+        let mut checklist = Checklist::default();
+        fill_in(
+            &rakazo,
+            &mut Silent,
+            EMAIL,
+            Some(password()),
+            Fillable::default(),
+            &mut filled,
+            &mut checklist,
+        );
+        assert_eq!(*rakazo.calls.borrow(), ["detect"]);
+        still_connected(&rakazo, &mut checklist);
+        let items: Vec<_> = checklist.items().collect();
+        assert_eq!(items.len(), 3);
+        assert!(items[0].contains("\"Personal\", connected by owner@example.com,"));
+        assert!(items[1].contains("\"Team\" is still connected"));
     }
 }

@@ -55,6 +55,61 @@ services:
     cap_add: [NET_ADMIN]
     restart: unless-stopped
 
+  # Memory (spec §10). The values come from .env, which has them only while memory is on.
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight-api:${HINDSIGHT_IMAGE_TAG:-not-recorded}
+    profiles: [hindsight]
+    restart: unless-stopped
+    stop_grace_period: 75s
+    depends_on:
+      hindsight-db:
+        condition: service_healthy
+    networks: [stack, hindsight-data, egress]
+    environment:
+      HINDSIGHT_API_DATABASE_URL: postgresql://hindsight:${HINDSIGHT_DB_PASSWORD:-}@hindsight-db:5432/hindsight
+      HINDSIGHT_API_TENANT_EXTENSION: hindsight_api.extensions.builtin.tenant:ApiKeyTenantExtension
+      HINDSIGHT_API_TENANT_API_KEY:
+      HINDSIGHT_API_LLM_PROVIDER:
+      HINDSIGHT_API_LLM_API_KEY:
+      HINDSIGHT_API_LLM_MODEL:
+      # OpenRouter only; left unset otherwise.
+      HINDSIGHT_API_LLM_REASONING_EFFORT:
+      HINDSIGHT_API_LLM_EXTRA_BODY:
+      # Pinned, so an upstream default change can't break boot.
+      HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL: BAAI/bge-small-en-v1.5
+      HINDSIGHT_API_RERANKER_LOCAL_MODEL: hindsight-ai/hs-rerank-1
+      # Keeps two recalls at once under Rakazo's 15 s recall timeout on a slow CPU (#47).
+      HINDSIGHT_API_RERANKER_MAX_CANDIDATES: "100"
+      # Stable, so in-flight tasks survive a restart.
+      HINDSIGHT_API_WORKER_ID: hindsight
+      HINDSIGHT_API_MCP_ENABLED: "false"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 300s
+
+  hindsight-db:
+    image: pgvector/pgvector:${HINDSIGHT_DB_IMAGE_TAG:-not-recorded}
+    profiles: [hindsight]
+    restart: unless-stopped
+    # Each new bank builds its HNSW indexes in parallel once memory_units passes 8 MB,
+    # which overflows Docker's 64 MB default (#48).
+    shm_size: 1g
+    networks: [hindsight-data]
+    environment:
+      POSTGRES_USER: hindsight
+      POSTGRES_DB: hindsight
+      POSTGRES_PASSWORD: ${HINDSIGHT_DB_PASSWORD:-}
+    volumes:
+      - hindsight-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "hindsight", "-d", "hindsight"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   tailscale:
     profiles: [tailscale]
     # `.env` holds the recorded version and digest whenever the profile is on.
@@ -77,6 +132,9 @@ services:
 networks:
   stack:
     internal: true
+  # Keeps Hindsight's database off `stack`.
+  hindsight-data:
+    internal: true
   egress: {}
 
 configs:
@@ -89,6 +147,7 @@ configs:
       }
 
 volumes:
+  hindsight-pgdata:
   tailscale-state:
   lemonade-models:
   lemonade-llama:
