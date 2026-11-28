@@ -638,15 +638,15 @@ mod tests {
         *super::log() = Some(log("restore"));
         let _password = Password::new("password-placeholder-0001".into()).unwrap();
         let _passphrase = Passphrase::new("passphrase-placeholder".into()).unwrap();
-        say("typed: password-placeholder-0001");
-        say("typed: passphrase-placeholder");
+        say("owner: password-placeholder-0001");
+        say("backup: passphrase-placeholder");
         keep(folder.path()).unwrap();
         *super::log() = None;
 
         let text = fs::read_to_string(folder.path().join(DIR).join("restore-20261126T120101Z.log"))
             .unwrap();
-        assert!(text.contains("typed: <Owner password>"), "{text}");
-        assert!(text.contains("typed: <Backup passphrase>"), "{text}");
+        assert!(text.contains("owner: <Owner password>"), "{text}");
+        assert!(text.contains("backup: <Backup passphrase>"), "{text}");
         assert!(!text.contains("placeholder-0001"), "{text}");
         assert!(!text.contains("passphrase-placeholder"), "{text}");
     }
