@@ -31,6 +31,7 @@ mod self_update;
 mod settings;
 mod setup;
 mod tailscale;
+mod uninstall;
 mod update;
 mod version;
 mod voice;
@@ -89,6 +90,15 @@ enum Command {
         #[arg(long)]
         replace: bool,
     },
+    /// Remove the Instance, its data and the program. Backups stay.
+    Uninstall {
+        /// The Instance's name, rakazo-stack, in place of typing it: asks nothing.
+        #[arg(long, value_name = "NAME")]
+        confirm: Option<String>,
+        /// Delete the images the Instance used that no other container uses.
+        #[arg(long)]
+        delete_images: bool,
+    },
 }
 
 impl Command {
@@ -98,6 +108,7 @@ impl Command {
             Self::Update { .. } => "update",
             Self::Backup { .. } => "backup",
             Self::Restore { .. } => "restore",
+            Self::Uninstall { .. } => "uninstall",
         }
     }
 
@@ -106,7 +117,7 @@ impl Command {
             Self::Setup { .. } => Some(preflight::Command::Setup),
             Self::Update { .. } => Some(preflight::Command::Update),
             Self::Restore { .. } => Some(preflight::Command::Restore),
-            Self::Backup { .. } => None,
+            Self::Backup { .. } | Self::Uninstall { .. } => None,
         }
     }
 }
@@ -119,6 +130,14 @@ fn main() -> ExitCode {
     };
     let folder = InstanceFolder::for_home(&home);
     let folder_existed = folder.path().exists();
+    if matches!(command, Command::Uninstall { .. })
+        && !restore::folder_holds_an_instance(folder.path()).unwrap_or(true)
+    {
+        eprintln!(
+            "Stop: there's no Instance in ~/rakazo-stack, so nothing was removed. To remove the program, delete ~/.local/bin/rakazo-stack."
+        );
+        return ExitCode::FAILURE;
+    }
     let first_setup = !folder.has_settings();
     let handed_over = matches!(command, Command::Update { .. })
         .then(|| std::env::var(self_update::HANDOVER_VAR).ok())
@@ -207,6 +226,18 @@ fn main() -> ExitCode {
         return run_restore(platform, &folder, file, replace, nftables, folder_existed);
     }
 
+    if let Command::Uninstall {
+        confirm,
+        delete_images,
+    } = command
+    {
+        let options = uninstall::Options {
+            confirm,
+            delete_images,
+        };
+        return run_uninstall(platform, &home, &folder, &options);
+    }
+
     if let Command::Update {
         yes,
         no_backup,
@@ -291,6 +322,44 @@ fn run_restore(
             if !err.touched && !folder_existed {
                 restore::remove_new_folder(folder);
             }
+            eprintln!("Stop: {}", err.message);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_uninstall(
+    platform: Platform,
+    home: &std::path::Path,
+    folder: &InstanceFolder,
+    options: &uninstall::Options,
+) -> ExitCode {
+    let Some(docker) = docker::Docker::find(platform) else {
+        eprintln!("Stop: no Docker CLI was found, so nothing was removed.");
+        return ExitCode::FAILURE;
+    };
+    let mut terminal = answers::Terminal::attached().ok();
+    let uninstall = uninstall::Uninstall {
+        platform,
+        docker: &docker,
+        folder,
+        home,
+    };
+    let env = |name: &str| std::env::var(name).ok();
+    match uninstall.run(
+        options,
+        &env,
+        terminal.as_mut().map(|t| t as &mut dyn answers::Prompt),
+    ) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) if err.removing && folder.path().exists() => {
+            eprintln!(
+                "Stop: {}\nRun `rakazo-stack uninstall` again to finish; it skips what is already gone.",
+                err.message
+            );
+            ExitCode::FAILURE
+        }
+        Err(err) => {
             eprintln!("Stop: {}", err.message);
             ExitCode::FAILURE
         }

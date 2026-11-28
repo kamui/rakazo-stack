@@ -8,7 +8,7 @@ What v1 doesn't do, and the trade-offs it makes on purpose. Terms are defined in
 - **Windows: type `docker.exe`.** Run `docker.exe compose …` instead of `docker compose …`, from `~/rakazo-stack` in WSL. Plain `docker` in WSL makes containers that can fail to start after a restart; the next `rakazo-stack setup` or `rakazo-stack update` repairs them.
 - **Docker Desktop's licence.** It's free for personal use, education, non-commercial open source, and businesses with fewer than 250 employees and under $10M in revenue. Other businesses, and every government body, need a paid subscription. Docker Engine on Linux is free for everyone.
 - **One Instance per computer**, for one Self-hoster. No hosted or multi-group mode.
-- **No uninstall command.** Removing an Instance is done by hand: see [the guide](guide.md#removing-an-instance). Its first step removes the bot-computer firewall's rules, and you skip it when another Instance, or a Rakazo you set up yourself with restricted computer egress, uses the same Docker engine.
+- **`rakazo-stack uninstall` leaves the Tailscale device on your tailnet.** Remove it in the Tailscale admin console; the command's last line links its page. See [the guide](guide.md#removing-an-instance).
 - **No start, stop, status or logs commands of its own:** use `docker compose`, as in [the guide](guide.md#running-it-day-to-day).
 - **Backups only when you run them.** There's no built-in schedule; [the guide](guide.md#backups-on-a-schedule) shows a cron line for Linux.
 - **A lost Backup passphrase makes the Backup unusable.** Nobody can recover it.

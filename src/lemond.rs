@@ -498,7 +498,7 @@ fn command_stdout(program: &str, args: &[String]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-fn launchctl_print(uid: u32, label: &str) -> Option<String> {
+pub fn launchctl_print(uid: u32, label: &str) -> Option<String> {
     command_stdout("launchctl", &["print".into(), service(uid, label)])
 }
 

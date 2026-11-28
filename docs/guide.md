@@ -296,7 +296,29 @@ If a newer rakazo-stack can't work with a version you held, `update` says so, mo
 
 ## Removing an Instance
 
-There's no uninstall command. To remove an Instance and all its data, take a Backup first if you might want it back, then run these from `~/rakazo-stack`.
+```sh
+rakazo-stack uninstall
+```
+
+`uninstall` removes the Instance and all its data, and nothing that isn't the Instance's:
+
+1. It offers to take a Backup first, asks whether to delete the images the Instance downloaded that no other container uses, with their total size (Enter keeps them), and asks you to type the Instance's name, `rakazo-stack`. Only then does it take the Backup, so a wrong name changes nothing.
+2. It removes the bot-computer firewall's rules, unless another Instance, or a Rakazo you set up yourself with restricted computer egress, runs on the same Docker engine: then the rules stay, because its bot computers rely on them, and `uninstall` says so.
+3. It removes the bot computers, the containers, the data, the images setup built, and the bot computers' networks.
+4. On a Mac, it removes voice's background item.
+5. It deletes `~/rakazo-stack` and the program.
+
+If it stops part way, run it again: it finishes the job and says what was already gone. Your Backups stay, and the last lines say where they are. If you saved one inside `~/rakazo-stack` with `--output`, `uninstall` stops before it changes anything and names it, so you can move it out. If the Instance joined your tailnet, its device stays there too, and the last line links its page in the Tailscale admin console, where **Machine settings** → **Remove** removes it.
+
+In a script, which has no terminal to type into, pass the name instead. It then asks nothing, takes no Backup, and keeps the images unless you add `--delete-images`:
+
+```sh
+rakazo-stack uninstall --confirm rakazo-stack
+```
+
+### Removing an Instance by hand
+
+If the program is gone, take a Backup first if you might want the Instance back, then run these from `~/rakazo-stack`.
 
 1. Remove the bot-computer firewall's rules. Skip this if another Instance, or a Rakazo you set up yourself with restricted computer egress, uses the same Docker engine: its bot computers rely on the same rules.
 

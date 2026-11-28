@@ -86,8 +86,17 @@ fn output_folder(home: &Path, chosen: Option<&Path>) -> io::Result<PathBuf> {
     Ok(folder)
 }
 
+const FILE_PREFIX: &str = "rakazo-stack-backup-";
+
 pub fn file_name(stamp: &str) -> String {
-    format!("rakazo-stack-backup-{stamp}.{EXTENSION}")
+    format!("{FILE_PREFIX}{stamp}.{EXTENSION}")
+}
+
+/// Whether `name` is a finished Backup's file name, as `file_name` writes it.
+pub fn is_backup(name: &str) -> bool {
+    name.strip_prefix(FILE_PREFIX)
+        .and_then(|rest| rest.strip_suffix(EXTENSION))
+        .is_some_and(|stamp| stamp.ends_with('.'))
 }
 
 #[derive(Serialize)]

@@ -193,6 +193,25 @@ pub fn key_expiry_item(device_name: &str, expires: &str, ipv4: Option<Ipv4Addr>)
     )
 }
 
+/// The Tailscale IPv4 address in a reply of `tailscale status --json`, if the device is up.
+pub fn device_ipv4(status_json: &str) -> Option<Ipv4Addr> {
+    read_status(status_json).ok()?.ipv4
+}
+
+/// `uninstall`'s last words for a device that joined a tailnet. The device stays on the
+/// tailnet after its container goes; `tailscale logout` wouldn't remove it either.
+pub fn remove_device_step(device_name: &str, ipv4: Option<Ipv4Addr>) -> String {
+    let steps = match ipv4 {
+        Some(ip) => {
+            format!("open {CONSOLE}/machines/{ip}, click Machine settings and choose Remove")
+        }
+        None => format!(
+            "open {CONSOLE}/machines, find `{device_name}` and choose Remove from its … menu"
+        ),
+    };
+    format!("Remove the Tailscale device `{device_name}` from your tailnet: {steps}.")
+}
+
 /// For a device setup couldn't read, so it can't tell which console steps are done.
 pub fn console_item(device_name: &str) -> String {
     format!(
@@ -285,6 +304,25 @@ mod tests {
             unknown_ip.contains("open https://console.tailscale.com/admin/machines, find `rakazo`")
         );
         assert!(!item.contains("MagicDNS"));
+    }
+
+    #[test]
+    fn the_removal_step_links_the_devices_page() {
+        let with_ips = running("rakazo").replace(
+            r#""Online":true"#,
+            r#""Online":true,"TailscaleIPs":["100.64.0.1"]"#,
+        );
+        let ip = device_ipv4(&with_ips);
+        assert_eq!(ip, Some(Ipv4Addr::new(100, 64, 0, 1)));
+        assert_eq!(device_ipv4(NEEDS_LOGIN), None);
+        assert_eq!(
+            remove_device_step("rakazo", ip),
+            "Remove the Tailscale device `rakazo` from your tailnet: open https://console.tailscale.com/admin/machines/100.64.0.1, click Machine settings and choose Remove."
+        );
+        assert!(
+            remove_device_step("rakazo", None)
+                .contains("open https://console.tailscale.com/admin/machines, find `rakazo`")
+        );
     }
 
     #[test]
