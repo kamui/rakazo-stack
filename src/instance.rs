@@ -4,6 +4,8 @@ use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
+use crate::runlog;
+
 /// The Instance folder, fixed at `~/rakazo-stack` (spec §6).
 pub struct InstanceFolder {
     path: PathBuf,
@@ -40,6 +42,12 @@ impl InstanceFolder {
     /// Writes a file in the folder through a temporary file, so a crash never leaves it
     /// half-written, and sets its mode to 600 (spec §6: modes are re-applied every run).
     pub fn write(&self, name: &str, contents: &[u8]) -> io::Result<()> {
+        let text = || String::from_utf8_lossy(contents);
+        match name {
+            "secrets.env" => runlog::learn(|r| r.secrets_file(&text())),
+            "settings.json" => runlog::learn(|r| r.settings_file(&text())),
+            _ => {}
+        }
         let target = self.file(name);
         let temp = self.file(&format!(".{name}.tmp"));
         {

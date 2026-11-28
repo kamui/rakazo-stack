@@ -28,6 +28,10 @@ _Avoid_: Snapshot, export, dump
 One of the upstream projects an Instance runs, such as Rakazo, Lemonade, Hindsight or Tailscale. Each has its own version, which an Update moves and a Hold keeps.
 _Avoid_: Service, dependency, package
 
+**Run log**:
+The file one run of setup, update, backup or restore writes in the Instance folder's `logs/`: what it printed and each command it ran, every line timed, with secrets and personal values replaced.
+_Avoid_: Setup log, debug log, trace
+
 **Checklist**:
 The list of steps left for the Self-hoster to do by hand, printed at the end of every setup run.
 _Avoid_: To-do list, manual steps

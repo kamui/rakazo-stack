@@ -20,7 +20,8 @@ use crate::interrupt::Interrupt;
 use crate::memory;
 use crate::platform::Platform;
 use crate::resolve::HINDSIGHT_DB_TAG;
-use crate::runlog::utc_stamp;
+use crate::runlog::{self, Logged, Running, Stdout, utc_stamp};
+use crate::say;
 use crate::settings::{Components, Settings};
 
 pub const PASSPHRASE_VAR: &str = "RAKAZO_STACK_BACKUP_PASSPHRASE";
@@ -158,7 +159,7 @@ impl Backup<'_> {
 
         let stopped = self.running(&project)?;
         let interrupt = Interrupt::catch()?;
-        println!("Stopping Rakazo for the Backup…");
+        say!("Stopping Rakazo for the Backup…");
         let stopped_at = Instant::now();
         let taken = self
             .stop(&stopped)
@@ -173,7 +174,7 @@ impl Backup<'_> {
             Ok(())
         } else {
             let restarted = self.start(&stopped);
-            println!(
+            say!(
                 "Rakazo was stopped for {} s.",
                 stopped_at.elapsed().as_secs()
             );
@@ -207,7 +208,7 @@ impl Backup<'_> {
         let checked = backup_file::write(&partial, passphrase, &small, &spool, seconds)
             .map_err(|err| format!("writing it failed: {err}"))
             .and_then(|()| {
-                println!("Checking the Backup…");
+                say!("Checking the Backup…");
                 self.check(&partial, passphrase, &small, &spool, &project, &images)
             })
             .and_then(|()| {
@@ -227,7 +228,7 @@ impl Backup<'_> {
             return Err(BackupError(format!("the Backup failed its check: {err}")));
         }
         let size = fs::metadata(&path).map_or(0, |m| m.len());
-        println!("Backup written: {} ({})", path.display(), megabytes(size));
+        say!("Backup written: {} ({})", path.display(), megabytes(size));
         Ok(Taken {
             path,
             created: stamp,
@@ -279,7 +280,7 @@ impl Backup<'_> {
     }
 
     fn start(&self, stopped: &Stopped) -> Result<(), BackupError> {
-        println!("Starting Rakazo again…");
+        say!("Starting Rakazo again…");
         if !stopped.services.is_empty() {
             let mut args = vec![
                 "up",
@@ -307,16 +308,16 @@ impl Backup<'_> {
         settings: &Settings,
         spool: &mut Spool,
     ) -> Result<Images, BackupError> {
-        println!("Dumping Rakazo's database…");
+        say!("Dumping Rakazo's database…");
         let postgres = self.image_of(&[], "postgres")?;
         self.dump(spool, Part::RakazoDump, &[], "postgres", "rakazo")?;
         let hindsight_db = if self.volume_exists(&volume(project, "hindsight-pgdata")) {
-            println!("Dumping Hindsight's database…");
+            say!("Dumping Hindsight's database…");
             Some(self.dump_hindsight(settings, spool)?)
         } else {
             None
         };
-        println!("Archiving appdata…");
+        say!("Archiving appdata…");
         self.archive(spool, Part::Appdata, project, "appdata", &postgres)?;
         if self.volume_exists(&volume(project, "tailscale-state")) {
             self.archive(
@@ -564,14 +565,15 @@ impl Backup<'_> {
     fn volume_exists(&self, name: &str) -> bool {
         self.docker
             .command(["volume", "inspect", name])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success())
+            .logged_output()
+            .is_ok_and(|out| out.status.success())
     }
 
     fn compose(&self, args: &[&str]) -> Result<String, BackupError> {
-        let out = self.docker.compose(self.folder.path(), args).output()?;
+        let out = self
+            .docker
+            .compose(self.folder.path(), args)
+            .logged_output()?;
         checked("docker compose", args, out)
     }
 
@@ -629,13 +631,12 @@ fn stream_out(mut command: Command, out: &mut dyn Write) -> Result<(), String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|err| err.to_string())?;
+    let (mut child, running) = runlog::spawn(&mut command).map_err(|err| err.to_string())?;
     let errors = collect_stderr(&mut child);
     let mut stdout = child.stdout.take().expect("stdout is piped");
     let copied = io::copy(&mut stdout, out).map(drop);
     drop(stdout);
-    let status = child.wait().map_err(|err| err.to_string())?;
-    finish(status, errors, copied)
+    finish(child.wait(), running, errors, copied)
 }
 
 /// Runs `command` with `input` on its standard input.
@@ -644,13 +645,12 @@ pub fn stream_in(mut command: Command, input: &mut dyn Read) -> Result<(), Strin
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|err| err.to_string())?;
+    let (mut child, running) = runlog::spawn(&mut command).map_err(|err| err.to_string())?;
     let errors = collect_stderr(&mut child);
     let mut stdin = child.stdin.take().expect("stdin is piped");
     let copied = io::copy(input, &mut stdin).map(drop);
     drop(stdin);
-    let status = child.wait().map_err(|err| err.to_string())?;
-    finish(status, errors, copied)
+    finish(child.wait(), running, errors, copied)
 }
 
 /// Reads standard error on its own thread, so a chatty child can't block on a full pipe.
@@ -664,11 +664,18 @@ fn collect_stderr(child: &mut std::process::Child) -> thread::JoinHandle<String>
 }
 
 fn finish(
-    status: ExitStatus,
+    status: io::Result<ExitStatus>,
+    running: Running,
     errors: thread::JoinHandle<String>,
     copied: io::Result<()>,
 ) -> Result<(), String> {
     let errors = errors.join().unwrap_or_default();
+    running.finish(
+        status.as_ref().copied(),
+        Stdout::Elsewhere,
+        errors.as_bytes(),
+    );
+    let status = status.map_err(|err| err.to_string())?;
     if !status.success() {
         return Err(last_line(&errors).unwrap_or_else(|| format!("exited with {status}")));
     }

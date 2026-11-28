@@ -11,6 +11,7 @@ use crate::lemond::{self, PortHolder};
 use crate::overrides;
 use crate::platform::{self, Platform};
 use crate::resolve;
+use crate::runlog::Logged;
 use crate::version::Version;
 
 const MIN_API: &str = "1.45";
@@ -434,7 +435,7 @@ fn windows_edition() -> Option<String> {
 fn command_output(program: &str, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new(program)
         .args(args)
-        .output()
+        .logged_output()
         .ok()?;
     out.status
         .success()

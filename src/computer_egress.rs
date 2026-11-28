@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use crate::checklist::Checklist;
 use crate::docker::Docker;
 use crate::instance::InstanceFolder;
-use crate::runlog::RunLog;
+use crate::runlog::{self, Logged};
 
 pub const SERVICE: &str = "computer-egress";
 /// Rakazo's script, fetched from the recorded tag and built into the image unmodified.
@@ -149,7 +149,6 @@ pub fn check(
     docker: &Docker,
     folder: &Path,
     nftables: bool,
-    log: &RunLog,
     checklist: &mut Checklist,
 ) -> io::Result<()> {
     if nftables {
@@ -160,12 +159,12 @@ pub fn check(
     if matches!(probe, Probe::Failed(_)) && compose.sidecar()?.applied() {
         // On a Docker restart both start at once, and the supervisor probes only at start
         // and before a computer starts, so a probe that lost the race is repeated here.
-        log.say("Restarting the supervisor so it checks the computer-egress rules again…");
+        runlog::say("Restarting the supervisor so it checks the computer-egress rules again…");
         compose.run(&["restart", "supervisor"])?;
         probe = compose.wait_for_probe()?;
     }
     if probe == Probe::Verified {
-        log.say("Restricted computer egress is verified.");
+        runlog::say("Restricted computer egress is verified.");
     } else {
         checklist.add(not_verified_item(&cause(
             nftables,
@@ -183,7 +182,7 @@ struct Compose<'a> {
 
 impl Compose<'_> {
     fn run(&self, args: &[&str]) -> io::Result<String> {
-        let out = self.docker.compose(self.folder, args).output()?;
+        let out = self.docker.compose(self.folder, args).logged_output()?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "`docker compose {}` failed: {}",

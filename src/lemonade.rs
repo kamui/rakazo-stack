@@ -11,6 +11,7 @@ use serde::Deserialize;
 use crate::docker::Docker;
 use crate::lemond::Lemond;
 use crate::platform::Platform;
+use crate::runlog::{self, Running, Stdout};
 use crate::voice::{Lemonade, Warmed};
 
 pub const LEMONADE_REPO: &str = "lemonade-sdk/lemonade";
@@ -129,14 +130,14 @@ struct Progress {
 }
 
 impl LocalLemonade<'_> {
-    fn spawn(&self, service: &str, args: &[&str]) -> Result<Child, String> {
+    fn spawn(&self, service: &str, args: &[&str]) -> Result<(Child, Running), String> {
         let mut command = self.docker.compose(self.folder, ["exec", "-T", service]);
         command
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        command.spawn().map_err(|err| err.to_string())
+        runlog::spawn(&mut command).map_err(|err| err.to_string())
     }
 
     /// Runs the voice-model client in `api` and hands each line it writes to `line`.
@@ -145,7 +146,7 @@ impl LocalLemonade<'_> {
         request: serde_json::Value,
         mut line: impl FnMut(ClientLine),
     ) -> Result<(), String> {
-        let mut child = self.spawn("api", &["node", "-e", CLIENT])?;
+        let (mut child, running) = self.spawn("api", &["node", "-e", CLIENT])?;
         let mut stdin = child.stdin.take().expect("stdin is piped");
         stdin
             .write_all(request.to_string().as_bytes())
@@ -157,16 +158,22 @@ impl LocalLemonade<'_> {
                 line(parsed);
             }
         }
-        finish(child, "api")
+        finish(child, running, "api")
     }
 }
 
-fn finish(mut child: Child, service: &str) -> Result<(), String> {
+fn finish(mut child: Child, running: Running, service: &str) -> Result<(), String> {
     let mut stderr = String::new();
     if let Some(mut pipe) = child.stderr.take() {
         let _ = pipe.read_to_string(&mut stderr);
     }
-    let status = child.wait().map_err(|err| err.to_string())?;
+    let status = child.wait();
+    running.finish(
+        status.as_ref().copied(),
+        Stdout::Elsewhere,
+        stderr.as_bytes(),
+    );
+    let status = status.map_err(|err| err.to_string())?;
     if status.success() {
         return Ok(());
     }
@@ -187,9 +194,9 @@ impl Lemonade for LocalLemonade<'_> {
         }
         let mut args = vec!["lemonade", "config", "set"];
         args.extend(CONFIG);
-        let mut child = self.spawn("lemonade", &args)?;
+        let (mut child, running) = self.spawn("lemonade", &args)?;
         drop(child.stdin.take());
-        finish(child, "lemonade")
+        finish(child, running, "lemonade")
     }
 
     fn installed(&self) -> Result<Vec<String>, String> {

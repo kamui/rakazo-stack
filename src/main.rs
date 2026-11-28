@@ -16,12 +16,14 @@ mod instance;
 mod interrupt;
 mod lemonade;
 mod lemond;
+mod logs;
 mod memory;
 mod model_provider;
 mod overrides;
 mod platform;
 mod preflight;
 mod rakazo;
+mod redact;
 mod registry;
 mod resolve;
 mod restore;
@@ -89,6 +91,8 @@ enum Command {
         #[arg(long)]
         replace: bool,
     },
+    /// Write one file of logs, with secrets replaced, to attach to a bug report.
+    Logs,
 }
 
 impl Command {
@@ -98,6 +102,7 @@ impl Command {
             Self::Update { .. } => "update",
             Self::Backup { .. } => "backup",
             Self::Restore { .. } => "restore",
+            Self::Logs => "logs",
         }
     }
 
@@ -106,7 +111,7 @@ impl Command {
             Self::Setup { .. } => Some(preflight::Command::Setup),
             Self::Update { .. } => Some(preflight::Command::Update),
             Self::Restore { .. } => Some(preflight::Command::Restore),
-            Self::Backup { .. } => None,
+            Self::Backup { .. } | Self::Logs => None,
         }
     }
 }
@@ -118,6 +123,12 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let folder = InstanceFolder::for_home(&home);
+    let platform = Platform::detect();
+    // It only reads, so it runs beside another command, such as a setup that hangs.
+    if let Command::Logs = command {
+        return run_logs(platform, &folder);
+    }
+    runlog::begin(command.name(), platform, folder.path());
     let folder_existed = folder.path().exists();
     let first_setup = !folder.has_settings();
     let handed_over = matches!(command, Command::Update { .. })
@@ -153,11 +164,21 @@ fn main() -> ExitCode {
         && !first_setup
         && let Err(err) = self_update::program_first(&lock, &home, *yes)
     {
-        eprintln!("Stop: {err}");
+        runlog::warn(&format!("Stop: {err}"));
         return ExitCode::FAILURE;
     }
 
-    let platform = Platform::detect();
+    // After update's step 2, which stops with the Instance as it was. Setup's log starts
+    // after its key checks (spec §7), and a new Instance's restore's once it has written
+    // the Instance (spec §16).
+    if !first_setup
+        && !matches!(command, Command::Setup { .. })
+        && let Err(err) = runlog::keep(folder.path())
+    {
+        runlog::warn(&format!("Stop: can't write the run log: {err}"));
+        return ExitCode::FAILURE;
+    }
+
     let mut nftables = false;
     if let Some(preflight_command) = command.preflight() {
         let recorded_rakazo = folder
@@ -183,7 +204,7 @@ fn main() -> ExitCode {
                 Level::Stop => "Stop",
                 Level::Warn => "Warning",
             };
-            eprintln!("{label}: {}", finding.message);
+            runlog::warn(&format!("{label}: {}", finding.message));
         }
         if findings.iter().any(|f| f.level == Level::Stop) {
             if matches!(command, Command::Restore { .. }) && !folder_existed {
@@ -191,7 +212,7 @@ fn main() -> ExitCode {
             }
             return ExitCode::FAILURE;
         }
-        eprintln!("Preflight passed.");
+        runlog::warn("Preflight passed.");
     }
 
     if let Command::Backup { output } = &command {
@@ -231,7 +252,7 @@ fn main() -> ExitCode {
         return match update.run() {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
-                eprintln!("Stop: {}", err.0);
+                runlog::warn(&format!("Stop: {}", err.0));
                 ExitCode::FAILURE
             }
         };
@@ -253,7 +274,7 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(err) => {
-                eprintln!("Stop: {}", err.0);
+                runlog::warn(&format!("Stop: {}", err.0));
                 ExitCode::FAILURE
             }
         };
@@ -261,6 +282,23 @@ fn main() -> ExitCode {
 
     eprintln!("rakazo-stack {}: not implemented yet", command.name());
     ExitCode::FAILURE
+}
+
+fn run_logs(platform: Platform, folder: &InstanceFolder) -> ExitCode {
+    match logs::run(platform, folder) {
+        Ok((path, docker_missing)) => {
+            if let Some(why) = docker_missing {
+                eprintln!("{why}");
+            }
+            println!("Wrote {}.", path.display());
+            println!("{}", logs::READ_FIRST);
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("Stop: {err}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn run_restore(
@@ -291,7 +329,7 @@ fn run_restore(
             if !err.touched && !folder_existed {
                 restore::remove_new_folder(folder);
             }
-            eprintln!("Stop: {}", err.message);
+            runlog::warn(&format!("Stop: {}", err.message));
             ExitCode::FAILURE
         }
     }
@@ -304,7 +342,7 @@ fn run_backup(
     output: Option<&std::path::Path>,
 ) -> ExitCode {
     let stop = |message: String| {
-        eprintln!("Stop: {message}");
+        runlog::warn(&format!("Stop: {message}"));
         ExitCode::FAILURE
     };
     let mut terminal = answers::Terminal::attached().ok();

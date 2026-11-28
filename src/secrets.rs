@@ -3,6 +3,8 @@
 
 use std::io::Read;
 
+use crate::runlog;
+
 /// Rakazo's six generated secrets (spec §6) and how many random bytes each gets,
 /// written as hex. Postgres passwords stay hex because they're interpolated into a URL.
 const RAKAZO_SECRETS: [(&str, usize); 6] = [
@@ -54,6 +56,9 @@ impl PastedKey {
             && key
                 .chars()
                 .all(|c| c.is_ascii_graphic() && !"\"'`\\$#".contains(c));
+        if usable {
+            runlog::learn(|r| r.unnamed_secret("pasted key", key));
+        }
         usable.then(|| Self(key.to_string()))
     }
 
@@ -85,6 +90,11 @@ impl Secrets {
             .iter()
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.as_str())
+    }
+
+    /// Every name and value, for the logs' replacements.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.entries.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
     /// Sets a pasted key in place, or removes it.

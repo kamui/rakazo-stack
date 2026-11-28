@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::docker::Docker;
 use crate::model_provider::{self, Provider};
 use crate::resolve::{HINDSIGHT_DB_TAG, HindsightRelease};
+use crate::runlog::Logged;
 use crate::secrets::{PastedKey, Secrets};
 
 pub const MEMORY_VAR: &str = "RAKAZO_STACK_MEMORY";
@@ -151,7 +152,7 @@ pub fn update_vector(docker: &Docker, folder: &Path) -> Result<(), String> {
                 "ALTER EXTENSION vector UPDATE",
             ],
         )
-        .output()
+        .logged_output()
         .map_err(|err| err.to_string())?;
     if out.status.success() {
         Ok(())

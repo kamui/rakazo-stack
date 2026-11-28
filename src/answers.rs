@@ -9,6 +9,7 @@ use crate::access::{AccessError, AccessMode, AuthKey, AuthKeyState};
 use crate::composio;
 use crate::memory::{MEMORY_VAR, Memory};
 use crate::model_provider::{Choice, PROVIDER_VAR, Provider};
+use crate::runlog;
 use crate::secrets::{PastedKey, Secrets};
 
 pub const NO_QUESTIONS_OPTION: &str = "--no-questions";
@@ -132,6 +133,7 @@ impl Password {
         } else if units > PASSWORD_MAX {
             Err(InputError::LongPassword)
         } else {
+            runlog::learn(|r| r.unnamed_secret("Owner password", &text));
             Ok(Self(text))
         }
     }
@@ -367,7 +369,7 @@ impl<F: Fn(&str) -> Option<String>> FrontEnd for NoQuestions<F> {
 
     /// A scripted change of choice is already deliberate, so it only warns.
     fn confirm_switch(&mut self, warning: &str) -> bool {
-        println!("{warning}");
+        runlog::say(warning);
         true
     }
 }

@@ -296,6 +296,44 @@ impl TestInstance {
     }
 }
 
+impl TestInstance {
+    /// The run logs whose names start with `prefix`, oldest first.
+    fn run_logs(&self, prefix: &str) -> Vec<PathBuf> {
+        let mut logs: Vec<PathBuf> = fs::read_dir(self.folder().join("logs"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                let name = path.file_name().unwrap().to_string_lossy();
+                name.starts_with(prefix) && name.ends_with(".log")
+            })
+            .collect();
+        logs.sort();
+        logs
+    }
+
+    /// Runs `rakazo-stack logs` and reads the file it wrote.
+    fn logs_file(&self) -> (Output, String) {
+        let out = Command::new(env!("CARGO_BIN_EXE_rakazo-stack"))
+            .arg("logs")
+            .env("HOME", self.home.path())
+            .env("RAKAZO_STACK_TEST_PROJECT", &self.project)
+            .stdin(Stdio::null())
+            .output()
+            .expect("run rakazo-stack logs");
+        let written = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("Wrote ")?
+                    .strip_suffix('.')
+                    .map(PathBuf::from)
+            });
+        let report = written
+            .map(|path| fs::read_to_string(path).unwrap())
+            .unwrap_or_default();
+        (out, report)
+    }
+}
+
 /// Each host port mapping of the Instance's containers, after its service's name.
 fn published_ports(instance: &TestInstance) -> Vec<String> {
     instance
@@ -1198,14 +1236,94 @@ fn a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing() {
             file.display()
         );
         if file.parent().unwrap().ends_with("logs") {
-            for secret in secret_values(&folder) {
-                assert!(
-                    !contents.contains(&secret),
-                    "a secret is in {}",
-                    file.display()
-                );
-            }
+            assert_private(&instance, &file, &contents);
         }
+    }
+
+    let run_logs = instance.run_logs("setup-");
+    assert_eq!(run_logs.len(), 5, "one run log per run: {run_logs:?}");
+    let last = fs::read_to_string(run_logs.last().unwrap()).unwrap();
+    let lines: Vec<&str> = last
+        .lines()
+        .map(|line| {
+            let (stamp, text) = line.split_once(' ').unwrap_or((line, ""));
+            assert!(
+                stamp.len() == 20 && stamp.as_bytes()[10] == b'T' && stamp.ends_with('Z'),
+                "a line without a time: {line}"
+            );
+            text
+        })
+        .collect();
+    assert_eq!(lines[0], "rakazo-stack setup --no-questions", "{last}");
+    for (line, start) in lines[1..5].iter().zip([
+        "Program: rakazo-stack v",
+        "OS: ",
+        "Docker: client ",
+        "Started: ",
+    ]) {
+        assert!(line.starts_with(start), "{start} in the header:\n{last}");
+    }
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("$ ") && line.contains(" compose up -d --wait ")),
+        "{last}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("  exit status: 0 after ")),
+        "{last}"
+    );
+    assert!(
+        last.contains("Its Instance URL is <Instance URL>."),
+        "{last}"
+    );
+
+    // Recreating a container loses its log; the run log stays in the `logs` file.
+    let recreated = instance.compose(&["up", "-d", "--no-deps", "--force-recreate", "supervisor"]);
+    assert!(recreated.status.success(), "{}", text(&recreated));
+    let (out, report) = instance.logs_file();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(
+        text(&out).contains("read the file before you post it"),
+        "{}",
+        text(&out)
+    );
+    assert!(
+        report.contains(&last),
+        "the newest setup run log is in:\n{report}"
+    );
+    for part in [
+        "===== docker compose ps -a =====",
+        "===== docker compose logs supervisor, last 200 lines =====",
+        "Docker's VM: up ",
+    ] {
+        assert!(report.contains(part), "{part} in:\n{report}");
+    }
+    assert_private(&instance, Path::new("the logs file"), &report);
+}
+
+/// Searches a log for the test Instance's own secrets and personal values.
+fn assert_private(instance: &TestInstance, file: &Path, contents: &str) {
+    let mut values = secret_values(&instance.folder());
+    values.extend(
+        [
+            OWNER_EMAIL,
+            OWNER_PASSWORD,
+            MODEL_KEY,
+            COMPOSIO_KEY,
+            "rakazo.example.com",
+        ]
+        .map(str::to_string),
+    );
+    values.push(instance.home.path().display().to_string());
+    for value in values {
+        assert!(
+            !contents.contains(&value),
+            "{value:?} is in {}",
+            file.display()
+        );
     }
 }
 

@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use crate::compose_env;
 use crate::platform::Platform;
+use crate::runlog::Logged;
 use crate::version::Version;
 
 /// The Docker CLI every command goes through. On WSL it is Windows' `docker.exe`
@@ -91,7 +92,7 @@ impl Docker {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.command(args).output()
+        self.command(args).logged_output()
     }
 }
 
