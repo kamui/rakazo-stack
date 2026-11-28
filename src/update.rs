@@ -550,9 +550,16 @@ pub fn remove_pulled_image(docker: &Docker, id: &str) -> Result<bool, String> {
         names
     };
     for name in &refs {
-        let args = ["image", "rm", name.as_str()];
-        let out = docker.output(args).map_err(|err| err.to_string())?;
-        backup::checked("docker", &args, out).map_err(|err| err.0)?;
+        let out = docker
+            .output(["image", "rm", name])
+            .map_err(|err| err.to_string())?;
+        if !out.status.success() {
+            return Err(format!(
+                "`docker image rm {name}` failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
     }
     Ok(true)
 }
