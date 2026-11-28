@@ -15,6 +15,7 @@ use crate::docker::Docker;
 use crate::lemonade::{RELAY_URL, SPEECH_MODEL, TRANSCRIPTION_MODEL};
 use crate::memory::ConnectedSpace;
 use crate::model_provider::{OwnerModel, Provider};
+use crate::runlog::{self, Stdout};
 
 /// Upstream's defaults for `POSTGRES_USER` and `POSTGRES_DB`, which setup never changes.
 /// The official Postgres image trusts local socket connections, so no password is needed.
@@ -56,11 +57,16 @@ impl LocalRakazo<'_> {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = command.spawn().map_err(|err| err.to_string())?;
+        let (mut child, running) = runlog::spawn(&mut command).map_err(|err| err.to_string())?;
         let mut pipe = child.stdin.take().expect("stdin is piped");
         pipe.write_all(stdin).map_err(|err| err.to_string())?;
         drop(pipe);
-        let output = child.wait_with_output().map_err(|err| err.to_string())?;
+        let output = child.wait_with_output();
+        match &output {
+            Ok(out) => running.finish(Ok(out.status), Stdout::Data(out.stdout.len()), &out.stderr),
+            Err(err) => running.finish(Err(err), Stdout::Elsewhere, b""),
+        }
+        let output = output.map_err(|err| err.to_string())?;
         if output.status.success() {
             Ok(output)
         } else {

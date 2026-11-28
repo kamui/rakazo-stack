@@ -27,7 +27,8 @@ use crate::preflight;
 use crate::registry::{self, Ghcr};
 use crate::resolve::{self, HINDSIGHT_DB_IMAGE, HINDSIGHT_DB_TAG, HINDSIGHT_FLOOR, ResolveError};
 use crate::restore::{self, Database, Replace, Restore};
-use crate::runlog::utc_stamp;
+use crate::runlog::{self, Logged, utc_stamp};
+use crate::say;
 use crate::secrets::{LEMONADE_API_KEY, Secrets};
 use crate::self_update;
 use crate::settings::{
@@ -669,7 +670,7 @@ impl Update<'_> {
         holds::apply(&mut holds, &add, &remove, &settings.components).map_err(UpdateError)?;
 
         // Step 4.
-        println!("Checking for newer releases…");
+        say!("Checking for newer releases…");
         let agent = http::agent();
         let native = self.platform == Platform::MacOs;
         let lookup = Lookup {
@@ -680,9 +681,9 @@ impl Update<'_> {
             .plan(&settings, &running(&settings, &secrets), &holds)
             .map_err(|err| UpdateError(format!("{err} Nothing was changed.")))?;
         if let Some(failed) = &settings.failed_update {
-            println!("{}", describe_failed(failed));
+            say!("{}", describe_failed(failed));
         }
-        print!("{}", plan.render());
+        say!("{}", plan.render().trim_end());
         if !plan.moves() {
             if plan.holds != settings.holds {
                 let mut kept = settings.clone();
@@ -709,7 +710,7 @@ impl Update<'_> {
         let staged = self.stage(&agent, &next, &plan)?;
         let checked = self.check_postgres(&plan).and_then(|moves| {
             for line in &moves {
-                println!("{}", line.describe());
+                say!("{}", line.describe());
             }
             if !moves.is_empty() && self.options.no_backup {
                 return Err(UpdateError(
@@ -737,7 +738,7 @@ impl Update<'_> {
             };
             if !confirmed(prompt.line("Update? [Y/n] ").as_deref()) {
                 self.discard(&staged);
-                println!("Nothing was changed.");
+                say!("Nothing was changed.");
                 return Ok(());
             }
         }
@@ -762,7 +763,7 @@ impl Update<'_> {
             }
         } else {
             if plan.needs_backup() {
-                println!("Skipping the Backup (--no-backup).");
+                say!("Skipping the Backup (--no-backup).");
             }
             None
         };
@@ -838,7 +839,7 @@ impl Update<'_> {
             let layout = lemond::Layout::new(self.folder.path(), &project);
             let _ = fs::remove_dir_all(layout.version_dir(&old.version));
         }
-        println!("Update finished.");
+        say!("Update finished.");
         Ok(())
     }
 
@@ -899,7 +900,7 @@ impl Update<'_> {
                 "{reason} {stay} To roll back to the previous versions from the Backup taken at {time}, run:\n  {command}"
             ));
         };
-        println!("{reason}");
+        say!("{reason}");
         let question = format!(
             "Update failed at {step}. Roll back to the previous versions from the Backup taken at {time}? [Y/n] "
         );
@@ -928,7 +929,7 @@ impl Update<'_> {
         to: BTreeMap<Component, String>,
         terminal: &mut Terminal,
     ) -> Result<(), String> {
-        println!("Rolling back from {}…", taken.path.display());
+        say!("Rolling back from {}…", taken.path.display());
         let restore = Restore {
             platform: self.platform,
             docker: self.docker,
@@ -1023,7 +1024,10 @@ impl Update<'_> {
     }
 
     fn compose(&self, args: &[&str]) -> Result<String, UpdateError> {
-        let out = self.docker.compose(self.folder.path(), args).output()?;
+        let out = self
+            .docker
+            .compose(self.folder.path(), args)
+            .logged_output()?;
         if out.status.success() {
             Ok(String::from_utf8_lossy(&out.stdout).into_owned())
         } else {
@@ -1124,7 +1128,7 @@ impl Update<'_> {
             .write("settings.json", next.to_json().as_bytes())?;
         for line in moves {
             let database = line.database;
-            println!(
+            say!(
                 "Moving {} from Postgres {} to {}…",
                 database.label(),
                 line.from,
@@ -1159,7 +1163,7 @@ impl Update<'_> {
             if !moves.iter().any(|line| line.database == database) {
                 return Ok(());
             }
-            println!("Restoring {}…", database.label());
+            say!("Restoring {}…", database.label());
             restored.push(database);
             restore::restore_database(self.docker, self.folder.path(), database, dump)
         })
@@ -1258,9 +1262,9 @@ impl Update<'_> {
         if let Some((script, _)) = &staged.script {
             computer_egress::write_build_folder(self.folder, script)?;
         }
-        println!("Pulling the new images while the Instance runs…");
+        say!("Pulling the new images while the Instance runs…");
         self.compose_new(&["pull", "--quiet", "--ignore-buildable"])?;
-        println!("Building the Lemonade relay and the computer-egress sidecar…");
+        say!("Building the Lemonade relay and the computer-egress sidecar…");
         self.compose_new(&[
             "build",
             "--quiet",
@@ -1274,7 +1278,7 @@ impl Update<'_> {
             let layout = lemond::Layout::new(self.folder.path(), &overrides::compose_project());
             let key = secrets.get(LEMONADE_API_KEY.0).unwrap_or_default();
             Lemond::new(layout, release, key)
-                .install(agent, &|line| println!("{line}"))
+                .install(agent, &runlog::say)
                 .map_err(UpdateError)?;
         }
         Ok(())
@@ -1304,11 +1308,11 @@ impl Update<'_> {
                 .try_for_each(|name| self.docker_ok(&["image", "rm", name]).map(|_| ()));
             match gone {
                 Ok(()) => removed += 1,
-                Err(err) => println!("Couldn't remove a replaced image: {}", err.0),
+                Err(err) => say!("Couldn't remove a replaced image: {}", err.0),
             }
         }
         if removed > 0 {
-            println!(
+            say!(
                 "Removed {removed} image{} of replaced versions.",
                 if removed == 1 { "" } else { "s" }
             );
@@ -1343,7 +1347,7 @@ pub fn nudge(folder: &InstanceFolder, platform: Platform) {
         return;
     }
     if updates_available(folder, platform) {
-        println!("Updates available: run `rakazo-stack update`");
+        say!("Updates available: run `rakazo-stack update`");
     }
 }
 

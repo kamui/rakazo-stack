@@ -15,6 +15,8 @@ use crate::answers::{Prompt, Terminal};
 use crate::github;
 use crate::http::{self, HttpError};
 use crate::instance::InstanceLock;
+use crate::runlog::{self, Stdout};
+use crate::say;
 use crate::update;
 
 const PROGRAM_REPO: &str = "kamui/rakazo-stack";
@@ -183,7 +185,7 @@ pub fn program_first(lock: &InstanceLock, home: &Path, yes: bool) -> Result<(), 
     let own = own_tag();
     let offer = format!("rakazo-stack {newer} is available (you have {own}).");
     if yes {
-        println!("{offer} Installing it.");
+        say!("{offer} Installing it.");
     } else {
         let mut terminal = Terminal::attached().map_err(|_| {
             "update asks before it changes anything, and there is no terminal. Run `rakazo-stack update --yes` to update without asking. Nothing was changed.".to_string()
@@ -193,7 +195,7 @@ pub fn program_first(lock: &InstanceLock, home: &Path, yes: bool) -> Result<(), 
                 .line(&format!("{offer} Install it? [Y/n] "))
                 .as_deref(),
         ) {
-            println!("Carrying on with rakazo-stack {own}.");
+            say!("Carrying on with rakazo-stack {own}.");
             return Ok(());
         }
     }
@@ -214,22 +216,24 @@ fn install(agent: &ureq::Agent, tag: &Tag) -> Result<(), String> {
     let dir = tempfile::tempdir().map_err(|err| err.to_string())?;
     let path = dir.path().join("install.sh");
     fs::write(&path, script).map_err(|err| err.to_string())?;
-    let mut child = Command::new("sh")
+    let mut command = Command::new("sh");
+    command
         .arg(&path)
         .arg("--no-setup")
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|err| format!("sh couldn't run install.sh: {err}"))?;
+        .stdout(Stdio::piped());
+    let (mut child, running) =
+        runlog::spawn(&mut command).map_err(|err| format!("sh couldn't run install.sh: {err}"))?;
     let stdout = child.stdout.take().expect("stdout is piped");
     // install.sh's last line names `setup` as the next step; here the Update is.
     for line in BufReader::new(stdout).lines().map_while(Result::ok) {
         if !line.starts_with("Next: ") {
-            println!("{line}");
+            say!("{line}");
         }
     }
-    let status = child.wait().map_err(|err| err.to_string())?;
-    if status.success() {
+    let status = child.wait();
+    running.finish(status.as_ref().copied(), Stdout::Elsewhere, b"");
+    if status.map_err(|err| err.to_string())?.success() {
         Ok(())
     } else {
         Err("install.sh stopped".into())
@@ -246,7 +250,7 @@ fn hand_over(lock: &InstanceLock, program: &Path, tag: &Tag) -> Result<(), Strin
         )
     };
     let fd = lock.keep_across_exec().map_err(cannot_start)?;
-    println!("Handing over to rakazo-stack {tag}.");
+    say!("Handing over to rakazo-stack {tag}.");
     let _ = std::io::stdout().flush();
     let err = Command::new(program)
         .args(std::env::args_os().skip(1))

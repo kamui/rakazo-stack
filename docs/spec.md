@@ -297,7 +297,7 @@ Fixed at `~/rakazo-stack` on every OS, with no option to move it. On Windows tha
   relay/                           build context for lemonade-relay
   computer-egress/                 build context for the sidecar: Dockerfile, the wrapper, and Rakazo's restrict-computer-egress.sh
   lemonade/                        macOS only: lemond's working folder (config.json, backends), versions/<v>/, models/ (HF_HOME)
-  logs/                            setup run logs, one `setup-<UTC time>.log` per run (no secrets); `lemond.log` on macOS
+  logs/                            run logs, one `<command>-<UTC time>.log` per run of setup, update, backup and restore; `rakazo-stack logs`' files; `lemond.log` on macOS
   .lock                            the lock setup, update, backup and restore take (an OS file lock, released if the program dies)
   .update-check                    when setup or backup last checked for updates, in Unix seconds
   .update.env                      only while update fetches: the new versions' image lines
@@ -387,6 +387,22 @@ The Model provider key, `COMPOSIO_API_KEY` and the Tailscale auth key ([#3](http
 - Surrounding spaces are dropped from a pasted key. A key with a space, quote, backslash, backtick, `$`, `#` or non-ASCII character is invalid input, because it would change the meaning of its `.env` line ([#65](https://github.com/kamui/rakazo-stack/issues/65)).
 - The Composio key is `COMPOSIO_API_KEY`. While integrations are off, `secrets.env` has no such line ([#69](https://github.com/kamui/rakazo-stack/issues/69)).
 - The Tailscale auth key is `TS_AUTHKEY`. It is the one pasted key that isn't kept: once the Instance has joined, setup removes it from `secrets.env` and `.env`, because `tailscale-state` holds the device's identity ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
+
+### Run logs
+
+Each run of `setup`, `update`, `backup` and `restore` writes one run log, `logs/<command>-<UTC time>.log` (mode 600, in `logs/` at mode 700), named for the time the run started. The setup that `update`'s switch and `restore`'s hand-over run writes into that command's log ([#118](https://github.com/kamui/rakazo-stack/issues/118)).
+
+- **When it starts.** The run's lines wait in memory until the run may write to the Instance folder, so a run that stops before then leaves no file: setup after its key checks ([§7](#first-run-step-by-step) step 3), `update` after step 2, which stops with the Instance as it was ([§14](#steps)), `backup` after the lock, and `restore` after the lock when an Instance is already there, otherwise once step 4 has written `settings.json` and `secrets.env` ([§16](#steps-1)).
+- **Header:** the command as typed, the program's release tag and version, the OS and its version (with the kernel on Linux and WSL), Docker's client and engine versions with the engine's platform name, and the start time. Docker's versions are read when the log is first written, so a run that never writes one never asks Docker for them.
+- **Lines.** Every line starts with its UTC time, as `2026-11-27T12:01:01Z`. The log holds every line the run prints, its questions and typed answers aside.
+- **Commands.** Each command the program runs is logged as `$ <command line>` (an argument over 120 characters, such as a Node script, is cut short), then the last 200 lines of its standard error and, when the Self-hoster saw it, of its standard output, then its exit status and how long it took. `compose pull`, `build` and `up` are shown as they come and logged too. Standard output the program reads as data, such as JSON, query results and dumps, is logged by its size only, because it can hold personal values no rule below knows, such as the tailnet's login name in `tailscale status`. The header's `docker version` and `rakazo-stack logs`' own commands aren't logged.
+- **Replacements** ([#118](https://github.com/kamui/rakazo-stack/issues/118)), in every log the program writes, `rakazo-stack logs`' file included:
+  - every value in `secrets.env` by its name, as `<POSTGRES_PASSWORD>`, from the moment it is written there;
+  - a pasted key, the Owner password and the Backup passphrase as soon as the program has them: `<pasted key>` until `secrets.env` names the key, `<Owner password>` and `<Backup passphrase>`;
+  - the Owner email, in any case, by `<Owner email>`; the Instance URL by `<Instance URL>`, and a bring-your-own host by `<Instance URL host>`; any `*.ts.net` name by `<ts.net name>`; the Tailscale device name, as a whole word, by `<Tailscale device name>`, unless it is the default `rakazo` or Tailscale's `rakazo-<n>`, which are no one's own and would garble every line naming Rakazo; Tailscale addresses (`100.64.0.0/10` and `fd7a:115c:a1e0::/48`) by `<Tailscale IP>`; and the home folder, also in Docker Desktop's backslash form, by `~`;
+  - values shorter than 4 characters stay, because they are no key and replacing them would garble the log.
+- **Pruning.** Writing a run log deletes all but the newest 20 of that command's; writing a `rakazo-stack logs` file does the same for those files ([§21](#21-left-to-the-implementation)).
+- `lemond.log` is lemond's own standard output and error, written by launchd ([§9](#macos-native-lemond)); `rakazo-stack logs` applies the replacements to it.
 
 ## 7. `rakazo-stack setup`
 
@@ -796,7 +812,7 @@ The only command that moves recorded versions ([#32](https://github.com/kamui/ra
 ### Steps
 
 1. **Lock.**
-2. **Program first.** If a newer rakazo-stack exists, ask "rakazo-stack vX is available (you have vY). Install it? [Y/n]", run the latest `install.sh --no-setup` (same SHA-256 and attestation checks as a fresh install), and hand over to the new program, which keeps the lock. Newer Components may need a newer layer file or floor.
+2. **Program first.** The run log starts once this step has finished ([§6](#run-logs)). If a newer rakazo-stack exists, ask "rakazo-stack vX is available (you have vY). Install it? [Y/n]", run the latest `install.sh --no-setup` (same SHA-256 and attestation checks as a fresh install), and hand over to the new program, which keeps the lock. Newer Components may need a newer layer file or floor.
    - **Which release.** The newest in GitHub's list of `kamui/rakazo-stack` releases, never `releases/latest`, which answers 404 while only pre-releases exist. Drafts never count. A program from a release (`vX.Y.Z`) moves only to a newer release. A program from a pre-release (`vX.Y.Z-<suffix>`) also moves to a newer pre-release, in SemVer order (`v0.1.0-rc.2` < `v0.1.0-rc.10` < `v0.1.0`), so a pre-release tester stays on pre-releases until a release passes them, and a release never offers a pre-release. The update nudge counts the same release ([#76](https://github.com/kamui/rakazo-stack/issues/76)).
    - **When.** Right after the lock, before preflight, and only when `settings.json` exists. `--yes` installs without asking. Without a terminal and without `--yes`, `update` stops with nothing changed, as at step 5. A No carries on with the running program. If GitHub can't be reached, `update` stops with nothing changed ([#76](https://github.com/kamui/rakazo-stack/issues/76)).
    - **Install.** `update` downloads the `install.sh` of the release it offered (`releases/download/vX/install.sh`, not `latest`) and runs it with `sh … --no-setup`, so the checks are the release's own. Its "Next: run … setup" line isn't printed. If it fails, the older program stays installed, because `install.sh` replaces it only after both checks pass, and `update` stops with nothing in the Instance changed ([#76](https://github.com/kamui/rakazo-stack/issues/76)).
@@ -876,7 +892,7 @@ Inside, the Backup is one tar archive holding these files, in this order ([#71](
 
 ### How it runs
 
-1. Lock, then the passphrase: from `RAKAZO_STACK_BACKUP_PASSPHRASE`, or typed twice on a terminal. With neither, the run stops before anything changes.
+1. Lock, then the passphrase: from `RAKAZO_STACK_BACKUP_PASSPHRASE`, or typed twice on a terminal. With neither, the run stops before anything changes. The run log starts after the lock ([§6](#run-logs)).
 2. Stop whichever of Rakazo's `api`, `worker` and `supervisor` are running, and the running bot computers (not Compose services; found by the `rakazo.managed=true` label and a mount of the Instance's `appdata` volume, so another Instance's computers on the same engine are left alone). Postgres, `web`, Hindsight's API and Tailscale keep running.
 3. With memory off but `hindsight-pgdata` kept, start `hindsight-db` alone for its dump and remove its container afterwards, as setup leaves it ([#1](https://github.com/kamui/rakazo-stack/issues/1)). `.env` has no `hindsight-db` image while memory is off, so Compose gets a second env file, `.backup.env` in the Instance folder, holding only `HINDSIGHT_DB_IMAGE_TAG` from `settings.json`, and deleted afterwards. Dump each database inside its container: `docker compose exec -T <service> pg_dump -Fc --no-owner --no-privileges …` (without `-T`, terminal allocation corrupts the dump). Postgres volumes are never copied, so dumps survive Postgres major moves and moves between OSes.
 4. Archive `appdata` (and `tailscale-state`) in a throwaway container of Rakazo's own `postgres` image, which is Debian's and has GNU tar, on no network, with the volume mounted read-only. `staging/` and `mcp-packages/` are left out only at the top of `appdata`: `--anchored --exclude=./staging --exclude=./mcp-packages`. Dumping first means every row has its file.
@@ -904,7 +920,7 @@ Brings an Instance back from a Backup, on the same machine or a new one, on any 
 
 - **Lock:** `restore` takes the lock in the Instance folder like every other command, so `setup`, `update` and `backup` can't run beside it. On a machine with no Instance folder it creates the folder (mode 700) to hold `.lock`. A folder holding only `.lock` counts as no Instance, and when `restore` stops before step 4 it removes a folder it created, so a refused restore leaves the machine as it was ([#72](https://github.com/kamui/rakazo-stack/issues/72)).
 - **Existing Instance:** refuses if `~/rakazo-stack` holds anything but `.lock`, or if any `rakazo-stack_*` volume exists that no other Compose project claims (its `com.docker.compose.project` label is `rakazo-stack` or missing). `--replace` wipes the current Instance's data after the Self-hoster types its name, the Compose project name `rakazo-stack`, on a terminal; it suggests a Backup first but doesn't take one ([#30](https://github.com/kamui/rakazo-stack/issues/30), [#72](https://github.com/kamui/rakazo-stack/issues/72)).
-  - The wipe removes the Instance's containers and its bot computers (`rakazo.managed=true` with its `appdata` mounted), those volumes, and every file in the Instance folder but `.lock`. On macOS it first unloads the lemond LaunchAgent, which runs from that folder. Networks and the sidecar's firewall rules stay; setup reuses them.
+  - The wipe removes the Instance's containers and its bot computers (`rakazo.managed=true` with its `appdata` mounted), those volumes, and every file in the Instance folder but `.lock` and `logs/`, which holds the run log being written, `update`'s during a rollback included ([§6](#run-logs), [#118](https://github.com/kamui/rakazo-stack/issues/118)). On macOS it first unloads the lemond LaunchAgent, which runs from that folder. Networks and the sidecar's firewall rules stay; setup reuses them.
   - `--replace` refuses a Backup file inside the Instance folder, which the wipe would delete.
   - `update`'s rollback runs the same `--replace` inside its own lock, without the typed name ([§14](#failures)).
 - **Versions:** restore brings back exactly the Component versions and digests recorded in the Backup, so a pre-update Backup is a real way back. If Rakazo or Hindsight is below the program's floor, it says so and restores onto that Component's latest version instead, migrating forward. A Backup made by a newer rakazo-stack (`program_version` above this one's), or in another `format`, is refused, pointing to `rakazo-stack update` ([#32](https://github.com/kamui/rakazo-stack/issues/32)).
@@ -919,7 +935,7 @@ Brings an Instance back from a Backup, on the same machine or a new one, on any 
 1. Lock and setup's preflight (Docker versions, ports, the WSL home check, GitHub).
 2. Decrypt and verify the Backup and apply the version rule. The passphrase comes from `RAKAZO_STACK_BACKUP_PASSPHRASE`, or is typed once on a terminal. Every part is read through `age`, whose chunks are authenticated, and the tar must hold every required part in order, as in backup's self-check. The dumps and archives were read back by `pg_restore --list` and `tar --list` when the Backup was written, and `age` proves they haven't changed since, so this step runs no container. Latest versions for Components below the floor are looked up here. The machine is untouched until this passes ([#72](https://github.com/kamui/rakazo-stack/issues/72)).
 3. Check for an existing Instance; ask the Tailscale question.
-4. With `--replace`, wipe the Instance. Write `settings.json` and `secrets.env` into the Instance folder with the right modes.
+4. With `--replace`, wipe the Instance. Write `settings.json` and `secrets.env` into the Instance folder with the right modes. A restore with no Instance here before starts its run log here ([§6](#run-logs)).
 5. Write the stack files as setup's step 5 does, and a provisional `.env` that setup rewrites. Start only `postgres` and `hindsight-db` on fresh volumes (`up -d --no-deps --wait`), wait until each answers over TCP (`pg_isready -h 127.0.0.1`, since the image's first start serves only its socket until initialization ends), create the `rakazo_app` role Rakazo's dump expects (`NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`, as Rakazo's row-level security migration makes it), and run `pg_restore --no-owner --no-privileges --single-transaction --exit-on-error` for each, with the dump on standard input. This runs before Rakazo's `migrate` and Hindsight's API, which both migrate on start; `migrate` then gives `rakazo_app` its login, password and grants. `update`'s Postgres major move reuses this step ([§14](#postgres-major-moves)).
 6. Unpack `appdata`, and `tailscale-state` if kept, in a throwaway container of Rakazo's own `postgres` image on no network (GNU tar, `--numeric-owner`). Each volume is created first with Compose's `com.docker.compose.project` and `com.docker.compose.volume` labels, so Compose takes it as the Instance's own.
 7. Hand over to setup's no-questions run. It rewrites the stack files and `.env`, adds the OS-specific parts, pulls models and starts everything, finds the Owner, voice and memory settings already in the database (so it never needs the Owner password), and ends with the usual checklist.
@@ -930,7 +946,7 @@ Sources: ([#30](https://github.com/kamui/rakazo-stack/issues/30), [#32](https://
 
 ## 17. Running the Instance day to day
 
-There are no `start`, `stop`, `status` or `logs` subcommands. From `~/rakazo-stack` ([#41](https://github.com/kamui/rakazo-stack/issues/41)):
+There are no `start`, `stop` or `status` subcommands; `rakazo-stack logs` ([below](#rakazo-stack-logs)) only collects logs for a bug report. From `~/rakazo-stack` ([#41](https://github.com/kamui/rakazo-stack/issues/41)):
 
 | Task | Linux, macOS | Windows (in WSL) |
 |---|---|---|
@@ -941,6 +957,22 @@ There are no `start`, `stop`, `status` or `logs` subcommands. From `~/rakazo-sta
 On Windows, plain `docker` in WSL can leave parts of the Instance unable to start after a reboot; the next `setup` or `update` repairs it ([§7](#windows-docker-through-dockerexe)) ([#41](https://github.com/kamui/rakazo-stack/issues/41)).
 
 On macOS, the voice engine runs outside Docker as the LaunchAgent, so `docker compose down` doesn't stop it.
+
+### `rakazo-stack logs`
+
+Writes one file the Self-hoster can attach to an issue, `~/rakazo-stack/logs/rakazo-stack-logs-<UTC time>.txt` (mode 600), and prints where it is. A container's log is lost whenever setup, `update` or `compose down` recreates the container, and Docker's restarts show only in its VM's uptime, so the file gathers what a maintainer asks for ([#118](https://github.com/kamui/rakazo-stack/issues/118)):
+
+- the program, OS and Docker lines of a run log's header ([§6](#run-logs));
+- `docker version`, and Docker's VM uptime with the time it started, from `/proc/uptime`: the machine's own on Linux, and on Windows and macOS read in Rakazo's `postgres` container (`docker compose exec -T postgres cat /proc/uptime`);
+- `docker compose ps -a`, and the last 200 lines of `docker compose logs --no-color --timestamps` for each service with a container;
+- the newest run log of each of `setup`, `update`, `backup` and `restore`, whole;
+- on macOS, the last 500 lines of `lemond.log`, and the LaunchAgent's entry in `sfltool dumpbtm` (the entries whose text names its label).
+
+Everything goes through the run logs' replacements ([§6](#run-logs)), from the Instance folder's `secrets.env` and `settings.json`. The command says to read the file before posting it, because a log line can still hold something no rule knows about.
+
+- Without an Instance (no `settings.json`) it stops and writes nothing. It takes no lock and runs no preflight, so it also works beside a command that is still running, such as a setup that hangs.
+- With Docker stopped, or no Docker CLI, the file holds the run logs and the rest, and a "Container logs" section, also printed, that says the container logs are missing and why: Docker's own error, such as `Cannot connect to the Docker daemon`.
+- It writes no run log of its own, and nothing leaves the machine unless the Self-hoster attaches the file.
 
 ## 18. Distribution of the program
 
@@ -1026,6 +1058,7 @@ Each of these was decided from source, docs or a partial run and must pass durin
 - **Rakazo calls:** a voice call with a bot through Lemonade in a browser, which needs a Model provider key; speech and transcription through the browser's own `/api/voice/*` routes passed without one ([#64](https://github.com/kamui/rakazo-stack/issues/64)). With a real OpenAI or Gemini key: `models.connect` accepting it, and the Owner's new bot replying on the model with no step in Rakazo's UI. The call's route, body, detection query, new-key update and refusal of a bad key passed on v0.16.0, the floor and the latest release then, with placeholder keys; the saving runs had the providers made unreachable from `api` ([#67](https://github.com/kamui/rakazo-stack/issues/67)).
 - **Memory models:** Hindsight 1.3.0 retaining and recalling with a real OpenAI key on `gpt-6-luna`, and with a real Gemini key on `gemini-3.5-flash-lite`. Both models' documented output limits allow what fact extraction asks for ([§10](#10-memory)); no call has confirmed it ([#44](https://github.com/kamui/rakazo-stack/issues/44), [#67](https://github.com/kamui/rakazo-stack/issues/67)).
 - **Weekly canary:** a scheduled run of `main` with all four parts passing, a forced failure of each opening its issue, a repeat commenting on it, an `update` starting from an earlier run's record, and the `memory` part failing on a branch without `shm_size`. All four parts passed on a manual run of a branch, the `end-to-end` part with the real key ([#77](https://github.com/kamui/rakazo-stack/issues/77), [#109](https://github.com/kamui/rakazo-stack/issues/109)).
+- **Logs:** on a Mac, `rakazo-stack logs` holding the LaunchAgent's `sfltool dumpbtm` entry and the end of `lemond.log`; on Windows, Docker's VM uptime read in `postgres`. On Linux the integration test `a_scripted_first_run_creates_the_owner_and_a_rerun_changes_nothing` searches each run log and the `logs` file for the test Instance's secrets, Owner email and password, pasted keys, bring-your-own host and home folder, and checks the newest setup run log is in the `logs` file after the supervisor is recreated; `tests/cli.rs` covers a failed run's log and `logs` with Docker stopped, through a stand-in `docker` ([#118](https://github.com/kamui/rakazo-stack/issues/118)).
 - **Composio:** whether it accepts a callback to `http://127.0.0.1:5173/integrations/callback` and to a `ts.net` Instance URL; connecting one Composio-managed app as a Rakazo user and having a bot call it; and the key check's accepting reply, which no real key has produced yet. Only its refusals were recorded, with placeholder keys ([#3](https://github.com/kamui/rakazo-stack/issues/3), [#8](https://github.com/kamui/rakazo-stack/issues/8), [#69](https://github.com/kamui/rakazo-stack/issues/69)).
 - **Tailscale through setup:** with a real auth key, the Instance answering at its `ts.net` address from another device with a valid certificate; password sign-in at both addresses; only the web app answering on the device; a device-name clash ending on the assigned name; the rejoin with no key after the container is recreated; switching off; and the checklist item with HTTPS certificates off. The container's own behaviour was tested by hand on Windows in [#24](https://github.com/kamui/rakazo-stack/issues/24) ([#68](https://github.com/kamui/rakazo-stack/issues/68)).
 - **Phones:** Rakazo's phone app with `BETTER_AUTH_URL` on localhost ([#24](https://github.com/kamui/rakazo-stack/issues/24)). Android end to end is optional: v1 documents Android as untested, and the check runs only if an Android phone is at hand ([#28](https://github.com/kamui/rakazo-stack/issues/28), [#79](https://github.com/kamui/rakazo-stack/issues/79)).
@@ -1053,4 +1086,5 @@ Collected from the decisions above, for the README and docs:
 
 No ticket fixed these names. The implementation picked them, and the docs state them ([#78](https://github.com/kamui/rakazo-stack/issues/78)):
 
+- the `logs` command, its file `rakazo-stack-logs-<UTC time>.txt` in the Instance folder's `logs/`, and keeping the newest 20 run logs of each command and 20 of those files ([§6](#run-logs), [§17](#rakazo-stack-logs), [#118](https://github.com/kamui/rakazo-stack/issues/118)).
 - the rest of `settings.json`'s schema: `rakazo_model`, `memory_model`, `model_connection_due`, `model_providers_left`, `bring_your_own_url`, `holds` and `failed_update`, with the values in [§6](#settingsjson). [docs/files.md](files.md#settingsjson) lists every field.

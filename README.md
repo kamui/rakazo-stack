@@ -86,6 +86,7 @@ sh install.sh
 | `rakazo-stack restore <file>` | Brings an Instance back from a Backup file, on the same computer or a new one, on any supported system. |
 | `rakazo-stack update` | Updates the `rakazo-stack` program, then Rakazo, Lemonade, Hindsight and Tailscale, to their newest releases. It shows what will change and asks first, takes a Backup, and offers to roll back if the Update fails. `setup` and `backup` remind you, at most once a day, when there's something new. |
 | `rakazo-stack update --hold rakazo=v0.16.0` | Keeps a Component at a version you choose, for when a new release causes trouble. `--unhold rakazo` lets it update again. |
+| `rakazo-stack logs` | Writes one file, with your secrets and personal values replaced, to attach to a bug report: the latest run logs, the containers' last log lines, and the versions of everything. Read it before you post it. |
 
 [The guide](docs/guide.md) explains each command in full. Each command also has `--help`.
 

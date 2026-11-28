@@ -16,7 +16,7 @@ Everything setup writes goes in `~/rakazo-stack`, on every system. On Windows th
   relay/                           build folder for the Lemonade relay
   computer-egress/                 build folder for the bot-computer firewall
   lemonade/                        Mac only: the voice engine, its versions and its models (about 2 GB)
-  logs/                            one setup-<UTC time>.log per setup run, with no secrets; lemond.log on a Mac
+  logs/                            run logs, and the files `rakazo-stack logs` writes; lemond.log on a Mac
   .lock                            held by whichever rakazo-stack command is running
   .update-check                    when setup or backup last checked for updates
   .update.env                      only while an Update downloads: the new versions
@@ -31,6 +31,14 @@ Outside it:
 | `~/Library/LaunchAgents/com.github.kamui.rakazo-stack.lemond.plist` | Mac only: the background item that runs voice (mode 600) |
 
 Docker keeps the data in volumes named `rakazo-stack_<name>`: Rakazo's `pgdata`, `appdata` and `webassets`, and, when they're used, `lemonade-models`, `lemonade-llama`, `lemonade-data`, `lemonade-config`, `hindsight-pgdata` and `tailscale-state`.
+
+## Logs
+
+Each run of `setup`, `update`, `backup` and `restore` writes a run log in `~/rakazo-stack/logs/`, named for the command and the time it started in UTC, such as `setup-20261127T120101Z.log`. It starts with the command, the program's version, your system's version, Docker's version and the start time. Each line has its UTC time, and each command the program ran is there with its exit status and what it printed. The newest 20 of each command are kept.
+
+Secrets and personal values are replaced in every log: each value in `secrets.env` by its name, such as `<OPENROUTER_API_KEY>`, and a key you paste, the Owner password and the Backup passphrase as soon as the program has them; your Owner email by `<Owner email>`, the Instance URL by `<Instance URL>`, Tailscale names by `<ts.net name>` and `<Tailscale device name>`, Tailscale addresses by `<Tailscale IP>`, and your home folder by `~`. A Tailscale device name of `rakazo`, the default, stays.
+
+`rakazo-stack logs` writes `rakazo-stack-logs-<UTC time>.txt` in the same folder: see [the guide](guide.md#logs-for-a-bug-report). On a Mac, `lemond.log` is the voice engine's own log.
 
 ## Don't edit the generated files
 

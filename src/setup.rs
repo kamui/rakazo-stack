@@ -29,7 +29,7 @@ use crate::resolve::{
     self, HINDSIGHT_DB_IMAGE, HINDSIGHT_DB_TAG, HINDSIGHT_FLOOR, HindsightRelease, RakazoRelease,
     Resolution, ResolveError,
 };
-use crate::runlog::RunLog;
+use crate::runlog::{self, Logged};
 use crate::secrets::{self, HINDSIGHT_TENANT_KEY, LEMONADE_API_KEY, Secrets};
 use crate::settings::Settings;
 use crate::tailscale::{self, Joined};
@@ -184,27 +184,27 @@ impl Setup<'_> {
             }
             None => None,
         };
-        let log = RunLog::create(self.folder.path())?;
+        runlog::keep(self.folder.path())?;
         for note in dropped_override.iter().chain(&dropped_memory_override) {
-            log.say(note);
+            runlog::say(note);
         }
         for warning in [key_warning, composio_warning].into_iter().flatten() {
-            log.say(&warning);
+            runlog::say(&warning);
         }
         if let Some((Provider::Gemini, _)) = model {
-            log.say(model_provider::GEMINI_BILLING);
+            runlog::say(model_provider::GEMINI_BILLING);
         }
         let zdr_item = match model {
             Some((provider @ Provider::OpenRouter, key)) => model_provider::ensure_zdr(
                 || model_provider::probe_zdr(&agent, provider.api_base(), key),
                 front.as_mut(),
-                |line| log.say(line),
+                runlog::say,
             ),
             _ => None,
         };
         let release = match &recorded {
             Some(settings) => settings.rakazo_release(),
-            None => resolve_rakazo(&agent, &|line| log.say(line))?,
+            None => resolve_rakazo(&agent, &runlog::say)?,
         };
         // Recorded the first time memory runs; only `update` moves it after that.
         let hindsight = match (&hindsight_model, recorded.as_ref()) {
@@ -212,7 +212,7 @@ impl Setup<'_> {
             (Some(_), Some(settings)) if settings.components.hindsight.is_some() => {
                 settings.hindsight_release()
             }
-            (Some(_), _) => Some(resolve_hindsight(&agent, &|line| log.say(line))?),
+            (Some(_), _) => Some(resolve_hindsight(&agent, &runlog::say)?),
         };
         let mut settings = recorded.unwrap_or_else(|| Settings::new(&release));
         settings.program_version = env!("CARGO_PKG_VERSION").to_string();
@@ -231,9 +231,9 @@ impl Setup<'_> {
             Some(recorded) => recorded,
             None => {
                 let release = if native {
-                    lemond::resolve(&agent, &log).map_err(SetupError)?
+                    lemond::resolve(&agent).map_err(SetupError)?
                 } else {
-                    resolve_lemonade(&agent, &log)?
+                    resolve_lemonade(&agent)?
                 };
                 settings.record_lemonade(&release);
                 release
@@ -293,7 +293,7 @@ impl Setup<'_> {
         let lemond = native.then(|| self.lemond(&stack.project, lemonade_release, &secrets));
         let lemond_ready = lemond
             .as_ref()
-            .is_some_and(|lemond| lemond.set_up(&agent, &log, &mut checklist));
+            .is_some_and(|lemond| lemond.set_up(&agent, &mut checklist));
 
         // Compose leaves a service whose profile is off running, so it is removed by
         // name. Its volume stays, to rejoin as the same device later.
@@ -320,40 +320,40 @@ impl Setup<'_> {
             }
         }
         if self.platform == Platform::Wsl {
-            self.recreate_containers_made_in_wsl(&stack.project, &log)?;
+            self.recreate_containers_made_in_wsl(&stack.project)?;
         }
         let tailnet = tailscale_chosen && settings.components.tailscale.is_some();
         // Voice and Tailscale start on their own, so that their failure can't stop Rakazo's.
         let rakazo_services =
             self.services_besides(&[VOICE_SERVICES.as_slice(), &[tailscale::SERVICE]].concat())?;
-        log.say(&format!("Pulling Rakazo {} images…", stack.release.tag));
+        runlog::say(&format!("Pulling Rakazo {} images…", stack.release.tag));
         if let Some((hindsight, _)) = &stack.hindsight {
-            log.say(&format!(
+            runlog::say(&format!(
                 "Memory is on: pulling Hindsight {}, which is about 6.4 GB…",
                 hindsight.version
             ));
         }
         self.compose_for(&["pull", "--quiet", "--ignore-buildable"], &rakazo_services)?;
-        log.say("Building the computer-egress sidecar…");
+        runlog::say("Building the computer-egress sidecar…");
         self.compose(&["build", "--quiet", computer_egress::SERVICE])?;
-        let voice_started = self.start_voice(&log, &mut checklist);
-        log.say(if stack.hindsight.is_some() {
+        let voice_started = self.start_voice(&mut checklist);
+        runlog::say(if stack.hindsight.is_some() {
             "Starting Rakazo and Hindsight (Hindsight takes about a minute)…"
         } else {
             "Starting Rakazo…"
         });
         self.start(&stack, &rakazo_services)?;
         if self.switch.is_some() && stack.hindsight.is_some() {
-            log.say("Updating pgvector's extension in Hindsight's database…");
+            runlog::say("Updating pgvector's extension in Hindsight's database…");
             memory::update_vector(self.docker, self.folder.path()).map_err(SetupError)?;
         }
         let origin = stack.local_origin();
-        log.say(&format!(
+        runlog::say(&format!(
             "Rakazo {} is running at {origin}",
             stack.release.tag
         ));
         if let Access::BringYourOwn(url) = &stack.access {
-            log.say(&format!(
+            runlog::say(&format!(
                 "Its Instance URL is {}. Your proxy on this machine must forward it to {origin}.",
                 url.origin()
             ));
@@ -371,7 +371,7 @@ impl Setup<'_> {
                     let home = self.folder.path().parent()?;
                     preflight::docker_free_disk(self.platform, self.docker, home)
                 },
-                &mut |line| log.say(line),
+                &mut runlog::say,
                 &mut checklist,
             );
         let joined = if tailnet {
@@ -381,7 +381,6 @@ impl Setup<'_> {
                 &mut settings,
                 &mut secrets,
                 &mut checklist,
-                &log,
             )?
         } else {
             None
@@ -406,7 +405,6 @@ impl Setup<'_> {
             self.docker,
             self.folder.path(),
             self.nftables,
-            &log,
             &mut checklist,
         )?;
         let rakazo = LocalRakazo {
@@ -457,14 +455,14 @@ impl Setup<'_> {
         }
         self.folder
             .write("settings.json", settings.to_json().as_bytes())?;
-        log.say(checklist.render().trim_end());
+        runlog::say(checklist.render().trim_end());
         Ok(())
     }
 
     /// Builds the relay and starts it with Lemonade. A failure is a Checklist item, not a
     /// failed run, so Rakazo starts either way (spec §9).
-    fn start_voice(&self, log: &RunLog, checklist: &mut Checklist) -> bool {
-        log.say("Building the Lemonade relay and starting Lemonade…");
+    fn start_voice(&self, checklist: &mut Checklist) -> bool {
+        runlog::say("Building the Lemonade relay and starting Lemonade…");
         let mut up = vec![
             "up",
             "-d",
@@ -527,7 +525,10 @@ impl Setup<'_> {
     }
 
     fn compose(&self, args: &[&str]) -> Result<(), SetupError> {
-        let status = self.docker.compose(self.folder.path(), args).status()?;
+        let status = self
+            .docker
+            .compose(self.folder.path(), args)
+            .logged_status()?;
         if status.success() {
             Ok(())
         } else {
@@ -554,7 +555,7 @@ impl Setup<'_> {
         let out = self
             .docker
             .compose(self.folder.path(), ["config", "--services"])
-            .output()?;
+            .logged_output()?;
         if !out.status.success() {
             return Err(SetupError(format!(
                 "`docker compose config --services` failed ({}): {}",
@@ -577,9 +578,8 @@ impl Setup<'_> {
         settings: &mut Settings,
         secrets: &mut Secrets,
         checklist: &mut Checklist,
-        log: &RunLog,
     ) -> Result<Option<Joined>, SetupError> {
-        log.say("Waiting for Tailscale…");
+        runlog::say("Waiting for Tailscale…");
         let previous = settings
             .tailscale_dns_name
             .as_deref()
@@ -602,14 +602,14 @@ impl Setup<'_> {
         let env = stack.env(settings, secrets);
         if self.folder.read(".env")?.as_deref() != Some(env.as_bytes()) {
             self.folder.write(".env", env.as_bytes())?;
-            log.say("Applying the Instance URL…");
+            runlog::say("Applying the Instance URL…");
             self.start(stack, rakazo_services)?;
             if let Err(item) = self.start_tailscale(joined.device_name(), None) {
                 checklist.add(item);
             }
         }
         let url = format!("https://{}", joined.dns_name);
-        log.say(&format!("Its Instance URL is {url}"));
+        runlog::say(&format!("Its Instance URL is {url}"));
         if !joined.https_ready {
             checklist.add(tailscale::no_https_item(&url, self.compose_command()));
         }
@@ -643,7 +643,7 @@ impl Setup<'_> {
                 "--peers=false",
             ],
         );
-        let out = command.output().ok()?;
+        let out = command.logged_output().ok()?;
         out.status
             .success()
             .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
@@ -659,11 +659,7 @@ impl Setup<'_> {
 
     /// A WSL-run Compose gives containers mounts served from the distro, which fail after
     /// a reboot, so containers it made are recreated through `docker.exe` (spec §7).
-    fn recreate_containers_made_in_wsl(
-        &self,
-        project: &str,
-        log: &RunLog,
-    ) -> Result<(), SetupError> {
+    fn recreate_containers_made_in_wsl(&self, project: &str) -> Result<(), SetupError> {
         let filter = format!("label=com.docker.compose.project={project}");
         let out =
             self.docker
@@ -672,7 +668,7 @@ impl Setup<'_> {
         if services.is_empty() {
             return Ok(());
         }
-        log.say(&format!(
+        runlog::say(&format!(
             "Recreating containers made by WSL's docker: {}",
             services.join(", ")
         ));
@@ -814,7 +810,7 @@ pub fn report<R>(
     }
 }
 
-fn resolve_lemonade(agent: &ureq::Agent, log: &RunLog) -> Result<LemonadeRelease, SetupError> {
+fn resolve_lemonade(agent: &ureq::Agent) -> Result<LemonadeRelease, SetupError> {
     let tags = github::fetch_stable_tags(agent, LEMONADE_REPO)
         .map_err(|err| SetupError(format!("Couldn't check Lemonade's releases: {err}")))?;
     let ghcr = Ghcr::new(agent);
@@ -824,7 +820,7 @@ fn resolve_lemonade(agent: &ureq::Agent, log: &RunLog) -> Result<LemonadeRelease
     })
     .map_err(|err| SetupError(format!("Couldn't pick a Lemonade release: {err}")))?;
     for tag in &resolution.skipped {
-        log.say(&lemonade::describe_skipped(tag));
+        runlog::say(&lemonade::describe_skipped(tag));
     }
     Ok(resolution.release)
 }

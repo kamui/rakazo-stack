@@ -23,6 +23,8 @@ use crate::memory;
 use crate::overrides;
 use crate::platform::Platform;
 use crate::resolve::{self, HINDSIGHT_DB_TAG};
+use crate::runlog::{self, Logged};
+use crate::say;
 use crate::secrets::{HINDSIGHT_DB_PASSWORD, Secrets};
 use crate::settings::{RakazoImages, RecordedRakazo, Settings};
 use crate::setup::{self, Setup};
@@ -155,7 +157,7 @@ impl Restore<'_> {
         env: &dyn Fn(&str) -> Option<String>,
         mut terminal: Option<&mut (dyn Prompt + '_)>,
     ) -> Result<(), RestoreError> {
-        println!("Reading the Backup…");
+        say!("Reading the Backup…");
         let mut opened = open(self.file, passphrase).map_err(RestoreError::before)?;
         if let Some(platform) = overrides::backup_platform() {
             opened.manifest.platform = Some(platform);
@@ -194,11 +196,10 @@ impl Restore<'_> {
             .map_err(RestoreError::before)?;
 
         let agent = http::agent();
-        let say = |line: &str| println!("{line}");
         for note in plan.notes(&opened.settings) {
-            say(&note);
+            runlog::say(&note);
         }
-        plan.apply(&mut opened.settings, &agent, &say)
+        plan.apply(&mut opened.settings, &agent, &runlog::say)
             .map_err(RestoreError::before)?;
 
         let mut step = Step::Folder;
@@ -206,9 +207,10 @@ impl Restore<'_> {
             &mut step, &opened, passphrase, &agent, &project, replacing, device,
         )
         .map_err(|err| self.failed(step, &err))?;
-        println!(
+        say!(
             "Restored the Backup made {} by rakazo-stack v{}.",
-            opened.manifest.created, opened.manifest.program_version
+            opened.manifest.created,
+            opened.manifest.program_version
         );
         Ok(())
     }
@@ -226,17 +228,18 @@ impl Restore<'_> {
         device: Device,
     ) -> Result<(), String> {
         if replacing {
-            println!("Wiping the Instance here…");
+            say!("Wiping the Instance here…");
             self.wipe(project)?;
         }
         self.folder
             .write("settings.json", opened.settings.to_json().as_bytes())
             .and_then(|()| self.folder.write("secrets.env", &opened.secrets_text))
             .and_then(|()| self.folder.reapply_modes())
+            .and_then(|()| runlog::keep(self.folder.path()))
             .map_err(|err| err.to_string())?;
 
         *step = Step::Databases;
-        println!("Starting Rakazo's database on a fresh volume…");
+        say!("Starting Rakazo's database on a fresh volume…");
         setup::write_stack_files(
             agent,
             self.folder,
@@ -257,7 +260,7 @@ impl Restore<'_> {
             Database::Rakazo.service(),
         ])?;
         if opened.parts.contains(&Part::HindsightDump) {
-            println!("Starting Hindsight's database on a fresh volume…");
+            say!("Starting Hindsight's database on a fresh volume…");
             let mut args = Database::Hindsight.prefix().to_vec();
             args.extend([
                 "up",
@@ -278,12 +281,12 @@ impl Restore<'_> {
                     Part::RakazoDump => Database::Rakazo,
                     _ => Database::Hindsight,
                 };
-                println!("Restoring {}…", database.label());
+                say!("Restoring {}…", database.label());
                 restore_database(self.docker, self.folder.path(), database, data)
             }
             Part::Appdata => {
                 *step = Step::Volumes;
-                println!("Unpacking appdata…");
+                say!("Unpacking appdata…");
                 self.unpack(project, "appdata", &image, data)
             }
             Part::TailscaleState if device == Device::Same => {
@@ -295,7 +298,7 @@ impl Restore<'_> {
         restored?;
 
         *step = Step::Setup;
-        println!("Handing over to setup…");
+        say!("Handing over to setup…");
         Setup {
             platform: self.platform,
             docker: self.docker,
@@ -387,21 +390,22 @@ impl Restore<'_> {
         secrets.set_pasted(AUTH_KEY_NAME, Some(key.pasted()));
         opened.secrets_text = secrets.to_text().into_bytes();
         opened.secrets = secrets;
-        println!(
+        say!(
             "The Instance joins the tailnet again as a new device, so Tailscale gives it a new name and its Instance URL changes. {SWITCH_WARNING}"
         );
         Ok(Device::Rejoin)
     }
 
     /// The Instance's containers, its bot computers, its volumes and the Instance
-    /// folder's files. The lock stays, because this run holds it.
+    /// folder's files. The lock stays, because this run holds it, and so do the logs, which
+    /// this run is writing to.
     fn wipe(&self, project: &str) -> Result<(), String> {
         if self.platform == Platform::MacOs {
             // lemond runs from the Instance folder, so it stops before the folder goes.
             let uid = rustix::process::getuid().as_raw();
             let _ = Command::new("launchctl")
                 .args(["bootout", &lemond::service(uid, &lemond::label(project))])
-                .output();
+                .logged_output();
         }
         let in_project = format!("label=com.docker.compose.project={project}");
         let appdata = format!("volume={}", backup::volume(project, "appdata"));
@@ -433,7 +437,7 @@ impl Restore<'_> {
         }
         for entry in fs::read_dir(self.folder.path()).map_err(|err| err.to_string())? {
             let entry = entry.map_err(|err| err.to_string())?;
-            if entry.file_name() == LOCK_FILE {
+            if entry.file_name() == LOCK_FILE || entry.file_name() == runlog::DIR {
                 continue;
             }
             let path = entry.path();
@@ -504,7 +508,7 @@ impl Restore<'_> {
         let out = self
             .docker
             .compose(self.folder.path(), args)
-            .output()
+            .logged_output()
             .map_err(|err| err.to_string())?;
         backup::checked("docker compose", args, out).map_err(|err| err.0)
     }
@@ -595,7 +599,7 @@ pub fn restore_database(
     ]);
     let mut answered = false;
     for _ in 0..60 {
-        let status = docker.compose(folder, &ready).output();
+        let status = docker.compose(folder, &ready).logged_output();
         if status.is_ok_and(|out| out.status.success()) {
             answered = true;
             break;
@@ -884,7 +888,7 @@ fn confirm_name(
             "--replace asks you to type the Instance's name, which needs a terminal.".into(),
         );
     };
-    println!(
+    say!(
         "--replace wipes the Instance here: {}. Restore doesn't back it up first; run `rakazo-stack backup` before this if you may want it again.",
         present.join(", ")
     );
@@ -919,7 +923,7 @@ fn old_machine_off(
             "this Backup holds the Instance's Tailscale device. Set {OLD_MACHINE_OFF_VAR} to `yes` if the machine it came from is switched off for good, or `no` to join as a new device."
         ));
     };
-    println!(
+    say!(
         "This Backup holds the Instance's Tailscale device. If the machine it came from still runs, both copies would share one device (\"Duplicate node key\"), so restore can join as a new device instead."
     );
     let answer = prompt.line("Is the machine this Backup came from switched off for good? [y/N] ");

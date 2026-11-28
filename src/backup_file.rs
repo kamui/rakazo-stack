@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use age::secrecy::SecretString;
 use age::{Decryptor, Encryptor, Identity, Recipient, scrypt, x25519};
 
+use crate::runlog;
+
 pub const EXTENSION: &str = "tar.age";
 
 /// The Backup passphrase. It is never saved, logged or printed, so it has no `Display`
@@ -20,6 +22,9 @@ pub struct Passphrase(String);
 
 impl Passphrase {
     pub fn new(text: String) -> Option<Self> {
+        if !text.is_empty() {
+            runlog::learn(|r| r.unnamed_secret("Backup passphrase", &text));
+        }
         (!text.is_empty()).then_some(Self(text))
     }
 

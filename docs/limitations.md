@@ -9,7 +9,8 @@ What v1 doesn't do, and the trade-offs it makes on purpose. Terms are defined in
 - **Docker Desktop's licence.** It's free for personal use, education, non-commercial open source, and businesses with fewer than 250 employees and under $10M in revenue. Other businesses, and every government body, need a paid subscription. Docker Engine on Linux is free for everyone.
 - **One Instance per computer**, for one Self-hoster. No hosted or multi-group mode.
 - **No uninstall command.** Removing an Instance is done by hand: see [the guide](guide.md#removing-an-instance). Its first step removes the bot-computer firewall's rules, and you skip it when another Instance, or a Rakazo you set up yourself with restricted computer egress, uses the same Docker engine.
-- **No start, stop, status or logs commands of its own:** use `docker compose`, as in [the guide](guide.md#running-it-day-to-day).
+- **No start, stop or status commands of its own:** use `docker compose`, as in [the guide](guide.md#running-it-day-to-day). `rakazo-stack logs` only gathers logs for a bug report.
+- **Logs stay on your computer.** Nothing is sent anywhere; `rakazo-stack logs` writes a file that you attach to an issue yourself. Its replacements catch only the secrets and personal values they know, so read the file before you post it.
 - **Backups only when you run them.** There's no built-in schedule; [the guide](guide.md#backups-on-a-schedule) shows a cron line for Linux.
 - **A lost Backup passphrase makes the Backup unusable.** Nobody can recover it.
 - **No moving an existing Rakazo in.** rakazo-stack starts a new Rakazo of its own.

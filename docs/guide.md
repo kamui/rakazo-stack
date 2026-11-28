@@ -171,6 +171,25 @@ These work because setup writes the Compose settings to `~/rakazo-stack/.env`. C
 - **Mac:** voice runs outside Docker, as a background item of your account, so `docker compose down` doesn't stop it. The first time setup installs it, macOS 13 and later shows a "Background Items Added" notice. It's listed as `lemond` in **System Settings → General → Login Items & Extensions**, under **Background App Activity** (**Allow in the Background** on older macOS), not under Open at Login. If you turn it off there, voice stops working, and setup's Checklist says so.
 - **Windows and Mac:** the Instance runs only while you're signed in and Docker Desktop is running. Turn on **Start Docker Desktop when you sign in to your computer** in Docker Desktop's settings, or the Instance stays down after a restart until you open Docker Desktop.
 
+### Logs for a bug report
+
+Each run of `setup`, `update`, `backup` and `restore` keeps a run log in `~/rakazo-stack/logs/`: what it printed, and each command it ran with its result, every line with its time in UTC. When something goes wrong, run:
+
+```sh
+rakazo-stack logs
+```
+
+It writes one file in `~/rakazo-stack/logs/`, prints where it is, and changes nothing else. The file holds:
+
+- the program's, your system's and Docker's versions, and how long Docker has been up, which tells whether it restarted;
+- `docker compose ps -a`, and the last 200 lines of each service's log;
+- the newest run log of each command, which stays even after setup, `update` or `docker compose down` has recreated the containers and lost their logs;
+- on a Mac, the end of `lemond.log` and how macOS lists the voice engine's background item.
+
+Your secrets, keys, Owner email, Instance URL, Tailscale names and addresses, and home folder are replaced by placeholders such as `<Owner email>`, in the run logs and in this file. A log line can still hold something no rule knows about, so **read the file before you post it**. Nothing leaves your computer unless you attach the file to an issue yourself.
+
+If Docker isn't running, the file still holds the run logs, and says that the container logs are missing and why. Start Docker and run `rakazo-stack logs` again to add them. On Windows, the file is at `\\wsl.localhost\<your distro>\home\<you>\rakazo-stack\logs` in File Explorer.
+
 The bot-computer firewall can show the rules it keeps:
 
 ```sh

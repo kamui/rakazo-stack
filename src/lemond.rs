@@ -15,7 +15,7 @@ use serde::Deserialize;
 use crate::checklist::Checklist;
 use crate::github;
 use crate::lemonade::{LEMONADE_REPO, LemonadeRelease};
-use crate::runlog::RunLog;
+use crate::runlog::{self, Logged};
 use crate::voice;
 
 /// A loopback port of the stack's own, so it can't collide with an upstream Lemonade on
@@ -132,13 +132,13 @@ fn is_sha256(digest: &str) -> bool {
 }
 
 /// Resolves the release on a first run (spec §4).
-pub fn resolve(agent: &ureq::Agent, log: &RunLog) -> Result<LemonadeRelease, String> {
+pub fn resolve(agent: &ureq::Agent) -> Result<LemonadeRelease, String> {
     let json = github::fetch_releases(agent, LEMONADE_REPO)
         .map_err(|err| format!("Couldn't check Lemonade's releases: {err}"))?;
     let resolution = choose_tarball(&String::from_utf8_lossy(&json), None)
         .map_err(|err| format!("Couldn't pick a Lemonade release: {err}"))?;
     for tag in &resolution.skipped {
-        log.say(&describe_skipped(tag));
+        runlog::say(&describe_skipped(tag));
     }
     Ok(resolution.release)
 }
@@ -191,7 +191,7 @@ fn unpack(tarball: &Path, version_dir: &Path) -> Result<(), String> {
     fs::create_dir_all(&partial).map_err(|err| err.to_string())?;
     let out = command("tar")
         .args(unpack_args(tarball, &partial))
-        .output()
+        .logged_output()
         .map_err(|err| format!("tar: {err}"))?;
     if !out.status.success() {
         return Err(format!(
@@ -492,7 +492,7 @@ fn uid() -> u32 {
 }
 
 fn command_stdout(program: &str, args: &[String]) -> Option<String> {
-    let out = command(program).args(args).output().ok()?;
+    let out = command(program).args(args).logged_output().ok()?;
     out.status
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
@@ -505,7 +505,7 @@ fn launchctl_print(uid: u32, label: &str) -> Option<String> {
 fn launchctl(args: &[String]) -> Result<(), String> {
     let out = command("launchctl")
         .args(args)
-        .output()
+        .logged_output()
         .map_err(|err| format!("launchctl: {err}"))?;
     if out.status.success() {
         return Ok(());
@@ -557,8 +557,8 @@ impl Lemond {
 
     /// Step 6: install, write the plist, load the LaunchAgent and check its health. A
     /// failure becomes a Checklist item, never another voice setup.
-    pub fn set_up(&self, agent: &ureq::Agent, log: &RunLog, checklist: &mut Checklist) -> bool {
-        if let Err(reason) = self.install(agent, &|line| log.say(line)) {
+    pub fn set_up(&self, agent: &ureq::Agent, checklist: &mut Checklist) -> bool {
+        if let Err(reason) = self.install(agent, &runlog::say) {
             checklist.add(voice::not_set_up(&reason));
             return false;
         }
@@ -580,7 +580,7 @@ impl Lemond {
         }
         match self.wait_for_health(agent) {
             Ok(()) => {
-                log.say(&format!(
+                runlog::say(&format!(
                     "Lemonade {} is running natively on 127.0.0.1:{PORT}.",
                     self.release.tag
                 ));
@@ -697,7 +697,7 @@ impl Lemond {
             .env("PATH", LAUNCHD_PATH)
             .env("HOME", &self.layout.home)
             .env("LEMONADE_API_KEY", &self.key)
-            .output()
+            .logged_output()
             .map_err(|err| format!("{}: {err}", cli.display()))?;
         if out.status.success() {
             return Ok(());
