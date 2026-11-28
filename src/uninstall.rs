@@ -101,7 +101,11 @@ impl Uninstall<'_> {
                 "uninstall asks you to type the Instance's name, which needs a terminal. Without one, pass `--confirm {project}`."
             )));
         }
-        let inside = backups_in(self.folder.path());
+        let inside = backups_in(self.folder.path()).map_err(|err| {
+            UninstallError::before(format!(
+                "looking for Backups in ~/rakazo-stack, so nothing was removed: {err}"
+            ))
+        })?;
         if !inside.is_empty() {
             let listed: Vec<String> = inside
                 .iter()
@@ -582,26 +586,35 @@ fn needed_elsewhere(owner: &str, supervisors: &[String], networks: &[Network]) -
     })
 }
 
-/// Backups in `folder` or below. A folder it can't list is one `remove_dir_all` can't
-/// empty either.
-fn backups_in(folder: &Path) -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    let Ok(entries) = fs::read_dir(folder) else {
-        return found;
+/// Backups in `folder` or below. A folder it may not list is one `remove_dir_all` can't
+/// empty either; any other failure to list one, such as a path past PATH_MAX, which
+/// `remove_dir_all` still deletes through, is an error.
+fn backups_in(folder: &Path) -> io::Result<Vec<PathBuf>> {
+    let entries = match fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(err)
+            if matches!(
+                err.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            return Ok(Vec::new());
+        }
+        Err(err) => return Err(err),
     };
-    for entry in entries.flatten() {
-        let Ok(kind) = entry.file_type() else {
-            continue;
-        };
+    let mut found = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let kind = entry.file_type()?;
         let path = entry.path();
         if kind.is_dir() {
-            found.extend(backups_in(&path));
+            found.extend(backups_in(&path)?);
         } else if kind.is_file() && backup::is_backup(&entry.file_name().to_string_lossy()) {
             found.push(path);
         }
     }
     found.sort();
-    found
+    Ok(found)
 }
 
 /// Lines of `name<TAB>bridge<TAB>owner<TAB>probe`.
@@ -799,8 +812,29 @@ mod tests {
         .unwrap();
         let mut expected = vec![deep, top];
         expected.sort();
-        assert_eq!(backups_in(folder.path()), expected);
-        assert!(backups_in(&folder.path().join("missing")).is_empty());
+        assert_eq!(backups_in(folder.path()).unwrap(), expected);
+        assert!(
+            backups_in(&folder.path().join("missing"))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_backup_past_path_max_stops_the_search() {
+        let folder = tempfile::tempdir().unwrap();
+        let name = "d".repeat(200);
+        let script = format!(
+            "for i in $(seq 30); do mkdir {name} && cd -P {name} || exit 1; done; : > {}",
+            backup::file_name("20261127T120101Z")
+        );
+        let made = std::process::Command::new("sh")
+            .args(["-c", &script])
+            .current_dir(folder.path())
+            .status()
+            .unwrap();
+        assert!(made.success());
+        assert!(backups_in(folder.path()).is_err());
     }
 
     #[test]
