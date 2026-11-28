@@ -128,7 +128,7 @@ fn main() -> ExitCode {
     if let Command::Logs = command {
         return run_logs(platform, &folder);
     }
-    runlog::begin(command.name(), platform);
+    runlog::begin(command.name(), platform, folder.path());
     let folder_existed = folder.path().exists();
     let first_setup = !folder.has_settings();
     let handed_over = matches!(command, Command::Update { .. })

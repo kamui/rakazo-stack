@@ -100,15 +100,16 @@ fn log() -> MutexGuard<'static, Option<Log>> {
     LOG.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Starts the run's log in memory.
-pub fn begin(command: &'static str, platform: Platform) {
+/// Starts the run's log in memory, already replacing what the Instance folder holds and
+/// the home folder it sits in.
+pub fn begin(command: &'static str, platform: Platform, folder: &Path) {
     *log() = Some(Log {
         command,
         platform,
         started: now(),
         pending: Vec::new(),
         file: None,
-        redactions: Redactions::default(),
+        redactions: Redactions::for_folder(folder),
     });
 }
 
@@ -341,7 +342,10 @@ pub struct Running {
 
 impl Running {
     pub fn start(command: &Command) -> Self {
-        record(&format!("$ {}", command_line(command)));
+        if let Some(log) = log().as_mut() {
+            let line = format!("$ {}", command_line(command, &log.redactions));
+            log.record(&line);
+        }
         Self {
             started: Instant::now(),
         }
@@ -396,10 +400,11 @@ fn last_lines(bytes: &[u8], keep: usize) -> (usize, Vec<String>) {
     )
 }
 
-pub fn command_line(command: &Command) -> String {
+/// Each argument is replaced before it is cut short, so no cut leaves part of a value.
+fn command_line(command: &Command, redactions: &Redactions) -> String {
     std::iter::once(command.get_program())
         .chain(command.get_args())
-        .map(|arg| shown_argument(&arg.to_string_lossy()))
+        .map(|arg| shown_argument(&redactions.apply(&arg.to_string_lossy())))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -496,6 +501,17 @@ fn civil(seconds: u64) -> [i64; 6] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::answers::Password;
+    use crate::backup_file::Passphrase;
+
+    /// Held by each test that sets the global log, so none clears another's mid-test.
+    static GLOBAL_LOG: Mutex<()> = Mutex::new(());
+
+    fn global_log() -> MutexGuard<'static, ()> {
+        GLOBAL_LOG
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn log(command: &'static str) -> Log {
         Log {
@@ -580,6 +596,7 @@ mod tests {
             "echo shown; echo data >&2; echo failing step >&2; exit 3",
         ]);
         // Through the global log, as the program runs it.
+        let _global = global_log();
         *super::log() = Some(log("setup"));
         let status = command.logged_status().unwrap();
         let mut quiet = Command::new("sh");
@@ -615,6 +632,26 @@ mod tests {
     }
 
     #[test]
+    fn replaces_the_owner_password_and_backup_passphrase_once_the_program_has_them() {
+        let folder = tempfile::tempdir().unwrap();
+        let _global = global_log();
+        *super::log() = Some(log("restore"));
+        let _password = Password::new("password-placeholder-0001".into()).unwrap();
+        let _passphrase = Passphrase::new("passphrase-placeholder".into()).unwrap();
+        say("typed: password-placeholder-0001");
+        say("typed: passphrase-placeholder");
+        keep(folder.path()).unwrap();
+        *super::log() = None;
+
+        let text = fs::read_to_string(folder.path().join(DIR).join("restore-20261126T120101Z.log"))
+            .unwrap();
+        assert!(text.contains("typed: <Owner password>"), "{text}");
+        assert!(text.contains("typed: <Backup passphrase>"), "{text}");
+        assert!(!text.contains("placeholder-0001"), "{text}");
+        assert!(!text.contains("passphrase-placeholder"), "{text}");
+    }
+
+    #[test]
     fn keeps_the_last_lines_as_a_terminal_shows_them() {
         assert_eq!(
             last_lines(b"a\nb\r\n 10%\r 50%\r100%\n\n", 2),
@@ -637,9 +674,39 @@ mod tests {
             "it's",
         ]);
         assert_eq!(
-            command_line(&command),
+            command_line(&command, &Redactions::default()),
             "docker compose exec -T api node -e 'let a = 1;…' (18 characters) 'it'\\''s'"
         );
+    }
+
+    #[test]
+    fn replaces_the_home_folder_before_cutting_an_argument_short() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root
+            .path()
+            .join("a-self-hoster-whose-placeholder-name-is-long");
+        let folder = home.join("rakazo-stack");
+        let plist = format!(
+            "{}/Library/LaunchAgents/com.github.kamui.rakazo-stack.lemond.plist",
+            home.display()
+        );
+        assert!(plist.chars().count() > LONGEST_ARGUMENT);
+        let _global = global_log();
+        begin("setup", Platform::Linux, &folder);
+        // Before the log is kept, as setup's key checks run.
+        Command::new("true").arg(&plist).logged_output().unwrap();
+        keep(&folder).unwrap();
+        *super::log() = None;
+
+        let log = fs::read_dir(folder.join(DIR)).unwrap().next().unwrap();
+        let text = fs::read_to_string(log.unwrap().path()).unwrap();
+        assert!(
+            text.contains(
+                "$ true ~/Library/LaunchAgents/com.github.kamui.rakazo-stack.lemond.plist"
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("a-self-hoster"), "{text}");
     }
 
     #[test]
