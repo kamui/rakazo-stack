@@ -1071,7 +1071,7 @@ Removes the Instance and everything setup put on the machine, in one command, an
 
 ### Steps
 
-The guide's steps for removing an Instance by hand, in their order. Each step looks before it acts and says what it removed or that it was already gone, so running the command again after a failure, or after it was interrupted, finishes the removal. A failed step stops the run with "Run `rakazo-stack uninstall` again to finish".
+The guide's steps for removing an Instance by hand, in their order. Each step looks before it acts and says what it removed or that it was already gone, so running the command again after a failure, or after it was interrupted, finishes the removal, except for the program when only it is left (step 7). A failed step stops the run with "Run `rakazo-stack uninstall` again to finish".
 
 1. **The firewall's rules** ([§12](#the-computer-egress-sidecar)), removed only when nothing else on the engine relies on them: no other Compose project has Rakazo's `supervisor` running (`com.docker.compose.service=supervisor`), and no network with a `rakazo-c…` bridge is left but the Instance's own bot networks and Rakazo's shared probe network (`rakazo-egress-probe`, labelled `rakazo.egressProbe=true`). Then `docker compose stop computer-egress` and `docker compose run --rm -T computer-egress --remove`. Otherwise the rules stay, and the run names what relies on them. A hand-built Rakazo in `restricted` mode counts while its `supervisor` runs. A stopped one doesn't, which is safe: started again without the rules, `restricted` refuses its computers rather than run them open.
 2. **Bot computers:** `rakazo.managed=true` with the Instance's `appdata` volume mounted, as `backup` finds them, removed with `docker rm --force --volumes`.
