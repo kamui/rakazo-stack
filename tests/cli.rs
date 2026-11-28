@@ -131,6 +131,24 @@ fn uninstall_stops_before_anything_changes_without_an_instance_or_its_name() {
         "{}"
     );
 
+    let kept = folder.join("kept");
+    fs::create_dir_all(&kept).unwrap();
+    let inside = kept.join("rakazo-stack-backup-20261127T120101Z.tar.age");
+    fs::write(&inside, "backup").unwrap();
+    let out = uninstall(home.path(), &["--confirm", "rakazo-stack"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("these Backups are inside ~/rakazo-stack"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(
+        stderr(&out).contains("~/rakazo-stack/kept/rakazo-stack-backup-20261127T120101Z.tar.age"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(fs::read_to_string(&inside).unwrap(), "backup");
+
     let lock = File::create(folder.join(".lock")).unwrap();
     lock.try_lock().unwrap();
     let out = uninstall(home.path(), &["--confirm", "rakazo-stack"]);

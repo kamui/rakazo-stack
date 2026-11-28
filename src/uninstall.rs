@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 use std::net::Ipv4Addr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::answers::Prompt;
@@ -99,6 +99,18 @@ impl Uninstall<'_> {
         } else if terminal.is_none() {
             return Err(UninstallError::before(format!(
                 "uninstall asks you to type the Instance's name, which needs a terminal. Without one, pass `--confirm {project}`."
+            )));
+        }
+        let inside = backups_in(self.folder.path());
+        if !inside.is_empty() {
+            let listed: Vec<String> = inside
+                .iter()
+                .filter_map(|path| path.strip_prefix(self.folder.path()).ok())
+                .map(|path| format!("~/rakazo-stack/{}", path.display()))
+                .collect();
+            return Err(UninstallError::before(format!(
+                "these Backups are inside ~/rakazo-stack, which uninstall deletes, so nothing was removed: {}. Move them out of ~/rakazo-stack, then run `rakazo-stack uninstall` again.",
+                listed.join(", ")
             )));
         }
         let settings = self.settings();
@@ -332,6 +344,13 @@ impl Uninstall<'_> {
 
         self.images(&survey.images, delete_images)?;
 
+        // `.env` goes first: a run again that finds it runs Compose, which a partly
+        // deleted folder breaks.
+        match fs::remove_file(self.folder.file(".env")) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(format!("removing ~/rakazo-stack/.env: {err}")),
+        }
         match fs::remove_dir_all(self.folder.path()) {
             Ok(()) => println!("Removed ~/rakazo-stack."),
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
@@ -563,6 +582,28 @@ fn needed_elsewhere(owner: &str, supervisors: &[String], networks: &[Network]) -
     })
 }
 
+/// Backups in `folder` or below. A folder it can't list is one `remove_dir_all` can't
+/// empty either.
+fn backups_in(folder: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let Ok(entries) = fs::read_dir(folder) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if kind.is_dir() {
+            found.extend(backups_in(&path));
+        } else if kind.is_file() && backup::is_backup(&entry.file_name().to_string_lossy()) {
+            found.push(path);
+        }
+    }
+    found.sort();
+    found
+}
+
 /// Lines of `name<TAB>bridge<TAB>owner<TAB>probe`.
 fn parse_networks(listing: &str) -> Vec<Network> {
     listing
@@ -735,6 +776,31 @@ mod tests {
             images_question(&images),
             "Delete the 2 images (2.5 GB) this Instance used that no other container uses?"
         );
+    }
+
+    #[test]
+    fn finds_backups_anywhere_in_the_instance_folder() {
+        let folder = tempfile::tempdir().unwrap();
+        let nested = folder.path().join("kept/older");
+        fs::create_dir_all(&nested).unwrap();
+        let top = folder.path().join(backup::file_name("20261127T120101Z"));
+        let deep = nested.join(backup::file_name("20261126T080000Z"));
+        for path in [&top, &deep] {
+            fs::write(path, "").unwrap();
+        }
+        fs::write(folder.path().join(".env"), "").unwrap();
+        fs::write(
+            nested.join(format!(
+                ".{}.partial",
+                backup::file_name("20261128T000000Z")
+            )),
+            "",
+        )
+        .unwrap();
+        let mut expected = vec![deep, top];
+        expected.sort();
+        assert_eq!(backups_in(folder.path()), expected);
+        assert!(backups_in(&folder.path().join("missing")).is_empty());
     }
 
     #[test]

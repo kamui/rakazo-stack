@@ -308,7 +308,7 @@ rakazo-stack uninstall
 4. On a Mac, it removes voice's background item.
 5. It deletes `~/rakazo-stack` and the program.
 
-If it stops part way, run it again: it finishes the job and says what was already gone. Your Backups stay, and the last lines say where they are. If the Instance joined your tailnet, its device stays there too, and the last line links its page in the Tailscale admin console, where **Machine settings** → **Remove** removes it.
+If it stops part way, run it again: it finishes the job and says what was already gone. Your Backups stay, and the last lines say where they are. If you saved one inside `~/rakazo-stack` with `--output`, `uninstall` stops before it changes anything and names it, so you can move it out. If the Instance joined your tailnet, its device stays there too, and the last line links its page in the Tailscale admin console, where **Machine settings** → **Remove** removes it.
 
 In a script, which has no terminal to type into, pass the name instead. It then asks nothing, takes no Backup, and keeps the images unless you add `--delete-images`:
 
